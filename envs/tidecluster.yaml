@@ -1,0 +1,7 @@
+name: tidecluster
+channels:
+  - conda-forge
+  - bioconda
+  - petrnovak
+dependencies:
+  - tidecluster=1.5

@@ -1,0 +1,7 @@
+name: dante
+channels:
+  - conda-forge
+  - bioconda
+  - petrnovak
+dependencies:
+  - dante=0.1.9

@@ -1,0 +1,7 @@
+name: dante_ltr
+channels:
+  - conda-forge
+  - bioconda
+  - petrnovak
+dependencies:
+  - dante_ltr=0.3.5.2

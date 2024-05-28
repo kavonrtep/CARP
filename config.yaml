@@ -1,0 +1,4 @@
+genome_fasta: data/CEN6_ver_220406_part.fasta
+output_dir: output
+custom_library: data/pisum_library.fasta
+tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
