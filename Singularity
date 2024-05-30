@@ -46,14 +46,16 @@ From: continuumio/miniconda3
     Snakefile /opt/pipeline/Snakefile
     config.yaml /opt/pipeline/config.yaml
     run_pipeline.py /opt/pipeline/run_pipeline.py
+    scripts /opt/pipeline/scripts
 
 
 %environment
-    export PATH=/opt/conda/bin:$PATH
+    export PATH=/opt/pipeline/scripts:/opt/conda/bin:$PATH
     export CONDA_ENVS_PATH=/opt/conda/envs
     export CONDA_PREFIX=/opt/conda
     export CONDARC=/opt/conda/config/.condarc
     export HOME=/root
+
 
 %runscript
     # Navigate to the pipeline directory
