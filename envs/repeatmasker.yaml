@@ -1,7 +1,7 @@
 name: repeatmasker
 channels:
-  - bioconda
   - conda-forge
+  - bioconda
 dependencies:
-  - repeatmasker=4.1.5
   - bioconductor-rtracklayer=1.62.0
+  - repeatmasker=4.1.5

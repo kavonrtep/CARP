@@ -29,11 +29,13 @@ From: continuumio/miniconda3
     # make dummy data so snakemake can create the environments
     # TODO - replce with correct paths
     mkdir -p /opt/pipeline/data
-    touch /opt/pipeline/data/CEN6_ver_220406.fasta
-    touch /opt/pipeline/data/input.fastqsanger.gz
-    touch /opt/pipeline/data/chip.fastqsanger.gz
+    touch /opt/pipeline/data/CEN6_ver_220406_part.fasta
+    touch /opt/pipeline/data/pisum_custom_library.fasta
+    touch /opt/pipeline/data/FabTR_all_sequences_210901.db.RM_format.fasta
 
-    snakemake --use-conda --conda-prefix /opt/conda/envs --conda-create-envs-only --conda-frontend mamba --cores 4
+
+
+    snakemake --use-conda --conda-prefix /opt/conda/envs --conda-create-envs-only --conda-frontend mamba --cores 4 --configfile /opt/pipeline/config.yaml
 
     # Clean up
     mamba clean --all

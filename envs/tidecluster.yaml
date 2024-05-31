@@ -5,3 +5,4 @@ channels:
   - petrnovak
 dependencies:
   - tidecluster=1.5
+  - bioconductor-rtracklayer=1.62.0

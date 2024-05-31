@@ -1,5 +1,3 @@
-#configfile: "config.yaml"
-
 import os
 import re
 def create_dirs(*dirs):
@@ -38,6 +36,7 @@ rule all:
         F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_clustering.gff3",
         F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3",
         F"{config['output_dir']}/TideCluster/TideCluster_clustering_default_and_short_merged.gff3",
+        F"{config['output_dir']}/TideCluster/default/.bigwig_done",
         F"{config['output_dir']}/Libraries/class_ii_library.fasta",
         F"{config['output_dir']}/Libraries/LTR_RTs_library_clean.fasta",
         F"{config['output_dir']}/Libraries/combined_library.fasta",
@@ -47,7 +46,14 @@ rule all:
         F"{config['output_dir']}/all_repeats_for_masking.bed",
         F"{config['output_dir']}/DANTE_LTR.gff3",
         F"{config['output_dir']}/TideCluster_report.html",
-        F"{config['output_dir']}/DANTE_LTR_report.html"
+        F"{config['output_dir']}/DANTE_LTR_report.html",
+        F"{config['output_dir']}/gaps_10plus.bed",
+        F"{config['output_dir']}/summary_statistics.csv",
+        F"{config['output_dir']}/Repeat_Annotation_NoSat_10k.bw",
+        F"{config['output_dir']}/Repeat_Annotation_NoSat_100k.bw",
+        F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
+        F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done"
+
 rule dante:
     input:
         config["genome_fasta"],
@@ -124,7 +130,8 @@ rule tidecluster_long:
         gff3_tidehunter=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter.gff3",
         dimer_library_default=F"{config['output_dir']}/TideCluster/default/TideCluster_consensus_dimer_library.fasta",
         tr_default_short=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter_short.gff3",
-        html=F"{config['output_dir']}/TideCluster/default/TideCluster_index.html"
+        html=F"{config['output_dir']}/TideCluster/default/TideCluster_index.html",
+        bigwig_done=F"{config['output_dir']}/TideCluster/default/.bigwig_done"
     params:
         prefix = lambda wildcards, output: output.gff3_clust.replace("_clustering.gff3", ""),
         library = config.get("tandem_repeat_library", "")
@@ -138,18 +145,20 @@ rule tidecluster_long:
         prefix=$(basename {params.prefix})
         original_dir=$PWD
         genome_absolute_path=$(realpath {input.genome_fasta})
-        library_absolute_path=$(realpath {params.library})
+        # define library_absolute_path only if it is not empty
+        
         # NOTE - there is a bug in tidecluster - it does not correctly formal html links, soluton for now is 
         # to run it in the directory where the output will be created
         echo "Library: {input.library}"
         if [ -z "{params.library}" ]; then
             cd $wd
             echo "Running TideCluster without a library"
-            TideCluster.py run_all -pr $prefix -c {threads} -M 1 -f $genome_absolute_path
+            TideCluster.py run_all -pr $prefix -c {threads}  -f $genome_absolute_path
         else
+            library_absolute_path=$(realpath {params.library})
             echo "Running TideCluster with a custom library"
             cd $wd
-            TideCluster.py run_all -pr $prefix -c {threads} -M 1 -f $genome_absolute_path -l $library_absolute_path
+            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -l $library_absolute_path
         fi
         # if gff3_annot was not created but exit code is 0, it means that there were no clusters found, create an empty file
         # but check if gff3_tidehunter was created
@@ -159,16 +168,44 @@ rule tidecluster_long:
             if [ -f {output.gff3_tidehunter} ]; then
                 echo "##gff-version 3" > {output.gff3_clust}
                 echo "# no clusters found" >> {output.gff3_clust}
-            else
-                exit 1
             fi
         fi
+        if [ ! -f {output.dimer_library_default} ]; then
+            # check if gff3_tidehunter was created
+            if [ -f {output.gff3_tidehunter} ]; then
+                # make empty fasta file
+                : > {output.dimer_library_default}
+            fi
+        fi
+        
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        echo "this is a PATH: $PATH"
+        
+        cd $wd
+        # check if directory TideCluster_clustering_split_files exists
+        if [ -d TideCluster_clustering_split_files ]; then
+            mkdir -p TideCluster_clustering_split_files_bigwig
+            for f in TideCluster_clustering_split_files/*.gff3; do
+                base=$(basename $f);
+                # remove the extension
+                base_noext=$(basename "$base" .gff3)
+                base_bw10k=TideCluster_clustering_split_files_bigwig/"$base_noext"_10k.bw
+                base_bw100k=TideCluster_clustering_split_files_bigwig/"$base_noext"_100k.bw
+                calculate_density.R -b $f -o $base_bw10k -f gff3 --window 10000
+                calculate_density.R -b $f -o $base_bw100k -f gff3 --window 100000
+            done
+            touch .bigwig_done
+        else
+            echo "No split files found"
+            touch .bigwig_done
+        fi
+        
         """
 
 rule tidecluster_short:
     input:
         genome_fasta=config["genome_fasta"],
-        library= config.get("tandem_repeat_library","")
     output:
         gff3_clust=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_clustering.gff3",
         gff3_tidehunter=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_tidehunter.gff3",
@@ -187,19 +224,17 @@ rule tidecluster_short:
         prefix=$(basename {params.prefix})
         original_dir=$PWD
         genome_absolute_path=$(realpath {input.genome_fasta})
-        library_absolute_path=$(realpath {params.library})
         # NOTE - there is a bug in tidecluster - it does not correctly formal html links, soluton for now is 
         # to run it in the directory where the output will be created
-        echo "Library: {input.library}"
-        # TODO - set corretly -M parameter
         if [ -z "{params.library}" ]; then
             cd $wd
             echo "Running TideCluster without a library"
-            TideCluster.py run_all -pr $prefix -c {threads} -M 1 -f $genome_absolute_path -T "-p 10 -P 39 -c 5 -e 0.25" -m 5000
+            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -T "-p 10 -P 39 -c 5 -e 0.25" -m 5000
         else
             echo "Running TideCluster with a custom library"
+            library_absolute_path=$(realpath {params.library})
             cd $wd
-            TideCluster.py run_all -pr $prefix -c {threads} -M 1 -f $genome_absolute_path -l $library_absolute_path -T "-p 10 -P 39 -c 5 -e 0.25" -m 5000
+            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -l $library_absolute_path -T "-p 10 -P 39 -c 5 -e 0.25" -m 5000
         fi
         # if gff3_annot was not created but exit code is 0, it means that there were no clusters found, create an empty file
         # but check if gff3_tidehunter was created
@@ -211,12 +246,15 @@ rule tidecluster_short:
             if [ -f {output.gff3_tidehunter} ]; then
                 echo "##gff-version 3" > {output.gff3_clust}
                 echo "# no clusters found" >> {output.gff3_clust}
-                # make empty fasta file
-                echo "" > {output.dimer_library_short}
-            else
-                exit 1
             fi
-        fi 
+        fi
+        if [ ! -f {output.dimer_library_short} ]; then
+            # check if gff3_tidehunter was created
+            if [ -f {output.gff3_tidehunter} ]; then
+                # make empty fasta file
+                : > {output.dimer_library_short}
+            fi
+        fi
         """
 
 rule tidecluster_reannotate:
@@ -232,6 +270,12 @@ rule tidecluster_reannotate:
     threads: workflow.cores
     shell:
         """
+        # run only if dimer_library_default is not empty
+        if [ ! -s {input.dimer_library_default} ]; then
+            echo "No dimer library found, skipping reannotation"
+            : > {output}
+            exit 0
+        fi
         gf_absolute_path=$(realpath {input.dimer_library_default})
         dl_absolute_path=$(realpath {input.genome_fasta})
         gff_absolute_path=$(realpath {output.gff3})
@@ -257,19 +301,18 @@ rule merge_tidecluster_default_and_short:
 
 
 rule make_subclass_2_library:
-    input:
-        library=config.get("custom_library", [])
+    params:
+        library=config.get("custom_library", "")
     output:
         library=F"{config['output_dir']}/Libraries/class_ii_library.fasta"
     run:
-        # check if the input has attribute library but do not use input.library - it is causing an error is attribute is not present
-        if not hasattr(input, "library"):
-            print("no library provided")
-            print("No custom library provided, creating an empty file")
-            with open(output[0], "w") as f:
-                f.write("")
+        if params.library:
+            print("Custom library provided, filtering FASTA.")
+            filter_fasta(params.library, output.library, "Class_II/Subclass_1")
         else:
-            filter_fasta(input.library, output.library, "Class_II/Subclass_1")
+            print("No custom library provided, creating an empty file.")
+            with open(output.library, "w") as f:
+                f.write("")
 
 
 rule filter_ltr_rt_library:
@@ -305,12 +348,17 @@ rule filter_ltr_rt_library:
 rule concatenate_libraries:
     input:
         ltr_rt_library=F"{config['output_dir']}/Libraries/LTR_RTs_library_clean.fasta",
-        custom_library=F"{config['custom_library']}"
     output:
         F"{config['output_dir']}/Libraries/combined_library.fasta"
+    params:
+        custom_library = config.get("custom_library", "")
     shell:
         """
-        cat {input.ltr_rt_library} {input.custom_library} > {output}
+        if [ -z "{params.custom_library}" ]; then
+            cp {input.ltr_rt_library} {output}
+        else
+            cat {input.ltr_rt_library} {params.custom_library} > {output}
+        fi
         """
 
 
@@ -365,14 +413,17 @@ rule merge_rm_and_dante:
     output:
         gff=F"{config['output_dir']}/Repeat_Annotation_NoSat.gff3"
     conda:
-        "envs/repeatmasker.yaml"
+        "envs/dante_ltr.yaml"
+        # dante_ltr is already used and it contains the necessary tools (rtracklayer and optparse)
     shell:
         """
         echo $PWD
         # get absolute path of scripts directory
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        merge_repeat_annotations.R {input.rm_gff} {input.dante_gff} {output.gff}
+        # make temp file from date - names in gff3 must be consistent with names used for RepeatMasker
+        clean_DANTE_names.R {input.dante_gff}  {input.dante_gff}.tmp.gff3
+        merge_repeat_annotations.R {input.rm_gff} {input.dante_gff}.tmp.gff3 {output.gff}
         """
 
 
@@ -395,39 +446,125 @@ rule make_track_for_masking:
         rm {output}.tmp.gff3
         """
 
+rule make_track_for_Ns:
+    input:
+        genome_fasta=config["genome_fasta"]
+    output:
+        F"{config['output_dir']}/gaps_10plus.bed"
+    conda:
+        "envs/seqtk.yaml"
+    shell:
+        """
+        seqtk cutN -n 10 -g {input.genome_fasta} >  {output}
+        """
 
-rule add_top_level_ouputs:
+rule make_summary_statistics_and_split_by_class:
+    input:
+        rm=F"{config['output_dir']}/Repeat_Annotation_NoSat.gff3",
+        sat_tc=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
+        genome_fasta=config["genome_fasta"]
+    output:
+        csv=F"{config['output_dir']}/summary_statistics.csv",
+        dir=directory(F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3")
+    conda:
+        "envs/dante_ltr.yaml"
+    shell:
+        """
+        # get absolute path of scripts directory
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+
+        calculate_statistics.R -r {input.rm} -s {input.sat_tc} -o {output.csv} -g {input.genome_fasta} -d {output.dir}
+        """
+
+rule make_bigwig_density:
+    input:
+        gffdir=directory(F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3"),
+        cvs=F"{config['output_dir']}/summary_statistics.csv"  # this file is available if gffs were created
+    output:
+        bwdir=directory(F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig"),
+        checkpoint=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done"
+
+    conda:
+        "envs/dante_ltr.yaml"
+    shell:
+        """
+        mkdir -p {output.bwdir}
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        
+        for f in {input.gffdir}/*.gff3; do
+            base=$(basename $f);
+            # remove the extension
+            base_noext=$(basename "$base" .gff3)
+            base_bw10k={output.bwdir}/"$base_noext"_10k.bw
+            base_bw100k={output.bwdir}/"$base_noext"_100k.bw
+            calculate_density.R -b $f -o $base_bw10k -f gff3 --window 100000
+            calculate_density.R -b $f -o $base_bw100k -f gff3 --window 1000000
+        done
+        touch {output.checkpoint}
+        """
+
+rule add_top_level_outputs:
     input:
         dante=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
         dante_ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
         sat_tc=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
-        sar_rm=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3"
+        sat_tc_bw10=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
+        sat_tc_bw100=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_100k.bw",
+        sat_rm=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3"
     output:
         dante=F"{config['output_dir']}/DANTE_filtered.gff3",
         dante_ltr=F"{config['output_dir']}/DANTE_LTR.gff3",
         sat_tc=F"{config['output_dir']}/Tandem_repeats_TideCluster.gff3",
+        sat_tc_bw10=F"{config['output_dir']}/Tandem_repeats_TideCluster_10k.bw",
+        sat_tc_bw100=F"{config['output_dir']}/Tandem_repeats_TideCluster_100k.bw",
         sat_rm=F"{config['output_dir']}/Tandem_repeats_RepeatMasker.gff3"
-
+    params:
+        sat_tc_annot_in=F"{config['output_dir']}/TideCluster/default/TideCluster_annotation.gff3",
+        sat_tc_annot_out=F"{config['output_dir']}/Tandem_repeats_TideCluster_annotated.gff3"
     shell:
         """
         # make symbolic links to all the outputs
-        ln -s -r {input.dante} {output.dante}
-        ln -s -r {input.dante_ltr} {output.dante_ltr}
-        ln -s -r {input.sat_tc} {output.sat_tc}
-        ln -s -r {input.sar_rm} {output.sat_rm}
+        ln -fs -r {input.dante} {output.dante}
+        ln -fs -r {input.dante_ltr} {output.dante_ltr}
+        ln -fs -r {input.sat_tc} {output.sat_tc}
+        ln -fs -r {input.sat_rm} {output.sat_rm}
+        ln -fs -r {input.sat_tc_bw10} {output.sat_tc_bw10}
+        ln -fs -r {input.sat_tc_bw100} {output.sat_tc_bw100}
         sat_tc={output.sat_tc}
-        sat_tc_annot=$(echo {output.sat_tc} | sed 's/TideCluster_clustering.gff3/TideCluster_annotation.gff3/')
-        echo $sat_tc_annot
+
         # check if the file exists
         outdir=$(dirname {output.sat_tc})
-        if [ -f $sat_tc_annot ]; then
-            ln -s -r  $sat_tc_annot $outdir/Tandem_repeats_TideCluster_annotated.gff3
+        if [ -f {params.sat_tc_annot_in} ]; then
+             ln -fs -r {params.sat_tc_annot_in} {params.sat_tc_annot_out}
         fi
-        
+        """
+
+rule calculate_bigwig_density:
+    input:
+        F"{config['output_dir']}/Repeat_Annotation_NoSat.gff3",
+        F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
+    output:
+        F"{config['output_dir']}/Repeat_Annotation_NoSat_10k.bw",
+        F"{config['output_dir']}/Repeat_Annotation_NoSat_100k.bw",
+        F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
+        F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_100k.bw"
+    conda:
+        "envs/dante_ltr.yaml"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        echo "this is a PATH: $PATH"
+        calculate_density.R -b {input[0]} -o {output[0]} -f gff3 --window 10000
+        calculate_density.R -b {input[0]} -o {output[1]} -f gff3 --window 100000
+        calculate_density.R -b {input[1]} -o {output[2]} -f gff3 --window 10000
+        calculate_density.R -b {input[1]} -o {output[3]} -f gff3 --window 100000
         """
 
 
-rule add_html_oupouts:
+rule add_html_outputs:
     input:
         tc_index=F"{config['output_dir']}/TideCluster/default/TideCluster_index.html",
         dante_ltr_index=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR_summary.html"
