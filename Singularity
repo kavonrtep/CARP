@@ -9,7 +9,7 @@ From: continuumio/miniconda3
     conda install -c conda-forge mamba python=3.10
 
     # Install Snakemake
-    mamba install -c bioconda -c conda-forge snakemake
+    mamba install -c bioconda -c conda-forge snakemake=8.12.0
 
     # configure strict channel priority
     conda config --set channel_priority strict

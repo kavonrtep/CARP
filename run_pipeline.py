@@ -30,12 +30,33 @@ def main():
     config_string = open(config_template, 'r').read()
     parser = argparse.ArgumentParser(
             description=
-"""Analysis of ChIP seq using bamCompare, epic2 and macs3 programs. 
-Analysis is exected as snakemake pipeline. Configuragion is provided in
-config.yaml file. """,
+"""Repeat Annotation Pipeline using DANTE, DANTE_LTR, TideCluster adn RepeatMasker.""",
             epilog=F"""Example of config.yaml file:
             
 {config_string}
+
+custom_library and tandem_repeat_library are optional.
+If custom library is provided it must be in FASTA 
+format and header must followthe following format:
+
+>unique_id#family_name/subfamily_name/..
+
+Use following classification scheme:
+
+Class_II/Subclass_1/TIR/EnSpm_CACTA
+Class_II/Subclass_1/TIR/hAT
+Class_II/Subclass_1/TIR/MITE
+Class_II/Subclass_1/TIR/MITE/Stowaway
+Class_II/Subclass_1/TIR/MuDR_Mutator
+Class_II/Subclass_1/TIR/Tc1_Mariner
+Class_II/Subclass_2/Helitron
+Class_I/LINE
+Class_I/pararetrovirus
+rDNA_45S/18S
+rDNA_45S/25S
+rDNA_45S/5_8S
+rDNA_45S/IGS
+rDNA_45S/ITS1
 
             """,
             formatter_class=argparse.RawDescriptionHelpFormatter

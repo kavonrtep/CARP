@@ -281,7 +281,7 @@ rule tidecluster_reannotate:
         gff_absolute_path=$(realpath {output.gff3})
         cd {params.outdir}
         # tc_reannotate.py -s {input.genome_fasta} -f {input.dimer_library_default} -o {output.gff3}
-        tc_reannotate.py -s $dl_absolute_path -f $gf_absolute_path -o $gff_absolute_path
+        tc_reannotate.py -s $dl_absolute_path -f $gf_absolute_path -o $gff_absolute_path  -c {threads}
         """
 
 rule merge_tidecluster_default_and_short:
@@ -479,26 +479,26 @@ rule make_summary_statistics_and_split_by_class:
 
 rule make_bigwig_density:
     input:
-        gffdir=directory(F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3"),
         cvs=F"{config['output_dir']}/summary_statistics.csv"  # this file is available if gffs were created
     output:
-        bwdir=directory(F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig"),
         checkpoint=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done"
-
+    params:
+        bwdir=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig",
+        gffdir=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3"
     conda:
         "envs/dante_ltr.yaml"
     shell:
         """
-        mkdir -p {output.bwdir}
+        mkdir -p {params.bwdir}
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         
-        for f in {input.gffdir}/*.gff3; do
+        for f in {params.gffdir}/*.gff3; do
             base=$(basename $f);
             # remove the extension
             base_noext=$(basename "$base" .gff3)
-            base_bw10k={output.bwdir}/"$base_noext"_10k.bw
-            base_bw100k={output.bwdir}/"$base_noext"_100k.bw
+            base_bw10k={params.bwdir}/"$base_noext"_10k.bw
+            base_bw100k={params.bwdir}/"$base_noext"_100k.bw
             calculate_density.R -b $f -o $base_bw10k -f gff3 --window 100000
             calculate_density.R -b $f -o $base_bw100k -f gff3 --window 1000000
         done
