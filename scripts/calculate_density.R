@@ -37,6 +37,15 @@ if (is.null(opt$bed) || is.null(opt$output)){
 
 suppressPackageStartupMessages(library(rtracklayer))
 g <- import(opt$bed, format=opt$format)
+
+# check if gff file is not empty
+if (length(g)==0){
+  # exit normally - create empty bigwig file
+  print("No regions found in the input file")
+  write.table(data.frame(), file=opt$output, quote=FALSE, sep="\t", row.names=FALSE)
+  quit()
+}
+
 if (opt$merge){
   g <- reduce(g)
 }

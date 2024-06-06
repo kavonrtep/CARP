@@ -6,7 +6,7 @@ From: continuumio/miniconda3
     export CONDARC=/opt/conda/config/.condarc
 
     # Install Mamba
-    conda install -c conda-forge mamba python=3.10
+    conda install -c conda-forge mamba python=3.11
 
     # Install Snakemake
     mamba install -c bioconda -c conda-forge snakemake=8.12.0

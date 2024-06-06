@@ -42,15 +42,15 @@ rule all:
         F"{config['output_dir']}/Libraries/combined_library.fasta",
         F"{config['output_dir']}/RepeatMasker/RM_on_combined_library.out",
         F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_minus_satellites.gff3",
-        F"{config['output_dir']}/Repeat_Annotation_NoSat.gff3",
+        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
         F"{config['output_dir']}/all_repeats_for_masking.bed",
         F"{config['output_dir']}/DANTE_LTR.gff3",
         F"{config['output_dir']}/TideCluster_report.html",
         F"{config['output_dir']}/DANTE_LTR_report.html",
         F"{config['output_dir']}/gaps_10plus.bed",
         F"{config['output_dir']}/summary_statistics.csv",
-        F"{config['output_dir']}/Repeat_Annotation_NoSat_10k.bw",
-        F"{config['output_dir']}/Repeat_Annotation_NoSat_100k.bw",
+        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_10k.bw",
+        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_100k.bw",
         F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
         F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done"
 
@@ -203,6 +203,7 @@ rule tidecluster_long:
         
         """
 
+
 rule tidecluster_short:
     input:
         genome_fasta=config["genome_fasta"],
@@ -278,10 +279,14 @@ rule tidecluster_reannotate:
         fi
         gf_absolute_path=$(realpath {input.dimer_library_default})
         dl_absolute_path=$(realpath {input.genome_fasta})
+        dl_basename=$(basename {input.genome_fasta})
         gff_absolute_path=$(realpath {output.gff3})
+        
         cd {params.outdir}
+        cp $dl_absolute_path .
         # tc_reannotate.py -s {input.genome_fasta} -f {input.dimer_library_default} -o {output.gff3}
-        tc_reannotate.py -s $dl_absolute_path -f $gf_absolute_path -o $gff_absolute_path  -c {threads}
+        tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path  -c {threads}
+        rm $dl_basename
         """
 
 rule merge_tidecluster_default_and_short:
@@ -315,6 +320,7 @@ rule make_subclass_2_library:
                 f.write("")
 
 
+
 rule filter_ltr_rt_library:
     input:
         dante_library=F"{config['output_dir']}/DANTE_LTR/LTR_RTs_library.fasta",
@@ -324,10 +330,12 @@ rule filter_ltr_rt_library:
     conda:
         "envs/blast.yaml"
 
+
     shell:
         """
         # first reformat header( convert | to / and / to _) and then filter using blast 
         # use sed to replace | with / and / with _ in the header
+        
         sed  's/\//_/g' {input.dante_library} |  sed 's/|/\//g'  > {input.dante_library}.reformatted
         # if the input.subclass_2_library is empty, just copy the reformatted library
         if [ ! -s {input.subclass_2_library} ]; then
@@ -362,6 +370,7 @@ rule concatenate_libraries:
         """
 
 
+
 rule repeatmasker:
     input:
         genome_fasta=config["genome_fasta"],
@@ -386,10 +395,18 @@ rule repeatmasker:
         gff_absolute_path=$(realpath {output.gff})
         cd {params.rm_dir}
         
-        RepeatMasker -pa {threads}  $genome_absolute_path  -lib $library_absolute_path -dir $PWD -s -xsmall -e ncbi -no_is
+        cp $library_absolute_path .
+        cp $genome_absolute_path .
+        lib_name=$(basename $library_absolute_path)
+        gen_name=$(basename $genome_absolute_path)
+        # run RepeatMasker with all files in the current directory
+        RepeatMasker -pa {threads}  $gen_name -lib $lib_name -dir . -s -xsmall -e ncbi -no_is
         mv `basename {input.genome_fasta}`.out $out_absolute_path
         mkdir -p RM_files
         mv  `basename {input.genome_fasta}`.* RM_files
+        # remove the library and genome files
+        rm $lib_name
+        rm $gen_name
         clean_rm_output.R $out_absolute_path $gff_absolute_path
         """
 
@@ -411,7 +428,7 @@ rule merge_rm_and_dante:
         rm_gff=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_minus_satellites.gff3",
         dante_gff=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3"
     output:
-        gff=F"{config['output_dir']}/Repeat_Annotation_NoSat.gff3"
+        gff=F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3"
     conda:
         "envs/dante_ltr.yaml"
         # dante_ltr is already used and it contains the necessary tools (rtracklayer and optparse)
@@ -429,7 +446,7 @@ rule merge_rm_and_dante:
 
 rule make_track_for_masking:
     input:
-        rm=F"{config['output_dir']}/Repeat_Annotation_NoSat.gff3",
+        rm=F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
         tr_main=F"{config['output_dir']}/TideCluster/TideCluster_clustering_default_and_short_merged.gff3",
         tr_default_short=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter_short.gff3",
         tr_short_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_tidehunter_short.gff3"
@@ -460,12 +477,16 @@ rule make_track_for_Ns:
 
 rule make_summary_statistics_and_split_by_class:
     input:
-        rm=F"{config['output_dir']}/Repeat_Annotation_NoSat.gff3",
+        rm=F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
         sat_tc=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
         genome_fasta=config["genome_fasta"]
     output:
         csv=F"{config['output_dir']}/summary_statistics.csv",
-        dir=directory(F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3")
+        dir=directory(F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3"),
+        mobile_elements=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3/Mobile_elements.gff3",
+        simple_repeats=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3/Simple_repeats.gff3",
+        low_complexity=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3/Low_complexity.gff3",
+        rdna=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3/rDNA.gff3"
     conda:
         "envs/dante_ltr.yaml"
     shell:
@@ -474,7 +495,8 @@ rule make_summary_statistics_and_split_by_class:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
 
-        calculate_statistics.R -r {input.rm} -s {input.sat_tc} -o {output.csv} -g {input.genome_fasta} -d {output.dir}
+        calculate_statistics_and_make_groups.R -r {input.rm} -s {input.sat_tc} -o {output.csv} -g {input.genome_fasta} -d {output.dir} \
+        -M {output.mobile_elements} -S {output.simple_repeats} -L {output.low_complexity} -R {output.rdna}
         """
 
 rule make_bigwig_density:
@@ -512,14 +534,22 @@ rule add_top_level_outputs:
         sat_tc=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
         sat_tc_bw10=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
         sat_tc_bw100=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_100k.bw",
-        sat_rm=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3"
+        sat_rm=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3",
+        simple_repeats=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3/Simple_repeats.gff3",
+        low_complexity=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3/Low_complexity.gff3",
+        rdna=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3/rDNA.gff3",
+        mobile_elements=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3/Mobile_elements.gff3"
     output:
         dante=F"{config['output_dir']}/DANTE_filtered.gff3",
         dante_ltr=F"{config['output_dir']}/DANTE_LTR.gff3",
         sat_tc=F"{config['output_dir']}/Tandem_repeats_TideCluster.gff3",
         sat_tc_bw10=F"{config['output_dir']}/Tandem_repeats_TideCluster_10k.bw",
         sat_tc_bw100=F"{config['output_dir']}/Tandem_repeats_TideCluster_100k.bw",
-        sat_rm=F"{config['output_dir']}/Tandem_repeats_RepeatMasker.gff3"
+        sat_rm=F"{config['output_dir']}/Tandem_repeats_RepeatMasker.gff3",
+        simple_repeats=F"{config['output_dir']}/Simple_repeats_RepeatMasker.gff3",
+        low_complexity=F"{config['output_dir']}/Low_complexity_RepeatMasker.gff3",
+        rdna=F"{config['output_dir']}/rDNA_RepeatMasker.gff3",
+        mobile_elements=F"{config['output_dir']}/Mobile_elements_RepeatMasker.gff3"
     params:
         sat_tc_annot_in=F"{config['output_dir']}/TideCluster/default/TideCluster_annotation.gff3",
         sat_tc_annot_out=F"{config['output_dir']}/Tandem_repeats_TideCluster_annotated.gff3"
@@ -532,6 +562,11 @@ rule add_top_level_outputs:
         ln -fs -r {input.sat_rm} {output.sat_rm}
         ln -fs -r {input.sat_tc_bw10} {output.sat_tc_bw10}
         ln -fs -r {input.sat_tc_bw100} {output.sat_tc_bw100}
+        ln -fs -r {input.simple_repeats} {output.simple_repeats}
+        ln -fs -r {input.low_complexity} {output.low_complexity}
+        ln -fs -r {input.rdna} {output.rdna}
+        ln -fs -r {input.mobile_elements} {output.mobile_elements}
+        
         sat_tc={output.sat_tc}
 
         # check if the file exists
@@ -543,11 +578,11 @@ rule add_top_level_outputs:
 
 rule calculate_bigwig_density:
     input:
-        F"{config['output_dir']}/Repeat_Annotation_NoSat.gff3",
+        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
         F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
     output:
-        F"{config['output_dir']}/Repeat_Annotation_NoSat_10k.bw",
-        F"{config['output_dir']}/Repeat_Annotation_NoSat_100k.bw",
+        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_10k.bw",
+        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_100k.bw",
         F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
         F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_100k.bw"
     conda:
