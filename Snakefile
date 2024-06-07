@@ -10,7 +10,8 @@ subdirs = [config['output_dir']+"/"+i for i in ['DANTE', 'DANTE_LTR',
                                                 'TideCluster/short_monomer',
                                                 'Libraries', 'RepeatMasker']]
 create_dirs(*subdirs)
-
+snakemake_dir = os.path.dirname(workflow.snakefile)
+print(snakemake_dir)
 def filter_fasta(input_file, output_file, filter_string):
     """Filter FASTA files based on a filter_string, which is a regular expression."""
     with open(input_file, "r") as f:
@@ -124,7 +125,8 @@ rule make_library_of_ltrs:
 rule tidecluster_long:
     input:
         genome_fasta=config["genome_fasta"],
-        library= config.get("tandem_repeat_library", [])
+        library= config.get("tandem_repeat_library", []),
+        genome_seqlengths=F"{config['output_dir']}/genome_seqlengths.rds"
     output:
         gff3_clust=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
         gff3_tidehunter=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter.gff3",
@@ -145,6 +147,7 @@ rule tidecluster_long:
         prefix=$(basename {params.prefix})
         original_dir=$PWD
         genome_absolute_path=$(realpath {input.genome_fasta})
+        genome_seqlengths=$(realpath {input.genome_seqlengths})
         # define library_absolute_path only if it is not empty
         
         # NOTE - there is a bug in tidecluster - it does not correctly formal html links, soluton for now is 
@@ -184,17 +187,10 @@ rule tidecluster_long:
         
         cd $wd
         # check if directory TideCluster_clustering_split_files exists
+
         if [ -d TideCluster_clustering_split_files ]; then
             mkdir -p TideCluster_clustering_split_files_bigwig
-            for f in TideCluster_clustering_split_files/*.gff3; do
-                base=$(basename $f);
-                # remove the extension
-                base_noext=$(basename "$base" .gff3)
-                base_bw10k=TideCluster_clustering_split_files_bigwig/"$base_noext"_10k.bw
-                base_bw100k=TideCluster_clustering_split_files_bigwig/"$base_noext"_100k.bw
-                calculate_density.R -b $f -o $base_bw10k -f gff3 --window 10000
-                calculate_density.R -b $f -o $base_bw100k -f gff3 --window 100000
-            done
+            calculate_density_batch.R -d TideCluster_clustering_split_files -o TideCluster_clustering_split_files_bigwig -g $genome_seqlengths
             touch .bigwig_done
         else
             echo "No split files found"
@@ -359,7 +355,8 @@ rule concatenate_libraries:
     output:
         F"{config['output_dir']}/Libraries/combined_library.fasta"
     params:
-        custom_library = config.get("custom_library", "")
+        custom_library = config.get("custom_library", ""),
+        rdna_library = os.path.join(snakemake_dir, "data/rdna_library.fasta")
     shell:
         """
         if [ -z "{params.custom_library}" ]; then
@@ -367,8 +364,9 @@ rule concatenate_libraries:
         else
             cat {input.ltr_rt_library} {params.custom_library} > {output}
         fi
+        # append rDNA library
+        cat {params.rdna_library} >> {output}
         """
-
 
 
 rule repeatmasker:
@@ -381,7 +379,7 @@ rule repeatmasker:
     params:
         rm_dir=directory(F"{config['output_dir']}/RepeatMasker")
     conda:
-        "envs/repeatmasker.yaml"
+        "envs/tidecluster.yaml"
     threads: workflow.cores
     shell:
         """
@@ -501,12 +499,14 @@ rule make_summary_statistics_and_split_by_class:
 
 rule make_bigwig_density:
     input:
-        cvs=F"{config['output_dir']}/summary_statistics.csv"  # this file is available if gffs were created
+        cvs=F"{config['output_dir']}/summary_statistics.csv",  # this file is available if gffs were created
+        genome_seqlengths=F"{config['output_dir']}/genome_seqlengths.rds"
     output:
         checkpoint=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done"
     params:
         bwdir=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig",
-        gffdir=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3"
+        gffdir=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3",
+        genome_fasta=config["genome_fasta"]
     conda:
         "envs/dante_ltr.yaml"
     shell:
@@ -514,16 +514,9 @@ rule make_bigwig_density:
         mkdir -p {params.bwdir}
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        
-        for f in {params.gffdir}/*.gff3; do
-            base=$(basename $f);
-            # remove the extension
-            base_noext=$(basename "$base" .gff3)
-            base_bw10k={params.bwdir}/"$base_noext"_10k.bw
-            base_bw100k={params.bwdir}/"$base_noext"_100k.bw
-            calculate_density.R -b $f -o $base_bw10k -f gff3 --window 100000
-            calculate_density.R -b $f -o $base_bw100k -f gff3 --window 1000000
-        done
+        echo "Calculating bigwig densities"
+        ls_absolute_path=$(realpath {input.genome_seqlengths})
+        calculate_density_batch.R -d {params.gffdir} -o {params.bwdir} -g $ls_absolute_path 
         touch {output.checkpoint}
         """
 
@@ -580,6 +573,7 @@ rule calculate_bigwig_density:
     input:
         F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
         F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
+        genome_seqlengths=F"{config['output_dir']}/genome_seqlengths.rds"
     output:
         F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_10k.bw",
         F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_100k.bw",
@@ -592,10 +586,10 @@ rule calculate_bigwig_density:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         echo "this is a PATH: $PATH"
-        calculate_density.R -b {input[0]} -o {output[0]} -f gff3 --window 10000
-        calculate_density.R -b {input[0]} -o {output[1]} -f gff3 --window 100000
-        calculate_density.R -b {input[1]} -o {output[2]} -f gff3 --window 10000
-        calculate_density.R -b {input[1]} -o {output[3]} -f gff3 --window 100000
+        calculate_density.R -b {input[0]} -o {output[0]} -f gff3 --window 10000 -g {input.genome_seqlengths}
+        calculate_density.R -b {input[0]} -o {output[1]} -f gff3 --window 100000 -g {input.genome_seqlengths}
+        calculate_density.R -b {input[1]} -o {output[2]} -f gff3 --window 10000 -g {input.genome_seqlengths}
+        calculate_density.R -b {input[1]} -o {output[3]} -f gff3 --window 100000 -g {input.genome_seqlengths}
         """
 
 
@@ -610,4 +604,19 @@ rule add_html_outputs:
         """
         ln -s -r {input.tc_index} {output.tc_index}
         ln -s -r {input.dante_ltr_index} {output.dante_ltr_index}
+        """
+
+
+rule calculate_seqlengths:
+    input:
+        genome_fasta=config["genome_fasta"]
+    output:
+        F"{config['output_dir']}/genome_seqlengths.rds"
+    conda:
+        "envs/dante_ltr.yaml"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        calculate_seqlengths.R  {input.genome_fasta} {output}
         """

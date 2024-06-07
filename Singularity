@@ -47,6 +47,7 @@ From: continuumio/miniconda3
     envs /opt/pipeline/envs
     Snakefile /opt/pipeline/Snakefile
     config.yaml /opt/pipeline/config.yaml
+    data/rdna_library.fasta /opt/pipeline/data/rdna_library.fasta
     run_pipeline.py /opt/pipeline/run_pipeline.py
     scripts /opt/pipeline/scripts
 
