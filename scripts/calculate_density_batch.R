@@ -62,7 +62,10 @@ dir.create(directory_for_10k, showWarnings=FALSE)
 dir.create(directory_for_100k, showWarnings=FALSE)
 print("genome:")
 print(opt$genome)
-chr_size <- readRDS(opt$genome)
+chr_size_all <- readRDS(opt$genome)
+# exclude seqlevels not included in g
+
+
 
 for (f in files) {
   base <- basename(f)
@@ -78,7 +81,7 @@ for (f in files) {
     print(paste("No regions found in the input file:", f))
     next
   }
-
+  chr_size <- chr_size_all[seqlevels(g)]
   #d10k <- get_density(g, chr_size, 10000)
   d10k_smooth <- get_density2(g, chr_size, N_for_mean = 10, step_size=1000)
   export(d10k_smooth, base_bw10k, format="bigwig")

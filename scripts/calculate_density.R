@@ -81,6 +81,9 @@ if (opt$merge){
 }
 print(opt)
 chr_size <- readRDS(opt$genome)
+# exclude seqlevels not included in g
+chr_size <- chr_size[seqlevels(g)]
+
 window_size <- opt$window/10 # 10 bins per window
 d <- get_density2(g, chr_size, N_for_mean = 10, step_size = window_size)
 
