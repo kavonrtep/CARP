@@ -10,7 +10,7 @@ From: continuumio/miniconda3
 
     # Install Snakemake
     mamba install -c bioconda -c conda-forge snakemake=8.12.0
-
+    mamba install h5py
     # configure strict channel priority
     conda config --set channel_priority strict
     conda init bash
@@ -37,11 +37,18 @@ From: continuumio/miniconda3
 
     snakemake --use-conda --conda-prefix /opt/conda/envs --conda-create-envs-only --conda-frontend mamba --cores 4 --configfile /opt/pipeline/config.yaml
 
+
     # Clean up
     mamba clean --all
+    # try to remove unnecessary data from RM
+    du --max-depth 1 -h /opt/conda/
+
+    /opt/pipeline/scripts/clean_h5_file.py
+    du --max-depth 1 -h /opt/conda/
 
     # make root accessible for everyone
     chmod -R 777 /root
+    # remove all temp files
 
 %files
     envs /opt/pipeline/envs

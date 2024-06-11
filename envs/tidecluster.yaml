@@ -5,4 +5,6 @@ channels:
   - petrnovak
 dependencies:
   - tidecluster=1.5
-  - bioconductor-rtracklayer=1.62.0
+  - dante_ltr=0.3.5.2
+  - dante=0.1.9
+  - seqkit=2.8.2
