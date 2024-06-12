@@ -27,24 +27,15 @@ From: continuumio/miniconda3
 
     cd /opt/pipeline
     # make dummy data so snakemake can create the environments
-    # TODO - replce with correct paths
     mkdir -p /opt/pipeline/data
     touch /opt/pipeline/data/CEN6_ver_220406_part.fasta
     touch /opt/pipeline/data/pisum_custom_library.fasta
     touch /opt/pipeline/data/FabTR_all_sequences_210901.db.RM_format.fasta
 
-
-
     snakemake --use-conda --conda-prefix /opt/conda/envs --conda-create-envs-only --conda-frontend mamba --cores 4 --configfile /opt/pipeline/config.yaml
-
 
     # Clean up
     mamba clean --all
-    # try to remove unnecessary data from RM
-    du --max-depth 1 -h /opt/conda/
-
-    /opt/pipeline/scripts/clean_h5_file.py
-    du --max-depth 1 -h /opt/conda/
 
     # make root accessible for everyone
     chmod -R 777 /root
