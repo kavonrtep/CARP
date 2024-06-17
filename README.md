@@ -73,6 +73,16 @@ singularity run -B /path/to/ -B $PWD assembly_repeat_annotation_pipeline.sif -c 
 ```
 Parameter `-t` specifies the number of threads to use. Singularity parameter `-B` is used to bind the input and output directories to the container. Without this parameter, the container will not be able to access the input and output files. File `config.yaml` must be also in directory which is accessible to the container. In the example above this is the current directory `$PWD`. 
 
+
+## Running pipeline on metacentrum
+Use [./scripts/annotate_repeats_metacentrum.sh](./scripts/annotate_repeats_metacentrum.sh) script to run the pipeline on metacentrum. Adjust paths to the input files , output directory and singularity image. 
+
+ 
+
+ 
+
+
+
 ## Output structure
 TODO
 
@@ -82,6 +92,6 @@ To build the container, run the following command:
 
 ```bash
 SINGULARITY=`which singularity`
-sudo $SINGULARITY build assembly_repeat_annotation_pipeline.sif Singularity
+sudo $SINGULARITY build assembly_repeat_annotation_pipeline_0.3.0.sif Singularity
 ```
 
