@@ -42,7 +42,7 @@ rule all:
         F"{config['output_dir']}/Libraries/LTR_RTs_library_clean.fasta",
         F"{config['output_dir']}/Libraries/combined_library.fasta",
         F"{config['output_dir']}/RepeatMasker/RM_on_combined_library.out",
-        F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_minus_satellites.gff3",
+        F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_plus_DANTE.gff3",
         F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
         F"{config['output_dir']}/all_repeats_for_masking.bed",
         F"{config['output_dir']}/DANTE_LTR.gff3",
@@ -410,10 +410,10 @@ rule repeatmasker:
 
 rule subtract_satellites_from_rm:
     input:
-        rm_gff=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library.gff3",
+        rm_gff=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_plus_DANTE.gff3",
         satellite_annotation=F"{config['output_dir']}/TideCluster/TideCluster_clustering_default_and_short_merged.gff3"
     output:
-        F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_minus_satellites.gff3"
+        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3"
     conda:
         "envs/bedtools.yaml"
     shell:
@@ -423,10 +423,10 @@ rule subtract_satellites_from_rm:
 
 rule merge_rm_and_dante:
     input:
-        rm_gff=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_minus_satellites.gff3",
+        rm_gff=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library.gff3",
         dante_gff=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3"
     output:
-        gff=F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3"
+        gff=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_plus_DANTE.gff3"
     conda:
         "envs/tidecluster.yaml"
         # dante_ltr is already used and it contains the necessary tools (rtracklayer and optparse)
