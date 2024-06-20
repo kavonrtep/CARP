@@ -447,7 +447,9 @@ rule make_track_for_masking:
         rm=F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
         tr_main=F"{config['output_dir']}/TideCluster/TideCluster_clustering_default_and_short_merged.gff3",
         tr_default_short=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter_short.gff3",
-        tr_short_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_tidehunter_short.gff3"
+        tr_short_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_tidehunter_short.gff3",
+        tr_rm=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3",
+        dante_ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3"
     output:
         F"{config['output_dir']}/all_repeats_for_masking.bed"
     conda:
@@ -456,7 +458,7 @@ rule make_track_for_masking:
         """
         # concatenate and sort the gff files
         export LC_COLLATE=C
-        cat {input.rm} {input.tr_main} {input.tr_default_short} {input.tr_short_short} | sort -k1,1 -k4,4n > {output}.tmp.gff3
+        cat {input.rm} {input.tr_main} {input.tr_default_short} {input.tr_short_short} {input.tr_rm} {input.dante_ltr} | sort -k1,1 -k4,4n > {output}.tmp.gff3
         bedtools merge -i {output}.tmp.gff3 > {output}
         rm {output}.tmp.gff3
         """

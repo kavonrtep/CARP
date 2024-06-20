@@ -76,7 +76,7 @@ echo "custom_library: custom_database_tarean.fasta" >> ${OUTPUT_DIR}/config.yaml
 echo "tandem_repeat_library: custom_database_repeats.fasta" >> ${OUTPUT_DIR}/config.yaml
 
 # Copy the PBS script itself to the OUTPUT_DIR
-cp ${PBS_O_WORKDIR}/$(basename $0) $OUTPUT_DIR
+cp $0 $OUTPUT_DIR/pbs_script.sh
 # export environment variables to the output directory
 env > $OUTPUT_DIR/env.sh
 
