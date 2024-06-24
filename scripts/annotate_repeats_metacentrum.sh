@@ -1,8 +1,9 @@
 #!/bin/bash
 #PBS -N annotate_repeats
-#PBS -l select=1:ncpus=40:mem=32gb:scratch_local=300gb
+#PBS -l select=1:ncpus=16:mem=64gb:scratch_local=300gb
 #PBS -l walltime=72:00:00
 #PBS -j oe
+#PBS -m bae
 
 
 # CONFIGURATION - use absolute paths
