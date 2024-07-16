@@ -1,10 +1,11 @@
 #!/bin/bash
 #PBS -N annotate_repeats
-#PBS -l select=1:ncpus=16:mem=64gb:scratch_local=300gb
-#PBS -l walltime=72:00:00
+#PBS -l select=1:ncpus=50:mem=512gb:scratch_local=300gb
+#PBS -l walltime=172:00:00
 #PBS -j oe
 #PBS -m bae
 
+## Use approximately 1 cpu per 8-10 GB of RAM
 
 # CONFIGURATION - use absolute paths
 SINGULARITY_IMAGE="todo.sif"
