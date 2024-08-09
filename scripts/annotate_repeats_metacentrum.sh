@@ -42,12 +42,12 @@ cd $SCRATCHDIR
 echo "genome_fasta: genome.fasta" > ${SCRATCHDIR}/config.yaml
 echo "output_dir: output" >> ${SCRATCHDIR}/config.yaml
 # if custom database is not empty
-if [ -n "$CUSTOM_DATABASE_TAREAN" ]; then
-    echo "custom_library: custom_database_tarean.fasta" >> ${SCRATCHDIR}/config.yaml
+if [ -n "$CUSTOM_DATABASE_REPEATS" ]; then
+    echo "custom_library: custom_database_repeats.fasta" >> ${SCRATCHDIR}/config.yaml
 fi
 # if custom database is not empty
-if [ -n "$CUSTOM_DATABASE_REPEATS" ]; then
-    echo "tandem_repeat_library: custom_database_repeats.fasta" >> ${SCRATCHDIR}/config.yaml
+if [ -n "$CUSTOM_DATABASE_TAREAN" ]; then
+    echo "tandem_repeat_library: custom_database_tarean.fasta" >> ${SCRATCHDIR}/config.yaml
 fi
 
 tmpdir=$SCRATCHDIR/tmp
@@ -72,10 +72,8 @@ if [ -n "$CUSTOM_DATABASE_REPEATS" ]; then
     cp $SCRATCHDIR/custom_database_repeats.fasta $OUTPUT_DIR
 fi
 
-# copy information to config.yaml
-echo "genome_fasta: genome.fasta" > ${OUTPUT_DIR}/config.yaml
-echo "custom_library: custom_database_tarean.fasta" >> ${OUTPUT_DIR}/config.yaml
-echo "tandem_repeat_library: custom_database_repeats.fasta" >> ${OUTPUT_DIR}/config.yaml
+
+cp $SCRATCHDIR/config.yaml $OUTPUT_DIR
 
 # Copy the PBS script itself to the OUTPUT_DIR
 cp $0 $OUTPUT_DIR/pbs_script.sh

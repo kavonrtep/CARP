@@ -7,8 +7,6 @@ if (FALSE){
 }
 suppressPackageStartupMessages({
   library(rtracklayer)
-  library(ggplot2)
-  library(ggforce)
 })
 smooth_score <- function(x, N_for_mean = 10){
   # extend the score in each direction by N_for_mean-1 zeros
@@ -82,8 +80,12 @@ plot_tracks <- function(main_tracks, SL,
   }
 
   # vertical lines
-  for (i in 1:(length(SL)-1)){
-    segments(SN_offsets[i], 0, SN_offsets[i], length(main_tracks)*1.1, col = "grey")
+  # no lines if length os SL is 1
+  if (length(SL) > 1){
+    for (i in 1:(length(SL)-1)){
+      print(i)
+      segments(SN_offsets[i], 0, SN_offsets[i], length(main_tracks)*1.1, col = "grey")
+    }
   }
 }
 

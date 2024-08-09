@@ -53,7 +53,8 @@ rule all:
         F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_10k.bw",
         F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_100k.bw",
         F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
-        F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done"
+        F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done",
+        F"{config['output_dir']}/summary_plots.pdf"
 
 rule dante:
     input:
@@ -624,4 +625,26 @@ rule calculate_seqlengths:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         calculate_seqlengths.R  {input.genome_fasta} {output}
+        """
+
+
+rule make_summary_plots:
+    input:
+        SL = F"{config['output_dir']}/genome_seqlengths.rds",
+        bw1 = F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_10k.bw",
+        bw2_info = F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done"
+        # these inputs are not used explicitly, but they are necessary for the rule to run
+    output:
+        F"{config['output_dir']}/summary_plots.pdf"
+    params:
+        output_dir = config["output_dir"]
+    conda:
+        "envs/tidecluster.yaml"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        # command can fail but it should not stop the workflow
+        make_summary_plots.R {params.output_dir} {output} || true
+        touch output
         """
