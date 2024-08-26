@@ -13,6 +13,7 @@ GENOME="TODO.fasta"
 CUSTOM_DATABASE_TAREAN=""  # optional, keep empty if not used
 CUSTOM_DATABASE_REPEATS="" # optional, keep empty if not used
 OUTPUT_DIR="TODO"
+REPEATMASKER_SENSITIVITY="default"  # default, sensitive, quick
 # END OF CONFIGURATION
 
 
@@ -48,6 +49,10 @@ fi
 # if custom database is not empty
 if [ -n "$CUSTOM_DATABASE_TAREAN" ]; then
     echo "tandem_repeat_library: custom_database_tarean.fasta" >> ${SCRATCHDIR}/config.yaml
+fi
+
+if [ -n "$REPEATMASKER_SENSITIVITY" ]; then
+    echo "repeatmasker_sensitivity: $REPEATMASKER_SENSITIVITY" >> ${SCRATCHDIR}/config.yaml
 fi
 
 tmpdir=$SCRATCHDIR/tmp
