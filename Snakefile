@@ -27,6 +27,19 @@ def filter_fasta(input_file, output_file, filter_string):
                 elif write_sequence:
                     o.write(line)
 
+# repeatmasker sensitivity:
+if "repeatmasker_sensitivity" not in config:
+    config["repeatmasker_sensitivity"] = "default"
+
+rm_sensitivity_option = {
+    "default": "",
+    "sensitive": "-s",
+    "quick": "-q",
+    "" : ""
+    }[config["repeatmasker_sensitivity"]]
+
+
+
 rule all:
     input:
         F"{config['output_dir']}/DANTE/DANTE.gff3",
@@ -378,7 +391,10 @@ rule repeatmasker:
         out=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library.out",
         gff=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library.gff3"
     params:
-        rm_dir=directory(F"{config['output_dir']}/RepeatMasker")
+        rm_dir=directory(F"{config['output_dir']}/RepeatMasker"),
+        rm_sensitivity_option=rm_sensitivity_option
+
+
     conda:
         "envs/tidecluster.yaml"
     threads: workflow.cores
@@ -399,7 +415,7 @@ rule repeatmasker:
         lib_name=$(basename $library_absolute_path)
         gen_name=$(basename $genome_absolute_path)
         # run RepeatMasker with all files in the current directory
-        RepeatMasker -pa {threads}  $gen_name -lib $lib_name -dir . -s -xsmall -e ncbi -no_is
+        RepeatMasker -pa {threads}  $gen_name -lib $lib_name -dir . -xsmall -e ncbi -no_is {params.rm_sensitivity_option}
         mv `basename {input.genome_fasta}`.out $out_absolute_path
         mkdir -p RM_files
         mv  `basename {input.genome_fasta}`.* RM_files
