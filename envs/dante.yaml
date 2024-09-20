@@ -4,4 +4,4 @@ channels:
   - bioconda
   - petrnovak
 dependencies:
-  - dante=0.1.9
+  - dante=0.2.0

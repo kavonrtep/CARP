@@ -8,3 +8,4 @@ dependencies:
   - dante_ltr=0.3.5.3
   - dante=0.1.9
   - seqkit=2.8.2
+  - cap3=10.2011

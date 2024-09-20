@@ -92,6 +92,6 @@ To build the container, run the following command:
 
 ```bash
 SINGULARITY=`which singularity`
-sudo $SINGULARITY build assembly_repeat_annotation_pipeline_0.5.2.sif Singularity
+sudo $SINGULARITY build assembly_repeat_annotation_pipeline_0.6.0.sif Singularity
 ```
 

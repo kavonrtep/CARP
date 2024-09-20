@@ -20,15 +20,20 @@ REPEATMASKER_SENSITIVITY="default"  # default, sensitive, quick
 
 SINGULARITY_IMAGE_BASE_NAME=$(basename $SINGULARITY_IMAGE)
 # copy data and singularity image to scratch
-cp $SINGULARITY_IMAGE $SCRATCHDIR
-cp $GENOME ${SCRATCHDIR}/genome.fasta
+
+
+rsync -avt $SINGULARITY_IMAGE $SCRATCHDIR/
+rsync -avt $GENOME ${SCRATCHDIR}/genome.fasta
+
+
 # copy is not empty
 if [ -n "$CUSTOM_DATABASE_TAREAN" ]; then
-    cp $CUSTOM_DATABASE_TAREAN ${SCRATCHDIR}/custom_database_tarean.fasta
+     rsync -avt $CUSTOM_DATABASE_TAREAN ${SCRATCHDIR}/custom_database_tarean.fasta
+
 fi
 
- if [ -n "$CUSTOM_DATABASE_REPEATS" ]; then
-    cp $CUSTOM_DATABASE_REPEATS ${SCRATCHDIR}/custom_database_repeats.fasta
+if [ -n "$CUSTOM_DATABASE_REPEATS" ]; then
+      rsync -avt $CUSTOM_DATABASE_REPEATS ${SCRATCHDIR}/custom_database_repeats.fasta
 fi
 
 cd $SCRATCHDIR
@@ -66,23 +71,23 @@ singularity run -B $SCRATCHDIR --env TMPDIR=$tmpdir $SINGULARITY_IMAGE_BASE_NAME
 
 # copy results back to the $OUTPUT_DIR
 mkdir -p $OUTPUT_DIR
-cp -r $SCRATCHDIR/output/* $OUTPUT_DIR/
+rsync -avt $SCRATCHDIR/output/ $OUTPUT_DIR/
 
 # copy also databases and genome to output
-cp $SCRATCHDIR/genome.fasta $OUTPUT_DIR
+rsync -avt $SCRATCHDIR/genome.fasta $OUTPUT_DIR/
 if [ -n "$CUSTOM_DATABASE_TAREAN" ]; then
-    cp $SCRATCHDIR/custom_database_tarean.fasta $OUTPUT_DIR
+    rsync -avt $SCRATCHDIR/custom_database_tarean.fasta $OUTPUT_DIR/
 fi
 if [ -n "$CUSTOM_DATABASE_REPEATS" ]; then
-    cp $SCRATCHDIR/custom_database_repeats.fasta $OUTPUT_DIR
+    rsync -avt $SCRATCHDIR/custom_database_repeats.fasta $OUTPUT_DIR/
 fi
 
-
-cp $SCRATCHDIR/config.yaml $OUTPUT_DIR
+rsync -avt $SCRATCHDIR/config.yaml $OUTPUT_DIR/
 
 # Copy the PBS script itself to the OUTPUT_DIR
-cp $0 $OUTPUT_DIR/pbs_script.sh
-# export environment variables to the output directory
+rsync -avt $0 $OUTPUT_DIR/pbs_script.sh
+
+# Export environment variables to the output directory
 env > $OUTPUT_DIR/env.sh
 
 

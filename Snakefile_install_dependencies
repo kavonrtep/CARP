@@ -1,0 +1,12 @@
+
+rule install_wublast:
+    conda:
+        "envs/tidecluster.yaml"
+    shell:
+        """
+        cd $CONDA_PREFIX/share/RepeatMasker
+        TRF_PRGM=`which trf`
+        WUBLAST_DIR=/opt/pipeline/wublast
+        ./configure --trf_prgm=$TRF_PRGM --abblast_dir=$WUBLAST_DIR
+        """
+

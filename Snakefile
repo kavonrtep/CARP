@@ -38,7 +38,13 @@ rm_sensitivity_option = {
     "" : ""
     }[config["repeatmasker_sensitivity"]]
 
-
+# repeatmasker engine:
+if "repeatmasker_engine" not in config:
+    config["repeatmasker_engine"] = "ncbi"
+rm_engine = config["repeatmasker_engine"]
+# check that the engine is valid - must be either ncbi or abblast
+if rm_engine not in ["ncbi", "abblast"]:
+    raise ValueError("Invalid RepeatMasker engine. Must be either 'ncbi' or 'abblast'.")
 
 rule all:
     input:
@@ -367,34 +373,53 @@ rule concatenate_libraries:
     input:
         ltr_rt_library=F"{config['output_dir']}/Libraries/LTR_RTs_library_clean.fasta",
     output:
-        F"{config['output_dir']}/Libraries/combined_library.fasta"
+        full_names=F"{config['output_dir']}/Libraries/combined_library.fasta",
+        short_names=F"{config['output_dir']}/Libraries/combined_library_short_names.fasta",
     params:
         custom_library = config.get("custom_library", ""),
         rdna_library = os.path.join(snakemake_dir, "data/rdna_library.fasta")
     shell:
         """
         if [ -z "{params.custom_library}" ]; then
-            cp {input.ltr_rt_library} {output}
+            cp {input.ltr_rt_library} {output.full_names}
         else
-            cat {input.ltr_rt_library} {params.custom_library} > {output}
+            cat {input.ltr_rt_library} {params.custom_library} > {output.full_names}
         fi
         # append rDNA library
-        cat {params.rdna_library} >> {output}
+        cat {params.rdna_library} >> {output.full_names}
+        awk '/^>/{{count++; split($0,a,"#"); print ">" count "#" a[2]; next}} {{print}}' {output.full_names} > {output.short_names}
         """
 
+rule reduce_library:
+    input:
+        library=F"{config['output_dir']}/Libraries/combined_library.fasta"
+    output:
+        library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced.fasta"
+    conda: "envs/tidecluster.yaml"
+    threads: workflow.cores
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        workdir=$(dirname {output.library_reduced})/workdir
+        reduce_library_size.R -i {input.library} -o {output.library_reduced} -t {threads} -d $workdir 
+        """
 
 rule repeatmasker:
     input:
         genome_fasta=config["genome_fasta"],
-        library=F"{config['output_dir']}/Libraries/combined_library.fasta"
+        library=F"{config['output_dir']}/Libraries/combined_library.fasta",
+        library_short=F"{config['output_dir']}/Libraries/combined_library_short_names.fasta",
+        library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced.fasta"
+
+
     output:
         out=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library.out",
         gff=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library.gff3"
     params:
         rm_dir=directory(F"{config['output_dir']}/RepeatMasker"),
-        rm_sensitivity_option=rm_sensitivity_option
-
-
+        rm_sensitivity_option=rm_sensitivity_option,
+        rm_engine=rm_engine
     conda:
         "envs/tidecluster.yaml"
     threads: workflow.cores
@@ -404,7 +429,8 @@ rule repeatmasker:
         # get absolute path of scripts directory
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        library_absolute_path=$(realpath {input.library})
+        
+        library_absolute_path=$(realpath {input.library_reduced})
         genome_absolute_path=$(realpath {input.genome_fasta})
         out_absolute_path=$(realpath {output.out})
         gff_absolute_path=$(realpath {output.gff})
@@ -415,7 +441,7 @@ rule repeatmasker:
         lib_name=$(basename $library_absolute_path)
         gen_name=$(basename $genome_absolute_path)
         # run RepeatMasker with all files in the current directory
-        RepeatMasker -pa {threads}  $gen_name -lib $lib_name -dir . -xsmall -e ncbi -no_is {params.rm_sensitivity_option}
+        RepeatMasker -pa {threads}  $gen_name -lib $lib_name -dir . -xsmall -e {params.rm_engine} -no_is {params.rm_sensitivity_option}
         mv `basename {input.genome_fasta}`.out $out_absolute_path
         mkdir -p RM_files
         mv  `basename {input.genome_fasta}`.* RM_files

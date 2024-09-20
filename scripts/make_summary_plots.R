@@ -97,15 +97,23 @@ dir_100k_TC <- paste0(main_dir,"/TideCluster/default")
 # sort by lengths
 SL <- SL[order(SL, decreasing = TRUE)]
 widths <- SL/sum(SL)*100
-main_tracks <- list(
-  Mobile_elements = import(paste0(dir_100k_RA, "/Mobile_elements_100k.bw")),
-  Low_complexity = import(paste0(dir_100k_RA, "/Low_complexity_100k.bw")),
-  Simple_repeats = import(paste0(dir_100k_RA, "/Simple_repeat_100k.bw")),
-  rDNA = import(paste0(dir_100k_RA, "/rDNA_100k.bw")),
-  Ty1_Copia = import(paste0(dir_100k_RA, "/All_Ty1_Copia_100k.bw")),
-  Ty3_Gypsy = import(paste0(dir_100k_RA, "/All_Ty3_Gypsy_100k.bw")),
-  Tandem_repeats_TC = import(paste0(dir_100k_TC, "/TideCluster_clustering_100k.bw"))
+
+list_of_tracks <-  c(
+  Mobile_elements = paste0(dir_100k_RA, "/Mobile_elements_100k.bw"),
+  Low_complexity = paste0(dir_100k_RA, "/Low_complexity_100k.bw"),
+  Simple_repeats = paste0(dir_100k_RA, "/Simple_repeat_100k.bw"),
+  rDNA = paste0(dir_100k_RA, "/rDNA_100k.bw"),
+  Ty1_Copia = paste0(dir_100k_RA, "/All_Ty1_Copia_100k.bw"),
+  Ty3_Gypsy = paste0(dir_100k_RA, "/All_Ty3_Gypsy_100k.bw"),
+  Tandem_repeats_TC = paste0(dir_100k_TC, "/TideCluster_clustering_100k.bw")
 )
+# load only existing files
+main_tracks <- list()
+for (name in names(list_of_tracks)){
+  if (file.exists(list_of_tracks[[name]])){
+    main_tracks[[name]] <- import(list_of_tracks[[name]])
+  }
+}
 
 
 # conver to data.frame for ggplot, uses seqnames, mean(start+end), score and track name
@@ -117,8 +125,6 @@ for (i in seq_along(main_tracks)){
   main_tracks_df_list[[i]] <- x
 }
 names(main_tracks_df_list) <- names(main_tracks)
-
-
 
 
 # plot lineges
