@@ -38,6 +38,13 @@ rm_sensitivity_option = {
     "" : ""
     }[config["repeatmasker_sensitivity"]]
 
+if "reduce_library" not in config:
+    config["reduce_library"] = True
+else:
+    # check validity of the value
+    if config["reduce_library"] not in [True, False]:
+        raise ValueError("Invalid value for reduce_library_size. Must be either True or False.")
+
 # repeatmasker engine:
 if "repeatmasker_engine" not in config:
     config["repeatmasker_engine"] = "ncbi"
@@ -203,8 +210,6 @@ rule tidecluster_long:
         
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        echo "this is a PATH: $PATH"
-        
         cd $wd
         # check if directory TideCluster_clustering_split_files exists
 
@@ -313,7 +318,6 @@ rule merge_tidecluster_default_and_short:
         F"{config['output_dir']}/TideCluster/TideCluster_clustering_default_and_short_merged.gff3"
     shell:
         """
-        echo $PWD
         cat {input.gff3_default} > {output}
         # replace TRC_ with TRC_S_ in the short monomer clusters to avoid name conflicts
         sed 's/TRC_/TRC_S_/g' {input.gff3_short} >> {output}
@@ -395,6 +399,8 @@ rule reduce_library:
         library=F"{config['output_dir']}/Libraries/combined_library.fasta"
     output:
         library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced.fasta"
+    params:
+        reduce_library_size = config["reduce_library"]
     conda: "envs/tidecluster.yaml"
     threads: workflow.cores
     shell:
@@ -402,6 +408,12 @@ rule reduce_library:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         workdir=$(dirname {output.library_reduced})/workdir
+        # if reduce_library_size is set to False, just copy the input library
+        echo "Reduce library size: {params.reduce_library_size}"
+        if [ "{params.reduce_library_size}" = "False" ]; then
+            cp  {input.library} {output.library_reduced}
+            exit 0
+        fi
         reduce_library_size.R -i {input.library} -o {output.library_reduced} -t {threads} -d $workdir 
         """
 
@@ -475,7 +487,6 @@ rule merge_rm_and_dante:
         # dante_ltr is already used and it contains the necessary tools (rtracklayer and optparse)
     shell:
         """
-        echo $PWD
         # get absolute path of scripts directory
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
@@ -633,7 +644,6 @@ rule calculate_bigwig_density:
         """
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        echo "this is a PATH: $PATH"
         calculate_density.R -b {input[0]} -o {output[0]} -f gff3 --window 10000 -g {input.genome_seqlengths}
         calculate_density.R -b {input[0]} -o {output[1]} -f gff3 --window 100000 -g {input.genome_seqlengths}
         calculate_density.R -b {input[1]} -o {output[2]} -f gff3 --window 10000 -g {input.genome_seqlengths}

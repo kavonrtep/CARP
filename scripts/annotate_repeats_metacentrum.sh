@@ -14,6 +14,7 @@ CUSTOM_DATABASE_TAREAN=""  # optional, keep empty if not used
 CUSTOM_DATABASE_REPEATS="" # optional, keep empty if not used
 OUTPUT_DIR="TODO"
 REPEATMASKER_SENSITIVITY="default"  # default, sensitive, quick
+REDUCE_LIBRARY="True"  # True, False, if not defined, default is True
 # END OF CONFIGURATION
 
 
@@ -58,6 +59,10 @@ fi
 
 if [ -n "$REPEATMASKER_SENSITIVITY" ]; then
     echo "repeatmasker_sensitivity: $REPEATMASKER_SENSITIVITY" >> ${SCRATCHDIR}/config.yaml
+fi
+
+if [ -n "$REDUCE_LIBRARY" ]; then
+    echo "reduce_library: $REDUCE_LIBRARY" >> ${SCRATCHDIR}/config.yaml
 fi
 
 tmpdir=$SCRATCHDIR/tmp

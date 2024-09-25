@@ -23,7 +23,7 @@ calculate_total_coverage <- function (bl_table){
   # do not count overlaps!!!
   # the total length is divided by the length of the query sequence
   region <- rep(FALSE, bl_table$qlen[1])
-  for (i in 1:nrow(bl_table)){
+  for (i in seq_len(nrow(bl_table))){
     # minimum length of region is 50 bp
     if (bl_table$length[i] < 50){
       next
@@ -63,6 +63,7 @@ if (is.null(opt$directory)){
   opt$directory <- tempdir()
 }
 dir.create(opt$directory)
+cap3='cap3'
 # for testing
 if (FALSE){
   opt <- list(
@@ -71,8 +72,8 @@ if (FALSE){
     threads = 4,
     directory = "/mnt/raid/users/petr/workspace/assembly_repeat_annotation_pipeline/output_abblast/Libraries/tmp_dir"
   )
+  cap3 <- "/mnt/raid/opt/tgicl_novy-cap/bin/cap3"
 }
-cap3 <- "/mnt/raid/opt/tgicl_novy-cap/bin/cap3"
 
 suppressPackageStartupMessages({
   library(Biostrings)
@@ -82,11 +83,11 @@ suppressPackageStartupMessages({
 
 s <- readDNAStringSet(opt$input)
 classification <- gsub(".+#", "", names(s))
-unique_classification <- unique(classification)
 # split by classification
 s_split <- split(s, classification)
+unique_classification <- names(s_split)
 
-message("Library loaded:")
+message("Library loaded-:")
 print(s)
 message("Classification of sequences in the library:")
 print(unique_classification)
@@ -135,7 +136,7 @@ if (any(run_blast)){
   cmd_blastn <- paste0("blastn -query ", output_singlets[run_blast],
                        " -db ", output_contigs[run_blast],
                        " -outfmt '6 qseqid sseqid pident length qstart qend evalue bitscore qlen slen qcovs'",
-                       " -evalue 1e-20 -perc_identity 80 -word_size 9 -max_target_seqs 20",
+                       " -evalue 1e-20 -perc_identity 95 -word_size 9 -max_target_seqs 20",
                        " -gapextend 1 -gapopen 2 -reward 1 -penalty -1 ",
                        " -num_threads ", opt$threads,
                        " -out ", blast_output[run_blast])
@@ -147,7 +148,7 @@ if (any(run_blast)){
   message("parsing blastn results")
   for (i in seq_along(qcov)){
     if (any(qcov[[i]]> 0.98)){
-      seq_id <- names(qcov[[i]][qcov[[i]] > 0.95])
+      seq_id <- names(qcov[[i]][qcov[[i]] > 0.98])
       s_name <- gsub(".blastn$", "", names(qcov)[i])
       singlets_filtered <- singlets[[s_name]][!names(singlets[[s_name]]) %in% seq_id]
       s_name_filtered <- paste0(s_name, "_filtered")
@@ -156,8 +157,9 @@ if (any(run_blast)){
   }
   message("Exporting library")
   for (i in seq_along(contigs)){
+    contig_suffix <- paste0("_", i)
     if (length(contigs[[i]]) > 0){
-      names(contigs[[i]]) <- paste0(names(contigs[[i]]), "#",classification[i])
+      names(contigs[[i]]) <- paste0(names(contigs[[i]]), contig_suffix, "#",unique_classification[i])
     }
   }
   new_singlets_files <- output_singlets
@@ -191,5 +193,5 @@ message("Output library size: ", output_size, " bp")
 message("Reduction: ", total_reduction, "%")
 message("-----------------------------------------------")
 
-save.image("tmp.RData")
+
 

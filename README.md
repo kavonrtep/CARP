@@ -19,6 +19,11 @@ genome_fasta: data/CEN6_ver_220406_part.fasta
 output_dir: output
 custom_library: data/pisum_custom_library.fasta
 tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
+# posible values are : sensitive, default, quick,
+# if missing, default is used
+repeatmasker_sensitivity: default
+# perform libary size reduction, possible values are True, False, if missinf True is used
+reduce_library: True  
 ```
 
 Lines specifying `custom_library` and `tandem_repeat_library` are optional. File `custom_library` is 
@@ -37,12 +42,17 @@ Class_I/LTR/Ty1_copia/Ivana
 Class_I/LTR/Ty1_copia/SIRE
 Class_I/LTR/Ty1_copia/TAR
 Class_I/LTR/Ty1_copia/Tork
+Class_I/LTR/Ty1_copia/Alexandra
+Class_I/LTR/Ty1_copia/Bryana
+Class_I/LTR/Ty1_copia/Ferco
 Class_I/LTR/Ty3_gypsy
 Class_I/LTR/Ty3_gypsy/chromovirus
+Class_I/LTR/Ty3_gypsy/chromovirus/Ferney
 Class_I/LTR/Ty3_gypsy/chromovirus/CRM
 Class_I/LTR/Ty3_gypsy/chromovirus/Reina
 Class_I/LTR/Ty3_gypsy/chromovirus/Tekay
 Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA
+Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tatius
 Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Athila
 Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat
 Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Ogre
@@ -78,7 +88,6 @@ Parameter `-t` specifies the number of threads to use. Singularity parameter `-B
 Use [./scripts/annotate_repeats_metacentrum.sh](./scripts/annotate_repeats_metacentrum.sh) script to run the pipeline on metacentrum. Adjust paths to the input files , output directory and singularity image. 
 
  
-
  
 
 
@@ -92,6 +101,6 @@ To build the container, run the following command:
 
 ```bash
 SINGULARITY=`which singularity`
-sudo $SINGULARITY build assembly_repeat_annotation_pipeline_0.6.0.sif Singularity
+sudo $SINGULARITY images/build assembly_repeat_annotation_pipeline_0.7.2.sif Singularity
 ```
 

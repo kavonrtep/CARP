@@ -1,7 +1,9 @@
 genome_fasta: data/CEN6_ver_220406_part.fasta
-output_dir: output
+output_dir: output_no_reduction
 custom_library: data/pisum_custom_library.fasta
 tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
-# posible valuesare : sensitive, default, quick,
+# posible values are : sensitive, default, quick,
 # if missing, default is used
 repeatmasker_sensitivity: default
+# possible values are: True, False, if missing, True is used
+reduce_library: False
