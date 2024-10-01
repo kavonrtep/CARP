@@ -129,7 +129,17 @@ rule dante_ltr:
         """
         
         dante_ltr -o {params.prefix} -s {input.fasta} -g {input.gff} -c {threads} -M 1 
+        # if exit status is 0 and gff3 file was created but html is missing
+        #create an empty file
+        echo "DANTE LTR-RTs finished"
+        if [ -f {output.gff} ]; then
+            if [ ! -f {output.html} ]; then
+                echo "Creating an empty html file"
+                echo "No complete LTR-RTs found" > {output.html}
+            fi
+        fi
         """
+
 
 
 rule make_library_of_ltrs:
@@ -144,8 +154,18 @@ rule make_library_of_ltrs:
     threads: workflow.cores
     shell:
         """
-        dante_ltr_to_library --gff {input.gff3} --output_dir {output.dir} -s {input.genome_fasta} -c {threads}
-        ln -s library/mmseqs2/mmseqs_representative_seq_clean.fasta {output.fasta}
+        # run only gff3 contains some records
+        # (number of lines not starting with # is greater than 1)
+        # but check just first 30 lines
+        if [ $(head -n 30 {input.gff3} | grep -v "^#" | wc -l) -gt 1 ]; then
+            dante_ltr_to_library --gff {input.gff3} --output_dir {output.dir} -s {input.genome_fasta} -c {threads}
+            ln -s library/mmseqs2/mmseqs_representative_seq_clean.fasta {output.fasta}
+        else
+            echo "No LTR-RTs found, creating an empty file"
+            : > {output.fasta}
+            mkdir -p {output.dir}
+        fi
+        
         """
 
 
@@ -431,7 +451,8 @@ rule repeatmasker:
     params:
         rm_dir=directory(F"{config['output_dir']}/RepeatMasker"),
         rm_sensitivity_option=rm_sensitivity_option,
-        rm_engine=rm_engine
+        rm_engine=rm_engine,
+        rm_sensitivity=config["repeatmasker_sensitivity"]
     conda:
         "envs/tidecluster.yaml"
     threads: workflow.cores
@@ -452,14 +473,8 @@ rule repeatmasker:
         cp $genome_absolute_path .
         lib_name=$(basename $library_absolute_path)
         gen_name=$(basename $genome_absolute_path)
-        # run RepeatMasker with all files in the current directory
-        RepeatMasker -pa {threads}  $gen_name -lib $lib_name -dir . -xsmall -e {params.rm_engine} -no_is {params.rm_sensitivity_option}
-        mv `basename {input.genome_fasta}`.out $out_absolute_path
-        mkdir -p RM_files
-        mv  `basename {input.genome_fasta}`.* RM_files
-        # remove the library and genome files
-        rm $lib_name
-        rm $gen_name
+        # user repeatmasker wrapper
+        repeatmasker_wrapper.py -f $gen_name -l $lib_name -o $out_absolute_path  -s {params.rm_sensitivity} -p {threads} -d workdir 
         clean_rm_output.R $out_absolute_path $gff_absolute_path
         """
 

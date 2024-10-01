@@ -101,6 +101,14 @@ To build the container, run the following command:
 
 ```bash
 SINGULARITY=`which singularity`
-sudo $SINGULARITY images/build assembly_repeat_annotation_pipeline_0.7.2.sif Singularity
+sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.6.0.sif Singularity
 ```
 
+```bash
+```
+
+
+## Changelog:
+- v 0.5.1 - graphical output to PDF added
+- v 0.5.2 - RepeatMasker sensitivity can be set
+- v 0.6.0 - REXdb Viridiplante v4.0, library size reduction added
