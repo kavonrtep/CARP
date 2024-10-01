@@ -64,6 +64,8 @@ rDNA_45S/ITS1
     parser.add_argument('-c', '--config', required=True, help='config file')
     parser.add_argument('-t', '--threads', required=False, default=2, type=int,
                         help='Number of threads to use')
+    parser.add_argument('-S','--snakemake_args', required=False, default="",
+                        help='Additional snakemake arguments')
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -125,7 +127,8 @@ rDNA_45S/ITS1
 
     cmd = (F"snakemake --snakefile {script_dir}/Snakefile --configfile {args.config} "
            F"--cores {args.threads} --use-conda --conda-prefix {CONDA_ENVS_PATH} "
-           F"--conda-frontend mamba --show-failed-logs")
+           F"--conda-frontend mamba --show-failed-logs"
+           F" {args.snakemake_args}")
 
     # append cache dir to other environment variables
     env = os.environ.copy()

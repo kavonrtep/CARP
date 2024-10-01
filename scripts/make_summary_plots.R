@@ -65,8 +65,7 @@ plot_tracks <- function(main_tracks, SL,
       }
     }
     # add labels on side - track names
-    text(max(SN_offsets), yoffest + 0.5, tt, pos = 4)
-
+    text(max(SN_offsets), yoffest + 0, paste(tt,"\n "), pos = 4)
     yoffest <- yoffest + 1.1 * ymax
   }
 
@@ -83,7 +82,6 @@ plot_tracks <- function(main_tracks, SL,
   # no lines if length os SL is 1
   if (length(SL) > 1){
     for (i in 1:(length(SL)-1)){
-      print(i)
       segments(SN_offsets[i], 0, SN_offsets[i], length(main_tracks)*1.1, col = "grey")
     }
   }

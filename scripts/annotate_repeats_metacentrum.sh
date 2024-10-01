@@ -95,6 +95,7 @@ rsync -avt $0 $OUTPUT_DIR/pbs_script.sh
 # Export environment variables to the output directory
 env > $OUTPUT_DIR/env.sh
 
+cp -r .snakemake $OUTPUT_DIR/
 
 # clean up scratch TODO after testing
 
