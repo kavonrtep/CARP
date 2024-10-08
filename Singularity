@@ -8,7 +8,7 @@ From: continuumio/miniconda3
     export CONDARC=/opt/conda/config/.condarc
 
     # Install Mamba
-    conda install -c conda-forge mamba python=3.11
+    conda install -c conda-forge mamba=1.5.10 python=3.11
 
     # Install Snakemake
     mamba install -c bioconda -c conda-forge snakemake=8.12.0
@@ -32,6 +32,7 @@ From: continuumio/miniconda3
     mkdir -p /opt/pipeline/data
     touch /opt/pipeline/data/CEN6_ver_220406_part.fasta
     touch /opt/pipeline/data/pisum_custom_library.fasta
+
     touch /opt/pipeline/data/FabTR_all_sequences_210901.db.RM_format.fasta
 
     snakemake --use-conda --conda-prefix /opt/conda/envs --conda-create-envs-only --conda-frontend mamba --cores 4 --configfile /opt/pipeline/config.yaml

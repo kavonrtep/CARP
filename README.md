@@ -12,7 +12,7 @@ conda activate singularity3
 ## Quick Start
 Singularity image (.sif file) can be downloaded from https://github.com/kavonrtep/assembly_repeat_annotation_pipeline/releases
 
-Format of config.yaml file is as follows:
+Format of `config.yaml` file is as follows:
 
 ```yaml
 genome_fasta: data/CEN6_ver_220406_part.fasta
@@ -22,7 +22,7 @@ tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
 # posible values are : sensitive, default, quick,
 # if missing, default is used
 repeatmasker_sensitivity: default
-# perform libary size reduction, possible values are True, False, if missinf True is used
+# perform library size reduction, possible values are True, False, if missinf True is used
 reduce_library: True  
 ```
 
@@ -111,4 +111,6 @@ sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.
 ## Changelog:
 - v 0.5.1 - graphical output to PDF added
 - v 0.5.2 - RepeatMasker sensitivity can be set
-- v 0.6.0 - REXdb Viridiplante v4.0, library size reduction added
+- v 0.6.0 - REXdb Viridiplante v4.0, library size reduction added, RepeatMasker parallelization added, missing full LTR-RT handling added
+- 
+

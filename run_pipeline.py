@@ -64,8 +64,16 @@ rDNA_45S/ITS1
     parser.add_argument('-c', '--config', required=True, help='config file')
     parser.add_argument('-t', '--threads', required=False, default=2, type=int,
                         help='Number of threads to use')
-    parser.add_argument('-S','--snakemake_args', required=False, default="",
-                        help='Additional snakemake arguments')
+    parser.add_argument(
+        '-S', '--snakemake_args', type=str, nargs='?', required=False, default="",
+        help='Additional snakemake arguments, Usage examples: '
+             '-S="--dry-run"'
+             '-S="--dry-run --reason"'
+             'Note: Do not use options --use-conda, --conda-prefix,'
+             '--conda-frontend, --show-failed-logs, --cores, --snakefile, --configfile'
+             'as they are set by the script.'
+        )
+
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.realpath(__file__))
