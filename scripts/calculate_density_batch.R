@@ -81,12 +81,19 @@ for (f in files) {
     print(paste("No regions found in the input file:", f))
     next
   }
+
+  # add missing seqlevels to g
   chr_size <- chr_size_all[seqlevels(g)]
+  not_used <- setdiff(names(chr_size_all), names(chr_size))
+  chr_size_not_used <- chr_size_all[not_used]
+  seqlevels(g) <- c(seqlevels(g), names(chr_size_not_used))
+  chr_size_in_order <- chr_size_all[seqlevels(g)]
+
   #d10k <- get_density(g, chr_size, 10000)
-  d10k_smooth <- get_density2(g, chr_size, N_for_mean = 10, step_size=1000)
+  d10k_smooth <- get_density2(g, chr_size_in_order, N_for_mean = 10, step_size=1000)
   export(d10k_smooth, base_bw10k, format="bigwig")
   #d100k <- get_density(g, chr_size, 100000)
-  d100k_smooth <- get_density2(g, chr_size, N_for_mean = 10, step_size=10000)
+  d100k_smooth <- get_density2(g, chr_size_in_order, N_for_mean = 10, step_size=10000)
   export(d100k_smooth, base_bw100k, format="bigwig")
 }
 

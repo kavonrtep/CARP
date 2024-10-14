@@ -80,11 +80,17 @@ if (opt$merge){
   g <- reduce(g)
 }
 print(opt)
-chr_size <- readRDS(opt$genome)
-# exclude seqlevels not included in g
-chr_size <- chr_size[seqlevels(g)]
+chr_size_all <- readRDS(opt$genome)
+
+# add missing seqlevels to g
+chr_size <- chr_size_all[seqlevels(g)]
+not_used <- setdiff(names(chr_size_all), names(chr_size))
+chr_size_not_used <- chr_size_all[not_used]
+seqlevels(g) <- c(seqlevels(g), names(chr_size_not_used))
+chr_size_in_order <- chr_size_all[seqlevels(g)]
+
 
 window_size <- opt$window/10 # 10 bins per window
-d <- get_density2(g, chr_size, N_for_mean = 10, step_size = window_size)
+d <- get_density2(g, chr_size_in_order, N_for_mean = 10, step_size = window_size)
 
 export(d, opt$output, format="bigwig")
