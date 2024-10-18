@@ -128,7 +128,7 @@ rule dante_ltr:
     shell:
         """
         
-        dante_ltr -o {params.prefix} -s {input.fasta} -g {input.gff} -c {threads} -M 1 
+        dante_ltr -o {params.prefix} -s {input.fasta} -g {input.gff} -c {threads} -M 1 -S 50000000
         # if exit status is 0 and gff3 file was created but html is missing
         #create an empty file
         echo "DANTE LTR-RTs finished"
