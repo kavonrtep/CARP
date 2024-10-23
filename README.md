@@ -101,7 +101,7 @@ To build the container, run the following command:
 
 ```bash
 SINGULARITY=`which singularity`
-sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.6.3.sif Singularity
+sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.6.4.sif Singularity
 ```
 
 ```bash
@@ -115,3 +115,4 @@ sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.
 - v 0.6.1 DANTE_LTR update to 0.4.0.3 (bugfix)
 - v 0.6.2 bugfix in bigwig calculation
 - v 0.6.3 dante update to 0.2.5 - bugfix
+- v 0.6.4 dante_ltr runs on smaller chunks (50000000) -> better memory usage

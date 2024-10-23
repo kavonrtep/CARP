@@ -1,6 +1,7 @@
 #!/bin/bash
 #PBS -N annotate_repeats
 #PBS -l select=1:ncpus=50:mem=512gb:scratch_local=300gb
+#PBS -q elixircz@pbs-m1.metacentrum.cz
 #PBS -l walltime=172:00:00
 #PBS -j oe
 #PBS -m bae
@@ -74,29 +75,23 @@ export TMPDIR=$tmpdir
 singularity run -B $SCRATCHDIR --env TMPDIR=$tmpdir $SINGULARITY_IMAGE_BASE_NAME  -c config.yaml -t $PBS_NCPUS
 
 
-# copy results back to the $OUTPUT_DIR
-mkdir -p $OUTPUT_DIR
-rsync -avt $SCRATCHDIR/output/ $OUTPUT_DIR/
-
-# copy also databases and genome to output
-rsync -avt $SCRATCHDIR/genome.fasta $OUTPUT_DIR/
+cp $SCRATCHDIR/genome.fasta $SCRATCHDIR/output
+cp $SCRATCHDIR/config.yaml $SCRATCHDIR/output
 if [ -n "$CUSTOM_DATABASE_TAREAN" ]; then
-    rsync -avt $SCRATCHDIR/custom_database_tarean.fasta $OUTPUT_DIR/
+  cp $SCRATCHDIR/custom_database_tarean.fasta $SCRATCHDIR/output
 fi
 if [ -n "$CUSTOM_DATABASE_REPEATS" ]; then
-    rsync -avt $SCRATCHDIR/custom_database_repeats.fasta $OUTPUT_DIR/
+  cp $SCRATCHDIR/custom_database_repeats.fasta $SCRATCHDIR/output
 fi
+cp $0 $SCRATCHDIR/output/pbs_script.sh
+cp -r .snakemake $SCRATCHDIR/output
+env > $SCRATCHDIR/output/env.sh
 
-rsync -avt $SCRATCHDIR/config.yaml $OUTPUT_DIR/
+cp /var/spool/pbs/spool/${PBS_JOBID}.OU re_output/pbs_log.txt
 
-# Copy the PBS script itself to the OUTPUT_DIR
-rsync -avt $0 $OUTPUT_DIR/pbs_script.sh
+zip -y -fz -r $SCRATCHDIR/output.zip output
+mkdir -p $OUTPUT_DIR
+cp $SCRATCHDIR/output.zip $OUTPUT_DIR/
 
-# Export environment variables to the output directory
-env > $OUTPUT_DIR/env.sh
-
-cp -r .snakemake $OUTPUT_DIR/
-
-# clean up scratch TODO after testing
 
 
