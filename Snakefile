@@ -500,8 +500,10 @@ rule merge_rm_and_dante:
     conda:
         "envs/tidecluster.yaml"
         # dante_ltr is already used and it contains the necessary tools (rtracklayer and optparse)
+    threads: workflow.cores
     shell:
         """
+        export CPU_COUNT={threads}
         # get absolute path of scripts directory
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH

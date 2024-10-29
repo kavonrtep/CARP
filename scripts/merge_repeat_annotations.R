@@ -29,7 +29,11 @@ gff_cleanup <- function(gff){
   ## remove overlapin annotation track - assign new annot
   gff_disjoin <- disjoin(gff, with.revmap=TRUE)
   ## append annotation:
-  # get number of cores
+  #  get number of cores from environment variable CPU_COUNT
+  num_cores <- as.integer(Sys.getenv("CPU_COUNT"))
+  if (is.na(num_cores)){
+    num_cores <- detectCores()
+  }
   num_cores <- detectCores()
   gff_names <- mclapply(as.list(gff_disjoin$revmap), FUN = function(x)gff$Name[x], mc.cores = round(num_cores *0.8))
   gff_strands <- mclapply(as.list(gff_disjoin$revmap), FUN = function(x)strand(gff[x]), mc.cores = round(num_cores *0.8))
