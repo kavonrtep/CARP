@@ -16,12 +16,9 @@ get_density2 <- function(x, chr_size=NULL, N_for_mean = 10,step_size=100000){
   cvg <- coverage(x)
   bins <- tileGenome(chr_size, tilewidth = step_size)
   d <- binnedAverage(unlist(bins), cvg, "score")
-  # calculate sliding window mean for N_for_mean bins
-
-  # split by chromosome
-  d_part <- split(d, ~seqnames)
-  d_part <- lapply(d_part, function(x)smooth_score(x, N_for_mean))
-  d <- unlist(GRangesList(d_part))
+  s_part <- split(d$score, seqnames(d))
+  s_part_smooth <- lapply(s_part, function(x)smooth_score2(x, N_for_mean))
+  d$score <- unlist(s_part_smooth)
   d
 }
 
@@ -35,6 +32,14 @@ smooth_score <- function(x, N_for_mean = 10){
   x
 }
 
+smooth_score2 <- function(x, N_for_mean = 10){
+  # extend the score in each direction by N_for_mean-1 zeros
+  sc <- c(rep(0, N_for_mean-1), x, rep(0, N_for_mean-1))
+  sc_smooth <- filter(sc, rep(1/N_for_mean, N_for_mean), sides=2)
+  # remove the first N_for_mean-1 and the last N_for_mean-1 elements
+  out <- sc_smooth[(N_for_mean):(length(sc_smooth)-N_for_mean+1)]
+  out
+}
 
 
 max_chr_length <- function(g){
