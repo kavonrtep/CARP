@@ -1,5 +1,21 @@
 # Assembly Repeat Annotation Pipeline
 
+The Assembly annotation pipeline is a comprehensive genome annotation workflow that
+integrates multiple specialized tools to identify and classify various types of repetitive
+elements in genomic sequences. 
+
+- The pipeline uses DANTE/DANTE_LTR to identify intact
+LTR retrotransposons.
+- TideCluster is employed to identify tandem repeats, with separate processes
+for default-length and short monomer repeats.
+- The pipeline then creates custom libraries of repeat sequences, including those from LTR
+retrotransposons and Tandem repeats. This library can be supplements with user-provided
+custom repeat databases.
+- After building these repeat libraries, the pipeline uses RepeatMasker to annotate the
+genome comprehensively. 
+- The workflow produces detailed GFF3 annotation files for
+different repeat classes (mobile elements, simple repeats, low complexity regions, rDNA),
+density visualizations as bigWig files, and summary statistics and plots.
 
 ## Requirements 
 Singularity is required to use the container. Singularity can be installed using conda environment. 
@@ -26,10 +42,11 @@ repeatmasker_sensitivity: default
 reduce_library: True  
 ```
 
-Lines specifying `custom_library` and `tandem_repeat_library` are optional. File `custom_library` is 
-used by RepeatMasker fo similarity based annotation. Sequences must be as FASTA with 
-sequence IDs in format `>repeatname#class/subclass`
-Classification categories are: 
+The pipeline allows to provide the custome repeat library by specifying
+the `custom_library` parameter. This parameter is optional.
+This library is used by RepeatMasker for similarity-based annotation. The sequences must
+be in FASTA format with sequence IDs in the format `>repeatname#class/subclass`. The
+classification categories used by the pipeline are listed below.
 
 ```text
 Class_I/LINE
@@ -70,9 +87,16 @@ rDNA_45S/25S
 rDNA_45S/5.8S
 rDNA_5S/5S
 ```
-It is possible to include additional categories to repeat library. Note that `Subclass_1` repeats are used to clean `Class_I/LTR` library which is built by DANTE_LTR thus it is critical to use correct codes for `Class_II/Subclass_1` mobile elements in repeat library.
 
-File `custom_library` is used by TideCluster to annotate discovered tandem repeats based
+An important feature of pipeline is the filtering process where
+`Class_II/Subclass_1` repeats from the custom library are used to screen the LTR
+retrotransposon library created by DANTE_LTR. This critical step identifies potentially
+problematic Class_I sequences - if a `Class_I` sequence shows similarity to
+`Class_II/Subclass_1` elements, it likely represents an LTR retrotransposon that contains
+inserted DNA transposons. Such composite elements are removed from the library to prevent
+incorrect or ambiguous annotations when RepeatMasker is applied later in the pipeline.
+
+File `tandem_repeat_library` (optional) is used by TideCluster to annotate discovered tandem repeats based
 on the similarity. Format is the same as above repeat database. E.g. 
 `>sequence_id/Satellite/PisTR-B`
 
@@ -86,9 +110,6 @@ Parameter `-t` specifies the number of threads to use. Singularity parameter `-B
 
 ## Running pipeline on metacentrum
 Use [./scripts/annotate_repeats_metacentrum.sh](./scripts/annotate_repeats_metacentrum.sh) script to run the pipeline on metacentrum. Adjust paths to the input files , output directory and singularity image. 
-
- 
- 
 
 
 
@@ -116,3 +137,6 @@ sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.
 - v 0.6.2 bugfix in bigwig calculation
 - v 0.6.3 dante update to 0.2.5 - bugfix
 - v 0.6.4 dante_ltr runs on smaller chunks (50000000) -> better memory usage
+- v 0.6.5 bugfix  in gff3 merging
+- v 0.6.6 DANTE_LTR updated to 0.6.0.4, tidecluster updated to 1.6
+- v 0.6.7 more efficient calculation of bigwig files
