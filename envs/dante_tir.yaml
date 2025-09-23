@@ -1,0 +1,7 @@
+name: dante_tir
+channels:
+  - conda-forge
+  - bioconda
+  - petrnovak
+dependencies:
+  - dante_tir=0.2.1

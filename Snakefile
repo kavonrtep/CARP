@@ -5,7 +5,7 @@ def create_dirs(*dirs):
         if not os.path.exists(d):
             os.makedirs(d)
 print(config)
-subdirs = [config['output_dir']+"/"+i for i in ['DANTE', 'DANTE_LTR',
+subdirs = [config['output_dir']+"/"+i for i in ['DANTE', 'DANTE_TIR', 'DANTE_LTR',
                                                 'TideCluster/default',
                                                 'TideCluster/short_monomer',
                                                 'Libraries', 'RepeatMasker']]
@@ -57,6 +57,7 @@ rule all:
     input:
         F"{config['output_dir']}/DANTE/DANTE.gff3",
         F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
+        F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
         F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
         F"{config['output_dir']}/DANTE_LTR/LTR_RTs_library.fasta",
         F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
@@ -94,7 +95,47 @@ rule dante:
         """
         dir_out=$(dirname {output})
         gff_out=$(basename {output})
-        dante -q {input} -o {output} -c {threads} 
+        dante -q {input} -o {output} -c {threads}
+        """
+
+rule dante_tir:
+    input:
+        gff=F"{config['output_dir']}/DANTE/DANTE.gff3",
+        fasta=config["genome_fasta"]
+    output:
+        checkpoint=F"{config['output_dir']}/DANTE_TIR/.done",
+        gff=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
+        fasta=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.fasta",
+        summary=F"{config['output_dir']}/DANTE_TIR/TIR_classification_summary.txt",
+        dante_tir_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_min3.fasta"
+    params:
+        output_dir=F"{config['output_dir']}/DANTE_TIR"
+    conda:
+        "envs/dante_tir.yaml"
+    threads: workflow.cores
+    shell:
+        """
+        # Run dante_tir.py and check exit status
+        if dante_tir.py -g {input.gff} -f {input.fasta} -o {params.output_dir} -c {threads}; then
+            # dante_tir.py succeeded
+            echo "DANTE_TIR completed successfully"
+
+            # Check if DANTE_TIR_final.fasta exists and is not empty
+            if [ -s {params.output_dir}/DANTE_TIR_final.fasta ]; then
+                echo "Running dante_tir_summary.R on non-empty results"
+                dante_tir_summary.R -g {params.output_dir}/DANTE_TIR_final.gff3 -f {input.fasta} -o {params.output_dir}
+            else
+                echo "No TIR elements found - skipping summary step"
+            fi
+        else
+            echo "DANTE_TIR failed with non-zero exit status"
+        fi
+
+        # Ensure all expected output files exist (create empty ones if needed)
+        touch {output.gff} {output.fasta} {output.summary}
+
+        # Create checkpoint file to indicate completion
+        touch {output.checkpoint}
         """
 
 rule filter_dante:
@@ -348,16 +389,24 @@ rule merge_tidecluster_default_and_short:
 rule make_subclass_2_library:
     params:
         library=config.get("custom_library", "")
+    input:
+        dante_tir_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_min3.fasta",
     output:
         library=F"{config['output_dir']}/Libraries/class_ii_library.fasta"
     run:
         if params.library:
             print("Custom library provided, filtering FASTA.")
             filter_fasta(params.library, output.library, "Class_II/Subclass_1")
+            # add dante_tir sequences to the library
+            with open(output.library, "a") as f_out:
+                with open(input.dante_tir_lib, "r") as f_in:
+                    f_out.write(f_in.read())
         else:
-            print("No custom library provided, creating an empty file.")
+            print("No custom library provided, using only DANTE_TIR sequences.")
             with open(output.library, "w") as f:
                 f.write("")
+                with open(input.dante_tir_lib, "r") as f_in:
+                    f.write(f_in.read())
 
 
 
@@ -600,6 +649,7 @@ rule add_top_level_outputs:
     input:
         dante=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
         dante_ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
+        dante_tir=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
         sat_tc=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
         sat_rm=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3",
         simple_repeats=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3/Simple_repeats.gff3",
@@ -612,6 +662,7 @@ rule add_top_level_outputs:
     output:
         dante=F"{config['output_dir']}/DANTE_filtered.gff3",
         dante_ltr=F"{config['output_dir']}/DANTE_LTR.gff3",
+        dante_tir=F"{config['output_dir']}/DANTE_TIR.gff3",
         sat_tc=F"{config['output_dir']}/Tandem_repeats_TideCluster.gff3",
         sat_rm=F"{config['output_dir']}/Tandem_repeats_RepeatMasker.gff3",
         simple_repeats=F"{config['output_dir']}/Simple_repeats_RepeatMasker.gff3",
@@ -628,6 +679,7 @@ rule add_top_level_outputs:
         # make symbolic links to all the outputs
         ln -fs -r {input.dante} {output.dante}
         ln -fs -r {input.dante_ltr} {output.dante_ltr}
+        ln -fs -r {input.dante_tir} {output.dante_tir}
         ln -fs -r {input.sat_tc} {output.sat_tc}
         ln -fs -r {input.sat_rm} {output.sat_rm}
         ln -fs -r {input.simple_repeats} {output.simple_repeats}

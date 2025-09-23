@@ -6,12 +6,12 @@ From: continuumio/miniconda3
     apt-get install -y libxml2 libxml2-dev
     mkdir -p /opt/conda/config
     export CONDARC=/opt/conda/config/.condarc
+    export CONDA_PLUGINS_AUTO_ACCEPT_TOS=yes
 
-    # Install Mamba
-    conda install -c conda-forge mamba=1.5.10 python=3.11
+    conda install python=3.11
 
     # Install Snakemake
-    mamba install -c bioconda -c conda-forge snakemake=8.12.0
+    conda install -c bioconda -c conda-forge snakemake=8.12.0
     # mamba install h5py
     # configure strict channel priority
     conda config --set channel_priority strict
@@ -35,10 +35,10 @@ From: continuumio/miniconda3
 
     touch /opt/pipeline/data/FabTR_all_sequences_210901.db.RM_format.fasta
 
-    snakemake --use-conda --conda-prefix /opt/conda/envs --conda-create-envs-only --conda-frontend mamba --cores 4 --configfile /opt/pipeline/config.yaml
-    snakemake install_wublast --conda-prefix /opt/conda/envs --snakefile Snakefile_install_dependencies --cores 1 --use-conda --conda-frontend mamba
+    snakemake --use-conda --conda-prefix /opt/conda/envs --conda-create-envs-only --cores 4 --configfile /opt/pipeline/config.yaml --conda-frontend conda
+    snakemake install_wublast --conda-prefix /opt/conda/envs --snakefile Snakefile_install_dependencies --cores 1 --use-conda --conda-frontend conda
     # Clean up
-    mamba clean --all
+    conda clean --all
 
     # make root accessible for everyone
     chmod -R 777 /root
