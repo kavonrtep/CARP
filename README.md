@@ -140,3 +140,4 @@ sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.
 - v 0.6.5 bugfix  in gff3 merging
 - v 0.6.6 DANTE_LTR updated to 0.6.0.4, tidecluster updated to 1.6
 - v 0.6.7 more efficient calculation of bigwig files
+- v 0.7.1 DANTE_TIR added
