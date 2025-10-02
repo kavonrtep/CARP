@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse, sys
 import parasail
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def read_first_fasta_seq(path):
     seq, seen = [], False
@@ -15,6 +16,48 @@ def read_first_fasta_seq(path):
     if not s:
         raise SystemExit(f"No sequence found in {path}")
     return s
+
+
+def read_fasta_sequences(path):
+    """
+    Read all sequences from a FASTA file.
+
+    Parameters
+    ----------
+    path : str
+        Path to FASTA file
+
+    Returns
+    -------
+    list[tuple]
+        List of (sequence_id, sequence) tuples
+    """
+    sequences = []
+    current_id = None
+    current_seq = []
+
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if line.startswith('>'):
+                # Save previous sequence if exists
+                if current_id is not None and current_seq:
+                    sequences.append((current_id, ''.join(current_seq).upper()))
+
+                # Start new sequence
+                current_id = line[1:].split()[0]  # Take only the first part of header
+                current_seq = []
+            else:
+                current_seq.append(line)
+
+        # Save last sequence
+        if current_id is not None and current_seq:
+            sequences.append((current_id, ''.join(current_seq).upper()))
+
+    if not sequences:
+        raise SystemExit(f"No sequences found in {path}")
+
+    return sequences
 
 def pick_func(end_anchor: str):
     # Fix 5′ (left) on both -> free 3′ ends on both
@@ -166,6 +209,8 @@ def per_column_scores_alt(
         Gap opening penalty (default 14).
     gap_extend : int
         Gap extension penalty (default 3).
+    cumulative : bool, optional
+        If True, return cumulative scores instead of per-column scores (default False).
 
     Returns
     -------
@@ -341,30 +386,32 @@ def extract_optimal_alignment(result, scores, end="5"):
     }
 
 
+def run_alignment_comparison(seq1_id, seq1, seq2_id, seq2, args):
+    """
+    Run alignment between two sequences and return results.
 
-def main():
-    ap = argparse.ArgumentParser(
-        description="Anchored semi-global alignment with Parasail (DNA). "
-                    "Fix BOTH sequences at 5′ or 3′; the opposite ends are free."
-    )
-    ap.add_argument("fasta1")
-    ap.add_argument("fasta2")
-    ap.add_argument("--end", choices=["5","3"], required=True,
-                    help="Which end is FIXED for BOTH sequences (5 or 3).")
-    ap.add_argument("--open", type=int, default=12, help="Gap open (default 12)")
-    ap.add_argument("--extend", type=int, default=3, help="Gap extend (default 2)")
-    ap.add_argument("--match", type=int, default=2, help="Match score (default 2)")
-    ap.add_argument("--mismatch", type=int, default=-2, help="Mismatch score (default -4)")
-    ap.add_argument("--show-aln", action="store_true", help="Print only the aligned core strings")
-    args = ap.parse_args()
+    Parameters
+    ----------
+    seq1_id : str
+        ID of first sequence
+    seq1 : str
+        First sequence
+    seq2_id : str
+        ID of second sequence
+    seq2 : str
+        Second sequence
+    args : argparse.Namespace
+        Command line arguments
 
-    s1 = read_first_fasta_seq(args.fasta1)
-    s2 = read_first_fasta_seq(args.fasta2)
-
+    Returns
+    -------
+    dict
+        Alignment results including optimal alignment data
+    """
     func = pick_func(args.end)
     mat = make_matrix(args.match, args.mismatch)
 
-    res = func(s1, s2, args.open, args.extend, mat)
+    res = func(seq1, seq2, args.open, args.extend, mat)
 
     scores = per_column_scores_alt(
         res,
@@ -374,65 +421,168 @@ def main():
         gap_extend=args.extend,
         cumulative=False
     )
-    print("Cumulative scores (alt method):")
-    print(scores)
+
     result_data = extract_optimal_alignment(res, scores, args.end)
-    print(f"Max cumulative score {result_data['max_score']} at position {result_data['max_pos']}")
-    print("Trimmed alignment to max score position:")
-    print(result_data['trimmed_query'])
-    print(result_data['trimmed_ref'])
-    print("Degapped trimmed sequences:")
-    print(f">query_len={result_data['degapped_query_len']}")
-    print(result_data['degapped_query'])
-    print(f">ref_len={result_data['degapped_ref_len']}")
-    print(result_data['degapped_ref'])
+
+    # Add sequence IDs and original alignment score
+    result_data['query_id'] = seq1_id
+    result_data['ref_id'] = seq2_id
+    result_data['parasail_score'] = res.score
+    result_data['query_len'] = len(seq1)
+    result_data['ref_len'] = len(seq2)
+
+    return result_data
 
 
-    exit()
-    cumulative_scores = [sum(scores[:i+1]) for i in range(len(scores))]
-    print("Cumulative scores:")
-    print(cumulative_scores)
+def generate_sequence_pairs(sequences):
+    """
+    Generate all unique sequence pairs for comparison.
 
-    print("Per-column scores:")
+    Parameters
+    ----------
+    sequences : list[tuple]
+        List of (sequence_id, sequence) tuples
+
+    Yields
+    ------
+    tuple
+        (i, j, seq1_id, seq1, seq2_id, seq2) for each unique pair
+    """
+    for i in range(len(sequences)):
+        for j in range(i + 1, len(sequences)):
+            seq1_id, seq1 = sequences[i]
+            seq2_id, seq2 = sequences[j]
+            yield (i, j, seq1_id, seq1, seq2_id, seq2)
+
+
+def run_single_comparison(pair_data, args):
+    """
+    Worker function for running a single pairwise comparison.
+
+    Parameters
+    ----------
+    pair_data : tuple
+        (i, j, seq1_id, seq1, seq2_id, seq2) from generate_sequence_pairs
+    args : argparse.Namespace
+        Command line arguments
+
+    Returns
+    -------
+    dict or None
+        Alignment result if above threshold, None otherwise
+    """
+    i, j, seq1_id, seq1, seq2_id, seq2 = pair_data
+
+    # Run alignment
+    result = run_alignment_comparison(seq1_id, seq1, seq2_id, seq2, args)
+
+    # Apply score threshold filter
+    if result['max_score'] >= args.score_threshold:
+        return result
+    else:
+        return None
+
+
+def write_results_table(results, output_file):
+    """
+    Write alignment results to tab-delimited file.
+
+    Parameters
+    ----------
+    results : list[dict]
+        List of alignment result dictionaries
+    output_file : str
+        Output file path
+    """
+    if not results:
+        return
+
+    # Define column order
+    columns = [
+        'query_id', 'ref_id', 'query_len', 'ref_len',
+        'parasail_score', 'max_score', 'max_pos', 'end_mode',
+        'degapped_query_len', 'degapped_ref_len',
+        'trimmed_query', 'trimmed_ref',
+        'degapped_query', 'degapped_ref'
+    ]
+
+    with open(output_file, 'w') as f:
+        # Write header
+        f.write('\t'.join(columns) + '\n')
+
+        # Write data rows
+        for result in results:
+            row = [str(result.get(col, '')) for col in columns]
+            f.write('\t'.join(row) + '\n')
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="All-to-all anchored semi-global alignment with Parasail (DNA). "
+                    "Fix BOTH sequences at 5′ or 3′; the opposite ends are free."
+    )
+    ap.add_argument("fasta", help="Input FASTA file with multiple sequences")
+    ap.add_argument("-o", "--output", required=True,
+                    help="Output tab-delimited file with alignment results")
+    ap.add_argument("--end", choices=["5","3"], required=True,
+                    help="Which end is FIXED for BOTH sequences (5 or 3).")
+    ap.add_argument("--open", type=int, default=12, help="Gap open (default 12)")
+    ap.add_argument("--extend", type=int, default=3, help="Gap extend (default 3)")
+    ap.add_argument("--match", type=int, default=2, help="Match score (default 2)")
+    ap.add_argument("--mismatch", type=int, default=-2, help="Mismatch score (default -2)")
+    ap.add_argument("--score-threshold", type=int, default=20,
+                    help="Minimum max_score for alignment to be reported (default 20)")
+    ap.add_argument("-t", "--threads", type=int, default=1,
+                    help="Number of threads for parallel processing (default 1)")
+    args = ap.parse_args()
     print(args)
-    print(scores)
-    print(len(scores), "columns, total =", sum(scores))
 
-    if res is None or res.cigar is None:
-        sys.exit("Parasail returned no traceback/CIGAR; check inputs and parameters.")
+    # Read all sequences from FASTA file
+    print(f"Reading sequences from {args.fasta}...")
+    sequences = read_fasta_sequences(args.fasta)
+    print(f"Found {len(sequences)} sequences")
 
-    cig = res.cigar
-    cigar_str = cig.decode.decode()  # SAM-style (M/=/X/I/D etc.)
+    # Perform all-to-all comparisons
+    results = []
+    total_comparisons = len(sequences) * (len(sequences) - 1) // 2
 
+    print(f"Performing {total_comparisons} pairwise alignments using {args.threads} threads...")
 
+    if args.threads == 1:
+        # Serial processing for single thread
+        comparison_count = 0
+        for pair_data in generate_sequence_pairs(sequences):
+            comparison_count += 1
+            if comparison_count % 100 == 0 or comparison_count == total_comparisons:
+                print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
 
-    q_beg, r_beg = cig.beg_query, cig.beg_ref          # 0-based inclusive
-    q_end, r_end = res.end_query, res.end_ref          # 0-based inclusive
+            result = run_single_comparison(pair_data, args)
+            if result is not None:
+                results.append(result)
+    else:
+        # Parallel processing
+        comparison_count = 0
+        with ThreadPoolExecutor(max_workers=args.threads) as executor:
+            # Submit all tasks
+            future_to_pair = {executor.submit(run_single_comparison, pair_data, args): pair_data
+                            for pair_data in generate_sequence_pairs(sequences)}
 
-    # Build soft-clipped CIGAR for the query so you can see hidden flanks
-    cigar_q_soft = softclip_cigar(cigar_str, q_beg, q_end, len(s1))
+            # Collect results as they complete
+            for future in as_completed(future_to_pair):
+                comparison_count += 1
+                if comparison_count % 100 == 0 or comparison_count == total_comparisons:
+                    print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
 
-    print("== Anchored semi-global alignment ==")
-    print(f"Mode: end {args.end}′ fixed on BOTH "
-          f"({'sg_qe_de' if args.end=='5' else 'sg_qb_db'})")  # :contentReference[oaicite:4]{index=4}
-    print(f"Score: {res.score}")
-    print(f"Query coords (1-based): {q_beg+1}-{q_end+1} / len={len(s1)}")
-    print(f"Target coords (1-based): {r_beg+1}-{r_end+1} / len={len(s2)}")
-    print(f"Query CIGAR (with soft-clips): {cigar_q_soft}")
+                result = future.result()
+                if result is not None:
+                    results.append(result)
 
-    if args.show_aln:
-        core_q = s1[q_beg:q_end+1]
-        core_r = s2[r_beg:r_end+1]
-        tb = res.traceback  # only the aligned core; no unaligned flanks
-        print("\nAligned core (no flanks):")
-        print(tb.query)  # aligned core with gaps
-        print(tb.comp)
-        print(tb.ref)
-        print("\nCore slices (raw, ungapped):")
-        print(">query_core")
-        print(core_q)
-        print(">target_core")
-        print(core_r)
+    # Write results to output file
+    print(f"Writing results to {args.output}...")
+    write_results_table(results, args.output)
+
+    print(f"Analysis complete! Generated {len(results)} alignment records from {total_comparisons} comparisons.")
+
 
 if __name__ == "__main__":
     main()

@@ -281,13 +281,27 @@ def get_flanking_regions(pattern: FeatureGroup, all_features: List[GFF3Feature],
 
 
 def create_extraction_bed(patterns: List[FeatureGroup], all_features: List[GFF3Feature],
-                         flank_size: int, bed_file: str) -> None:
-    """Create BED file for sequence extraction."""
+                         flank_size: int, bed_file: str, include_flanking: bool = False) -> None:
+    """Create BED file for sequence extraction.
+
+    Args:
+        patterns: List of feature groups to extract
+        all_features: All GFF3 features for overlap detection
+        flank_size: Size of flanking regions (only used if include_flanking=True)
+        bed_file: Output BED file path
+        include_flanking: If True, include flanking regions; if False, extract only core region
+    """
     with open(bed_file, 'w') as f:
         for pattern in patterns:
-            start, end = get_flanking_regions(pattern, all_features, flank_size)
-            # BED format is 0-based, but we'll keep 1-based for seqkit
-            f.write(f"{pattern.seqname}\t{start}\t{end}\t{pattern.group_id}_{pattern.strand}\n")
+            if include_flanking:
+                start, end = get_flanking_regions(pattern, all_features, flank_size)
+            else:
+                # Extract only the core region defined by the features
+                start, end = pattern.get_region_bounds()
+
+            # BED format: chr, start, end, name
+            # seqkit will use the name field as the sequence ID
+            f.write(f"{pattern.seqname}\t{start}\t{end}\t{pattern.group_id}\n")
 
 
 def extract_all_sequences(genome_fasta: str, bed_file: str, patterns: List[FeatureGroup],
@@ -308,13 +322,13 @@ def extract_all_sequences(genome_fasta: str, bed_file: str, patterns: List[Featu
         endo_rt_patterns = [p for p in patterns if p.pattern_type == "ENDO-RT"]
         endo_rt_rh_patterns = [p for p in patterns if p.pattern_type == "ENDO-RT-RH"]
 
-        # Extract grouped sequences
+        # Extract grouped sequences from the processed main FASTA
         if endo_rt_patterns:
-            extract_grouped_sequences(temp_fasta, str(output_files['endo_rt_fasta']),
+            extract_grouped_sequences(str(output_files['main_fasta']), str(output_files['endo_rt_fasta']),
                                     endo_rt_patterns, patterns)
 
         if endo_rt_rh_patterns:
-            extract_grouped_sequences(temp_fasta, str(output_files['endo_rt_rh_fasta']),
+            extract_grouped_sequences(str(output_files['main_fasta']), str(output_files['endo_rt_rh_fasta']),
                                     endo_rt_rh_patterns, patterns)
 
         # Extract 5' and 3' prime sequences
@@ -367,11 +381,28 @@ def extract_sequences_with_seqkit(genome_fasta: str, bed_file: str, output_fasta
         return False
 
 
+def extract_group_id_from_header(header: str) -> str:
+    """Extract group_id from seqkit header format.
+
+    seqkit adds coordinates like: >chr1:100-200 LINE_group_0001
+    We need to extract just LINE_group_0001
+    """
+    # Remove leading '>'
+    header = header.lstrip('>')
+    # Split by whitespace and get the last part which should be our group_id
+    parts = header.split()
+    if parts:
+        # The group_id might have suffixes like _5prime, _3prime
+        # Extract the base group_id or the full ID with suffix
+        return parts[-1]
+    return header
+
+
 def process_strand_orientation_with_seqkit(input_fasta: str, output_fasta: str,
                                           patterns: List[FeatureGroup]) -> None:
     """Process sequences to ensure forward orientation using seqkit for reverse complement."""
-    # Create lookup for strand info
-    strand_lookup = {f"{p.group_id}_{p.strand}": p.strand for p in patterns}
+    # Create lookup for strand info using group_id only
+    strand_lookup = {p.group_id: p.strand for p in patterns}
 
     # Separate plus and minus strand sequences
     plus_sequences = []
@@ -386,10 +417,14 @@ def process_strand_orientation_with_seqkit(input_fasta: str, output_fasta: str,
             if line.startswith('>'):
                 # Process previous sequence if any
                 if current_header and current_seq:
-                    seq_id = current_header[1:].split()[0]
-                    sequence_data = (current_header, ''.join(current_seq))
+                    seq_id = extract_group_id_from_header(current_header)
+                    # Remove suffix for strand lookup
+                    base_seq_id = seq_id.replace('_5prime', '').replace('_3prime', '')
 
-                    if seq_id in strand_lookup and strand_lookup[seq_id] == '-':
+                    # Use base_seq_id (without suffix) for the header
+                    sequence_data = (f">{base_seq_id}", ''.join(current_seq))
+
+                    if base_seq_id in strand_lookup and strand_lookup[base_seq_id] == '-':
                         minus_sequences.append(sequence_data)
                     else:
                         plus_sequences.append(sequence_data)
@@ -401,10 +436,14 @@ def process_strand_orientation_with_seqkit(input_fasta: str, output_fasta: str,
 
         # Process last sequence
         if current_header and current_seq:
-            seq_id = current_header[1:].split()[0]
-            sequence_data = (current_header, ''.join(current_seq))
+            seq_id = extract_group_id_from_header(current_header)
+            # Remove suffix for strand lookup
+            base_seq_id = seq_id.replace('_5prime', '').replace('_3prime', '')
 
-            if seq_id in strand_lookup and strand_lookup[seq_id] == '-':
+            # Use base_seq_id (without suffix) for the header
+            sequence_data = (f">{base_seq_id}", ''.join(current_seq))
+
+            if base_seq_id in strand_lookup and strand_lookup[base_seq_id] == '-':
                 minus_sequences.append(sequence_data)
             else:
                 plus_sequences.append(sequence_data)
@@ -472,7 +511,8 @@ def process_minus_strand_sequences(minus_sequences: List[Tuple[str, str]], outpu
 def extract_grouped_sequences(main_fasta: str, output_fasta: str,
                             target_patterns: List[FeatureGroup], all_patterns: List[FeatureGroup]) -> None:
     """Extract sequences for specific pattern groups from main FASTA."""
-    target_ids = {f"{p.group_id}_{p.strand}" for p in target_patterns}
+    # Use only group_id for matching
+    target_ids = {p.group_id for p in target_patterns}
 
     with open(main_fasta, 'r') as inf, open(output_fasta, 'w') as outf:
         current_header = None
@@ -490,7 +530,9 @@ def extract_grouped_sequences(main_fasta: str, output_fasta: str,
 
                 # Check if this sequence should be included
                 seq_id = line[1:].split()[0]
-                write_sequence = seq_id in target_ids
+                # Handle both original IDs and those with _revcomp suffix
+                base_seq_id = seq_id.replace('_revcomp', '')
+                write_sequence = base_seq_id in target_ids
                 current_header = line
                 current_seq = []
             else:
@@ -544,7 +586,12 @@ def extract_prime_sequences(genome_fasta: str, patterns: List[FeatureGroup],
 
 def create_prime_bed_files(patterns: List[FeatureGroup], flank_size: int,
                           bed_5prime: str, bed_3prime: str) -> None:
-    """Create BED files for 5' and 3' prime sequence extraction."""
+    """Create BED files for 5' and 3' prime sequence extraction.
+
+    For plus strand: 5' is upstream, 3' is downstream (relative to feature direction)
+    For minus strand: After reverse complement, what was downstream becomes 5', upstream becomes 3'
+    So we need to swap the labels for minus strand to maintain biological orientation.
+    """
     with open(bed_5prime, 'w') as f5, open(bed_3prime, 'w') as f3:
         for pattern in patterns:
             # Find ENDO domain and last domain (RT or RH)
@@ -553,34 +600,35 @@ def create_prime_bed_files(patterns: List[FeatureGroup], flank_size: int,
                 endo_feature = pattern.features[0]  # Should be ENDO
                 last_feature = pattern.features[-1]  # Should be RT or RH
 
-                # 5' upstream of ENDO
+                # 5' upstream of ENDO (will remain 5' after extraction)
                 prime5_start = max(1, endo_feature.start - flank_size)
                 prime5_end = endo_feature.start - 1
 
-                # 3' downstream of RT/RH
+                # 3' downstream of RT/RH (will remain 3' after extraction)
                 prime3_start = last_feature.end + 1
                 prime3_end = last_feature.end + flank_size
 
             else:
                 # Minus strand: RH/RT is first, ENDO is last
+                # After reverse complement: what was downstream (after ENDO) becomes 5'
+                #                          what was upstream (before RH/RT) becomes 3'
                 first_feature = pattern.features[0]  # Should be RH or RT
                 endo_feature = pattern.features[-1]  # Should be ENDO
 
-                # 5' upstream of first feature (RH/RT)
-                prime5_start = max(1, first_feature.start - flank_size)
-                prime5_end = first_feature.start - 1
+                # Downstream of ENDO → will become 5' after revcomp
+                prime5_start = endo_feature.end + 1
+                prime5_end = endo_feature.end + flank_size
 
-                # 3' downstream of ENDO
-                prime3_start = endo_feature.end + 1
-                prime3_end = endo_feature.end + flank_size
+                # Upstream of first feature → will become 3' after revcomp
+                prime3_start = max(1, first_feature.start - flank_size)
+                prime3_end = first_feature.start - 1
 
             # Write BED entries if regions are valid
             if prime5_end >= prime5_start:
-                f5.write(f"{pattern.seqname}\t{prime5_start}\t{prime5_end}\t{pattern.group_id}_5prime_{pattern.strand}\n")
+                f5.write(f"{pattern.seqname}\t{prime5_start}\t{prime5_end}\t{pattern.group_id}_5prime\n")
 
             if prime3_end >= prime3_start:
-                f3.write(f"{pattern.seqname}\t{prime3_start}\t{prime3_end}\t{pattern.group_id}_3prime_{pattern.strand}\n")
-
+                f3.write(f"{pattern.seqname}\t{prime3_start}\t{prime3_end}\t{pattern.group_id}_3prime\n")
 
 
 
@@ -693,8 +741,8 @@ Examples:
         bed_file = tempfile.mktemp(suffix='.bed')
         keep_bed = args.keep_bed
 
-    print(f"Creating BED file with {args.flank}bp flanking regions...")
-    create_extraction_bed(patterns, all_features, args.flank, bed_file)
+    print(f"Creating BED file for core regions (no flanking)...")
+    create_extraction_bed(patterns, all_features, args.flank, bed_file, include_flanking=False)
 
     print(f"Extracting sequences from {args.genome}...")
     success = extract_all_sequences(args.genome, bed_file, patterns, all_features,
