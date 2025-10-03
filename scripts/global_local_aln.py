@@ -516,6 +516,118 @@ def write_results_table(results, output_file):
             f.write('\t'.join(row) + '\n')
 
 
+def run_all_vs_all_alignment(
+    fasta_file,
+    output_file,
+    end="5",
+    gap_open=12,
+    gap_extend=3,
+    match=2,
+    mismatch=-2,
+    score_threshold=20,
+    threads=1,
+    verbose=True
+):
+    """
+    Run all-vs-all pairwise alignment analysis on sequences in a FASTA file.
+
+    Parameters
+    ----------
+    fasta_file : str
+        Path to input FASTA file with multiple sequences
+    output_file : str
+        Path to output tab-delimited file with alignment results
+    end : str, optional
+        Which end is FIXED for BOTH sequences ("5" or "3"), default "5"
+    gap_open : int, optional
+        Gap opening penalty, default 12
+    gap_extend : int, optional
+        Gap extension penalty, default 3
+    match : int, optional
+        Match score, default 2
+    mismatch : int, optional
+        Mismatch score, default -2
+    score_threshold : int, optional
+        Minimum max_score for alignment to be reported, default 20
+    threads : int, optional
+        Number of threads for parallel processing, default 1
+    verbose : bool, optional
+        Print progress messages, default True
+
+    Returns
+    -------
+    list[dict]
+        List of alignment result dictionaries
+    """
+    # Create a namespace object to mimic argparse args
+    class Args:
+        pass
+
+    args = Args()
+    args.fasta = fasta_file
+    args.output = output_file
+    args.end = end
+    args.open = gap_open
+    args.extend = gap_extend
+    args.match = match
+    args.mismatch = mismatch
+    args.score_threshold = score_threshold
+    args.threads = threads
+
+    # Read all sequences from FASTA file
+    if verbose:
+        print(f"Reading sequences from {fasta_file}...")
+    sequences = read_fasta_sequences(fasta_file)
+    if verbose:
+        print(f"Found {len(sequences)} sequences")
+
+    # Perform all-to-all comparisons
+    results = []
+    total_comparisons = len(sequences) * (len(sequences) - 1) // 2
+
+    if verbose:
+        print(f"Performing {total_comparisons} pairwise alignments using {threads} threads...")
+
+    if threads == 1:
+        # Serial processing for single thread
+        comparison_count = 0
+        for pair_data in generate_sequence_pairs(sequences):
+            comparison_count += 1
+            if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
+                print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
+
+            result = run_single_comparison(pair_data, args)
+            if result is not None:
+                results.append(result)
+    else:
+        # Parallel processing
+        comparison_count = 0
+        with ThreadPoolExecutor(max_workers=threads) as executor:
+            # Submit all tasks
+            future_to_pair = {executor.submit(run_single_comparison, pair_data, args): pair_data
+                            for pair_data in generate_sequence_pairs(sequences)}
+
+            # Collect results as they complete
+            for future in as_completed(future_to_pair):
+                comparison_count += 1
+                if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
+                    print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
+
+                result = future.result()
+                if result is not None:
+                    results.append(result)
+
+    # Write results to output file
+    if verbose:
+        print(f"Writing results to {output_file}...")
+    write_results_table(results, output_file)
+
+    if verbose:
+        print(f"Analysis complete! Generated {len(results)} alignment records from {total_comparisons} comparisons.")
+
+    return results
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="All-to-all anchored semi-global alignment with Parasail (DNA). "
@@ -537,51 +649,19 @@ def main():
     args = ap.parse_args()
     print(args)
 
-    # Read all sequences from FASTA file
-    print(f"Reading sequences from {args.fasta}...")
-    sequences = read_fasta_sequences(args.fasta)
-    print(f"Found {len(sequences)} sequences")
-
-    # Perform all-to-all comparisons
-    results = []
-    total_comparisons = len(sequences) * (len(sequences) - 1) // 2
-
-    print(f"Performing {total_comparisons} pairwise alignments using {args.threads} threads...")
-
-    if args.threads == 1:
-        # Serial processing for single thread
-        comparison_count = 0
-        for pair_data in generate_sequence_pairs(sequences):
-            comparison_count += 1
-            if comparison_count % 100 == 0 or comparison_count == total_comparisons:
-                print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
-
-            result = run_single_comparison(pair_data, args)
-            if result is not None:
-                results.append(result)
-    else:
-        # Parallel processing
-        comparison_count = 0
-        with ThreadPoolExecutor(max_workers=args.threads) as executor:
-            # Submit all tasks
-            future_to_pair = {executor.submit(run_single_comparison, pair_data, args): pair_data
-                            for pair_data in generate_sequence_pairs(sequences)}
-
-            # Collect results as they complete
-            for future in as_completed(future_to_pair):
-                comparison_count += 1
-                if comparison_count % 100 == 0 or comparison_count == total_comparisons:
-                    print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
-
-                result = future.result()
-                if result is not None:
-                    results.append(result)
-
-    # Write results to output file
-    print(f"Writing results to {args.output}...")
-    write_results_table(results, args.output)
-
-    print(f"Analysis complete! Generated {len(results)} alignment records from {total_comparisons} comparisons.")
+    # Call the main function with parsed arguments
+    run_all_vs_all_alignment(
+        fasta_file=args.fasta,
+        output_file=args.output,
+        end=args.end,
+        gap_open=args.open,
+        gap_extend=args.extend,
+        match=args.match,
+        mismatch=args.mismatch,
+        score_threshold=args.score_threshold,
+        threads=args.threads,
+        verbose=True
+    )
 
 
 if __name__ == "__main__":

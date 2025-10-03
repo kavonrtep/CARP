@@ -11,6 +11,7 @@ Features:
 - Flanking region extraction with overlap detection
 - Reverse complement for minus strand features
 - Grouped output with matching sequence and GFF3 features
+- All-vs-all alignment analysis of flanking sequences
 """
 
 import argparse
@@ -23,6 +24,18 @@ from pathlib import Path
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional, Set
+
+# Import alignment function from global_local_aln module
+try:
+    from global_local_aln import run_all_vs_all_alignment
+except ImportError:
+    # Try importing from same directory
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("global_local_aln",
+                                                   Path(__file__).parent / "global_local_aln.py")
+    global_local_aln = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(global_local_aln)
+    run_all_vs_all_alignment = global_local_aln.run_all_vs_all_alignment
 
 
 @dataclass
@@ -632,20 +645,448 @@ def create_prime_bed_files(patterns: List[FeatureGroup], flank_size: int,
 
 
 
-def write_grouped_gff(patterns: List[FeatureGroup], output_gff: str) -> None:
-    """Write GFF3 file with grouped features."""
+@dataclass
+class LineElement:
+    """Represents a complete LINE element with boundaries."""
+    group_id: str
+    seqname: str
+    strand: str
+    start: int
+    end: int
+    pattern_type: str
+    extension_5prime: int = 0
+    extension_3prime: int = 0
+
+
+def load_alignment_lengths(output_dir: Path) -> Dict[str, Dict[str, int]]:
+    """Load alignment length data from TSV files.
+
+    Returns dict: {group_id: {'5prime': length, '3prime': length}}
+    """
+    alignment_lengths = defaultdict(dict)
+
+    length_files = [
+        'ENDO_RT_5prime_aln_length.tsv',
+        'ENDO_RT_3prime_aln_length.tsv',
+        'ENDO_RT_RH_5prime_aln_length.tsv',
+        'ENDO_RT_RH_3prime_aln_length.tsv',
+    ]
+
+    for filename in length_files:
+        filepath = output_dir / filename
+        if not filepath.exists():
+            continue
+
+        # Determine if this is 5prime or 3prime
+        prime_type = '5prime' if '5prime' in filename else '3prime'
+
+        try:
+            with open(filepath, 'r') as f:
+                # Read header
+                header = f.readline().strip().split('\t')
+                group_id_idx = header.index('Group_ID')
+                selected_length_idx = header.index('Selected_Length')
+
+                # Read data rows
+                for line in f:
+                    fields = line.strip().split('\t')
+                    group_id = fields[group_id_idx]
+                    selected_length = int(fields[selected_length_idx])
+                    alignment_lengths[group_id][prime_type] = selected_length
+        except Exception as e:
+            print(f"Warning: Could not load {filename}: {e}", file=sys.stderr)
+
+    return dict(alignment_lengths)
+
+
+def create_line_elements(patterns: List[FeatureGroup], alignment_lengths: Dict[str, Dict[str, int]]) -> List[LineElement]:
+    """Create LINE_element features with boundaries based on alignment lengths.
+
+    Parameters
+    ----------
+    patterns : List[FeatureGroup]
+        List of feature groups (ENDO-RT or ENDO-RT-RH patterns)
+    alignment_lengths : Dict[str, Dict[str, int]]
+        Dictionary mapping group_id to 5prime/3prime alignment lengths
+
+    Returns
+    -------
+    List[LineElement]
+        List of LINE elements with calculated boundaries
+    """
+    line_elements = []
+
+    for pattern in patterns:
+        # Get base boundaries from features (ENDO to RT/RH)
+        base_start, base_end = pattern.get_region_bounds()
+
+        # Get alignment extensions if available
+        # For minus strand, the group_id in TSV has _revcomp suffix
+        lookup_id = f"{pattern.group_id}_revcomp" if pattern.strand == '-' else pattern.group_id
+        extensions = alignment_lengths.get(lookup_id, {})
+        ext_5prime = extensions.get('5prime', 0)
+        ext_3prime = extensions.get('3prime', 0)
+
+        # Calculate extended boundaries based on strand
+        if pattern.strand == '+':
+            # Plus strand: 5' is upstream (subtract from start), 3' is downstream (add to end)
+            element_start = base_start - ext_5prime if ext_5prime > 0 else base_start
+            element_end = base_end + ext_3prime if ext_3prime > 0 else base_end
+        else:
+            # Minus strand: 5' is downstream (add to end), 3' is upstream (subtract from start)
+            # After reverse complement: 5' extension goes to what was downstream (higher coords)
+            #                          3' extension goes to what was upstream (lower coords)
+            element_start = base_start - ext_3prime if ext_3prime > 0 else base_start
+            element_end = base_end + ext_5prime if ext_5prime > 0 else base_end
+
+        # Ensure start <= end and >= 1
+        element_start = max(1, element_start)
+        element_end = max(element_start, element_end)
+
+        line_elements.append(LineElement(
+            group_id=pattern.group_id,
+            seqname=pattern.seqname,
+            strand=pattern.strand,
+            start=element_start,
+            end=element_end,
+            pattern_type=pattern.pattern_type,
+            extension_5prime=ext_5prime,
+            extension_3prime=ext_3prime
+        ))
+
+    return line_elements
+
+
+def extract_extended_line_regions(genome_fasta: str, line_elements: List[LineElement],
+                                 output_fasta: str) -> bool:
+    """Extract extended LINE regions based on LINE_element boundaries.
+
+    Parameters
+    ----------
+    genome_fasta : str
+        Path to genome FASTA file
+    line_elements : List[LineElement]
+        List of LINE elements with extended boundaries
+    output_fasta : str
+        Output FASTA file for extended sequences
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
+    """
+    if not line_elements:
+        print("No LINE elements to extract")
+        return False
+
+    try:
+        # Create BED file for extended regions
+        bed_file = tempfile.mktemp(suffix='_extended.bed')
+
+        with open(bed_file, 'w') as f:
+            for line_element in line_elements:
+                f.write(f"{line_element.seqname}\t{line_element.start}\t{line_element.end}\t{line_element.group_id}\n")
+
+        # Extract sequences using seqkit
+        temp_fasta = tempfile.mktemp(suffix='_extended.fasta')
+        cmd = ['seqkit', 'subseq', '--bed', bed_file, genome_fasta]
+        with open(temp_fasta, 'w') as outf:
+            subprocess.run(cmd, stdout=outf, stderr=subprocess.PIPE, text=True, check=True)
+
+        # Create a list of FeatureGroups from LineElements for strand processing
+        pseudo_patterns = [
+            FeatureGroup(
+                group_id=le.group_id,
+                seqname=le.seqname,
+                strand=le.strand,
+                features=[],  # Not needed for this operation
+                pattern_type=le.pattern_type
+            )
+            for le in line_elements
+        ]
+
+        # Process strand orientation
+        process_strand_orientation_with_seqkit(temp_fasta, output_fasta, pseudo_patterns)
+
+        # Clean up
+        os.remove(bed_file)
+        os.remove(temp_fasta)
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error extracting extended regions: {e}")
+        print(f"stderr: {e.stderr}")
+        return False
+    except Exception as e:
+        print(f"Error extracting extended regions: {e}")
+        return False
+
+
+def write_grouped_gff(patterns: List[FeatureGroup], output_gff: str, line_elements: List[LineElement] = None) -> None:
+    """Write GFF3 file with grouped features and LINE_element features.
+
+    Parameters
+    ----------
+    patterns : List[FeatureGroup]
+        List of feature groups
+    output_gff : str
+        Output GFF3 file path
+    line_elements : List[LineElement], optional
+        List of LINE elements with extended boundaries
+    """
     with open(output_gff, 'w') as f:
         f.write("##gff-version 3\n")
 
         for pattern in patterns:
-            # Write all features in the group
+            # Find corresponding LINE_element if available
+            line_element = None
+            if line_elements:
+                line_element = next((le for le in line_elements if le.group_id == pattern.group_id), None)
+
+            # Write LINE_element feature first (parent)
+            if line_element:
+                attributes = f"ID={pattern.group_id};Pattern_Type={pattern.pattern_type}"
+                if line_element.extension_5prime > 0 or line_element.extension_3prime > 0:
+                    attributes += f";Extension_5prime={line_element.extension_5prime};Extension_3prime={line_element.extension_3prime}"
+
+                f.write(f"{line_element.seqname}\tDANTE\tLINE_element\t"
+                       f"{line_element.start}\t{line_element.end}\t.\t"
+                       f"{line_element.strand}\t.\t{attributes}\n")
+
+            # Write protein domain features with Parent attribute
             for feature in pattern.features:
-                # Add group ID to attributes
-                new_attributes = f"{feature.attributes};Group_ID={pattern.group_id};Pattern_Type={pattern.pattern_type}"
+                # Add Parent and Group_ID to attributes
+                new_attributes = f"{feature.attributes};Parent={pattern.group_id};Group_ID={pattern.group_id};Pattern_Type={pattern.pattern_type}"
 
                 f.write(f"{feature.seqname}\t{feature.source}\t{feature.feature}\t"
                        f"{feature.start}\t{feature.end}\t{feature.score}\t"
                        f"{feature.strand}\t{feature.phase}\t{new_attributes}\n")
+
+
+def analyze_alignment_lengths(alignment_tsv: Path, output_tsv: Path, min_num_alignments: int) -> None:
+    """Analyze alignment TSV and determine length thresholds for each group.
+
+    For each Group_ID, collects all alignment lengths (from both query and ref positions),
+    sorts them, and selects the Nth largest value where N = min_num_alignments.
+
+    Parameters
+    ----------
+    alignment_tsv : Path
+        Input alignment TSV file from all-vs-all alignment
+    output_tsv : Path
+        Output TSV file with length thresholds per group
+    min_num_alignments : int
+        Minimum number of alignments required (N largest alignments to consider)
+    """
+    # Dictionary to store alignment lengths per group
+    group_lengths = defaultdict(list)
+
+    # Read alignment data from TSV
+    with open(alignment_tsv, 'r') as f:
+        # Read header
+        header = f.readline().strip().split('\t')
+        query_id_idx = header.index('query_id')
+        ref_id_idx = header.index('ref_id')
+        degapped_query_len_idx = header.index('degapped_query_len')
+        degapped_ref_len_idx = header.index('degapped_ref_len')
+
+        # Read data rows
+        for line in f:
+            fields = line.strip().split('\t')
+            query_id = fields[query_id_idx]
+            ref_id = fields[ref_id_idx]
+            degapped_query_len = int(fields[degapped_query_len_idx])
+            degapped_ref_len = int(fields[degapped_ref_len_idx])
+
+            # Add query alignment length to query group
+            group_lengths[query_id].append(degapped_query_len)
+
+            # Add ref alignment length to ref group
+            group_lengths[ref_id].append(degapped_ref_len)
+
+    # Calculate threshold for each group
+    results = []
+    for group_id in sorted(group_lengths.keys()):
+        lengths = sorted(group_lengths[group_id], reverse=True)  # Sort descending
+
+        # Only report if we have at least min_num_alignments
+        if len(lengths) >= min_num_alignments:
+            # Select the Nth largest value (index N-1)
+            selected_length = lengths[min_num_alignments - 1]
+
+            # Count alignments shorter than OR EQUAL to selected_length, excluding the selected one
+            # This gives us the number of "other" alignments that pass the threshold
+            num_shorter_or_equal = sum(1 for length in lengths if length <= selected_length) - 1
+
+            results.append({
+                'Group_ID': group_id,
+                'Selected_Length': selected_length,
+                'Num_Shorter': num_shorter_or_equal
+            })
+        # If less than min_num_alignments, don't report (doesn't pass threshold)
+
+    # Write results to TSV
+    with open(output_tsv, 'w') as f:
+        # Write header
+        f.write('Group_ID\tSelected_Length\tNum_Shorter\n')
+
+        # Write data rows
+        for result in results:
+            f.write(f"{result['Group_ID']}\t{result['Selected_Length']}\t{result['Num_Shorter']}\n")
+
+
+def run_mmseqs_clustering(input_fasta: str, output_dir: Path, threads: int = 1) -> bool:
+    """Run MMseqs2 easy-cluster on extended LINE sequences.
+
+    Parameters
+    ----------
+    input_fasta : str
+        Path to input FASTA file (LINE_regions_extended.fasta)
+    output_dir : Path
+        Output directory for MMseqs2 results
+    threads : int, optional
+        Number of threads for clustering, default 1
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
+    """
+    if not Path(input_fasta).exists():
+        print(f"Error: Input FASTA file {input_fasta} not found", file=sys.stderr)
+        return False
+
+    # Create mmseqs subdirectory
+    mmseqs_dir = output_dir / 'mmseqs'
+    mmseqs_dir.mkdir(parents=True, exist_ok=True)
+
+    # Define output files
+    output_prefix = mmseqs_dir / 'cluster'
+    rep_seq_fasta = mmseqs_dir / 'cluster_rep_seq.fasta'
+    cluster_tsv = mmseqs_dir / 'cluster.tsv'
+    tmp_dir = mmseqs_dir / 'tmp'
+
+    # Check if clustering already exists (checkpoint)
+    if rep_seq_fasta.exists() and cluster_tsv.exists():
+        print(f"  MMseqs2 clustering already exists in {mmseqs_dir}")
+        return True
+
+    print(f"\nRunning MMseqs2 clustering on extended LINE sequences...")
+    print(f"  Output directory: {mmseqs_dir}")
+
+    try:
+        # Run MMseqs2 easy-cluster
+        cmd = [
+            'mmseqs', 'easy-cluster',
+            input_fasta,
+            str(output_prefix),
+            str(tmp_dir),
+            '--threads', str(threads)
+        ]
+
+        print(f"  Command: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+        # Check if output files were created
+        if rep_seq_fasta.exists():
+            print(f"  → cluster_rep_seq.fasta")
+        if cluster_tsv.exists():
+            print(f"  → cluster.tsv")
+
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error running MMseqs2: {e}", file=sys.stderr)
+        print(f"stdout: {e.stdout}", file=sys.stderr)
+        print(f"stderr: {e.stderr}", file=sys.stderr)
+        return False
+    except FileNotFoundError:
+        print("Error: mmseqs not found. Please ensure MMseqs2 is installed and in PATH.", file=sys.stderr)
+        return False
+
+
+def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments: int = 3) -> None:
+    """Run all-vs-all alignment analysis on prime sequences.
+
+    For 5' sequences: use --end 3 (3' end fixed, analyze 5' similarity)
+    For 3' sequences: use --end 5 (5' end fixed, analyze 3' similarity)
+
+    Parameters
+    ----------
+    output_dir : Path
+        Output directory containing prime sequence FASTA files
+    threads : int, optional
+        Number of threads for parallel processing, default 1
+    min_num_alignments : int, optional
+        Minimum number of alignments for length threshold calculation, default 3
+    """
+    alignment_files = [
+        ('ENDO_RT_5prime.fasta', 'ENDO_RT_5prime_alignment.tsv', '3'),  # 5' seqs -> fix 3' end
+        ('ENDO_RT_3prime.fasta', 'ENDO_RT_3prime_alignment.tsv', '5'),  # 3' seqs -> fix 5' end
+        ('ENDO_RT_RH_5prime.fasta', 'ENDO_RT_RH_5prime_alignment.tsv', '3'),
+        ('ENDO_RT_RH_3prime.fasta', 'ENDO_RT_RH_3prime_alignment.tsv', '5'),
+    ]
+
+    print("\nRunning all-vs-all alignment analysis on prime sequences...")
+
+    for fasta_name, output_name, end_param in alignment_files:
+        fasta_path = output_dir / fasta_name
+        output_path = output_dir / output_name
+
+        # Skip if output TSV already exists (checkpoint)
+        if output_path.exists():
+            print(f"  Skipping {fasta_name} (alignment file {output_name} already exists)")
+            continue
+
+        # Skip if FASTA file doesn't exist or is empty
+        if not fasta_path.exists():
+            print(f"  Skipping {fasta_name} (file not found)")
+            continue
+
+        if fasta_path.stat().st_size == 0:
+            print(f"  Skipping {fasta_name} (empty file)")
+            continue
+
+        print(f"  Analyzing {fasta_name} (--end {end_param})...")
+
+        try:
+            run_all_vs_all_alignment(
+                fasta_file=str(fasta_path),
+                output_file=str(output_path),
+                end=end_param,
+                gap_open=12,
+                gap_extend=3,
+                match=2,
+                mismatch=-2,
+                score_threshold=20,
+                threads=threads,
+                verbose=False  # Suppress detailed progress messages
+            )
+            print(f"    → {output_name}")
+        except Exception as e:
+            print(f"    Error analyzing {fasta_name}: {e}", file=sys.stderr)
+
+    # Analyze alignment lengths for each TSV file
+    print("\nAnalyzing alignment lengths and calculating thresholds...")
+    for fasta_name, alignment_name, end_param in alignment_files:
+        alignment_path = output_dir / alignment_name
+        length_output = output_dir / alignment_name.replace('_alignment.tsv', '_aln_length.tsv')
+
+        # Skip if alignment file doesn't exist
+        if not alignment_path.exists():
+            continue
+
+        # Skip if length file already exists (checkpoint)
+        if length_output.exists():
+            print(f"  Skipping {alignment_name} (length file already exists)")
+            continue
+
+        print(f"  Processing {alignment_name}...")
+        try:
+            analyze_alignment_lengths(alignment_path, length_output, min_num_alignments)
+            print(f"    → {length_output.name}")
+        except Exception as e:
+            print(f"    Error processing {alignment_name}: {e}", file=sys.stderr)
 
 
 def main():
@@ -680,6 +1121,10 @@ Examples:
                        help='Optional: save BED file with coordinates')
     parser.add_argument('--keep-bed', action='store_true',
                        help='Keep the intermediate BED file')
+    parser.add_argument('-t', '--threads', type=int, default=1,
+                       help='Number of threads for alignment analysis (default: 1)')
+    parser.add_argument('--min-num-alignments', type=int, default=3,
+                       help='Minimum number of alignments for length threshold calculation (default: 3)')
 
     args = parser.parse_args()
 
@@ -748,9 +1193,6 @@ Examples:
     success = extract_all_sequences(args.genome, bed_file, patterns, all_features,
                                    output_files, args.flank)
 
-    print(f"Writing grouped GFF3 to {output_files['gff_out']}...")
-    write_grouped_gff(patterns, str(output_files['gff_out']))
-
     # Clean up BED file
     if not keep_bed and os.path.exists(bed_file):
         os.remove(bed_file)
@@ -764,6 +1206,36 @@ Examples:
         for name, path in output_files.items():
             if path.exists():
                 print(f"  {name}: {path.name}")
+
+        # Run alignment analysis on prime sequences
+        run_prime_alignments(output_dir, threads=args.threads, min_num_alignments=args.min_num_alignments)
+
+        # Load alignment lengths and create LINE elements
+        print("\nCreating LINE_element features from alignment data...")
+        alignment_lengths = load_alignment_lengths(output_dir)
+        line_elements = create_line_elements(patterns, alignment_lengths)
+
+        # Write GFF3 with LINE_element features
+        print(f"Writing GFF3 with LINE_element features to {output_files['gff_out']}...")
+        write_grouped_gff(patterns, str(output_files['gff_out']), line_elements)
+
+        # Extract extended LINE regions based on LINE_element boundaries
+        extended_fasta_path = output_dir / 'LINE_regions_extended.fasta'
+        print(f"\nExtracting extended LINE regions to {extended_fasta_path}...")
+        extended_success = extract_extended_line_regions(args.genome, line_elements, str(extended_fasta_path))
+
+        if extended_success:
+            print(f"  → LINE_regions_extended.fasta")
+
+            # Run MMseqs2 clustering on extended sequences
+            clustering_success = run_mmseqs_clustering(str(extended_fasta_path), output_dir, threads=args.threads)
+
+            if not clustering_success:
+                print("  Warning: MMseqs2 clustering failed", file=sys.stderr)
+        else:
+            print("  Warning: Failed to extract extended LINE regions", file=sys.stderr)
+
+        print("\nAll processing completed successfully!")
         sys.exit(0)
     else:
         print("Extraction failed!")
