@@ -38,6 +38,51 @@ except ImportError:
     run_all_vs_all_alignment = global_local_aln.run_all_vs_all_alignment
 
 
+def load_sequence_lengths(genome_fasta: str) -> Dict[str, int]:
+    """Load sequence lengths from FASTA index file (.fai).
+
+    If .fai file doesn't exist, it will be created using seqkit faidx.
+
+    Parameters
+    ----------
+    genome_fasta : str
+        Path to genome FASTA file
+
+    Returns
+    -------
+    Dict[str, int]
+        Dictionary mapping sequence names to their lengths
+    """
+    fai_file = f"{genome_fasta}.fai"
+
+    # Check if .fai file exists, if not create it
+    if not Path(fai_file).exists():
+        print(f"FASTA index not found, creating {fai_file}...")
+        try:
+            subprocess.run(['seqkit', 'faidx', genome_fasta],
+                         check=True, capture_output=True, text=True)
+            print(f"  → Created {Path(fai_file).name}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error creating FASTA index: {e}", file=sys.stderr)
+            print(f"stderr: {e.stderr}", file=sys.stderr)
+            raise
+        except FileNotFoundError:
+            print("Error: seqkit not found. Please ensure seqkit is installed and in PATH.", file=sys.stderr)
+            raise
+
+    # Read .fai file
+    seq_lengths = {}
+    with open(fai_file, 'r') as f:
+        for line in f:
+            fields = line.strip().split('\t')
+            if len(fields) >= 2:
+                seq_name = fields[0]
+                seq_length = int(fields[1])
+                seq_lengths[seq_name] = seq_length
+
+    return seq_lengths
+
+
 @dataclass
 class GFF3Feature:
     seqname: str
@@ -264,28 +309,59 @@ def find_two_feature_pattern(named_features: List[Tuple[int, GFF3Feature]],
 
 
 def get_flanking_regions(pattern: FeatureGroup, all_features: List[GFF3Feature],
-                        flank_size: int) -> Tuple[int, int]:
-    """Calculate flanking regions with overlap detection."""
+                        flank_size: int, mask_features: List[GFF3Feature] = None) -> Tuple[int, int]:
+    """Calculate flanking regions with overlap detection.
+
+    Parameters
+    ----------
+    pattern : FeatureGroup
+        The feature group to calculate flanking regions for
+    all_features : List[GFF3Feature]
+        All DANTE annotation features
+    flank_size : int
+        Maximum size of flanking regions
+    mask_features : List[GFF3Feature], optional
+        Additional masking features that can limit flanking regions
+
+    Returns
+    -------
+    Tuple[int, int]
+        Start and end coordinates of flanking region
+    """
     region_start, region_end = pattern.get_region_bounds()
 
     # Initial flanking coordinates
     flank_start = region_start - flank_size
     flank_end = region_end + flank_size
 
-    # Find overlapping features on the same sequence
+    # Find overlapping features on the same sequence from DANTE annotations
     seq_features = [f for f in all_features if f.seqname == pattern.seqname]
 
-    # Adjust left flank
+    # Adjust left flank based on DANTE features
     for feature in seq_features:
         if (feature.end < region_start and feature.end > flank_start and
             feature not in pattern.features):
             flank_start = feature.end + 1
 
-    # Adjust right flank
+    # Adjust right flank based on DANTE features
     for feature in seq_features:
         if (feature.start > region_end and feature.start < flank_end and
             feature not in pattern.features):
             flank_end = feature.start - 1
+
+    # Adjust flanks based on mask features if provided
+    if mask_features:
+        mask_seq_features = [f for f in mask_features if f.seqname == pattern.seqname]
+
+        # Adjust left flank based on mask features
+        for feature in mask_seq_features:
+            if feature.end < region_start and feature.end > flank_start:
+                flank_start = feature.end + 1
+
+        # Adjust right flank based on mask features
+        for feature in mask_seq_features:
+            if feature.start > region_end and feature.start < flank_end:
+                flank_end = feature.start - 1
 
     # Ensure we don't go below 1
     flank_start = max(1, flank_start)
@@ -318,7 +394,8 @@ def create_extraction_bed(patterns: List[FeatureGroup], all_features: List[GFF3F
 
 
 def extract_all_sequences(genome_fasta: str, bed_file: str, patterns: List[FeatureGroup],
-                         all_features: List[GFF3Feature], output_files: Dict, flank_size: int) -> bool:
+                         all_features: List[GFF3Feature], output_files: Dict, flank_size: int,
+                         mask_features: List[GFF3Feature] = None, seq_lengths: Dict[str, int] = None) -> bool:
     """Extract all required sequences: full regions, grouped by pattern, and 5'/3' prime sequences."""
     try:
         # Extract main sequences with flanking regions
@@ -344,14 +421,16 @@ def extract_all_sequences(genome_fasta: str, bed_file: str, patterns: List[Featu
             extract_grouped_sequences(str(output_files['main_fasta']), str(output_files['endo_rt_rh_fasta']),
                                     endo_rt_rh_patterns, patterns)
 
-        # Extract 5' and 3' prime sequences
+        # Extract 5' and 3' prime sequences with mask support and sequence boundaries
         if endo_rt_patterns:
             extract_prime_sequences(genome_fasta, endo_rt_patterns, all_features, flank_size,
-                                   str(output_files['endo_rt_5prime']), str(output_files['endo_rt_3prime']))
+                                   str(output_files['endo_rt_5prime']), str(output_files['endo_rt_3prime']),
+                                   mask_features, seq_lengths)
 
         if endo_rt_rh_patterns:
             extract_prime_sequences(genome_fasta, endo_rt_rh_patterns, all_features, flank_size,
-                                   str(output_files['endo_rt_rh_5prime']), str(output_files['endo_rt_rh_3prime']))
+                                   str(output_files['endo_rt_rh_5prime']), str(output_files['endo_rt_rh_3prime']),
+                                   mask_features, seq_lengths)
 
         # Clean up
         os.remove(temp_fasta)
@@ -561,14 +640,16 @@ def extract_grouped_sequences(main_fasta: str, output_fasta: str,
 
 def extract_prime_sequences(genome_fasta: str, patterns: List[FeatureGroup],
                           all_features: List[GFF3Feature], flank_size: int,
-                          output_5prime: str, output_3prime: str) -> None:
+                          output_5prime: str, output_3prime: str,
+                          mask_features: List[GFF3Feature] = None,
+                          seq_lengths: Dict[str, int] = None) -> None:
     """Extract 5' and 3' prime sequences around ENDO and RT/RH domains."""
     # Create BED files for 5' and 3' sequences
     bed_5prime = tempfile.mktemp(suffix='_5prime.bed')
     bed_3prime = tempfile.mktemp(suffix='_3prime.bed')
 
     try:
-        create_prime_bed_files(patterns, flank_size, bed_5prime, bed_3prime)
+        create_prime_bed_files(patterns, all_features, flank_size, bed_5prime, bed_3prime, mask_features, seq_lengths)
 
         # Extract 5' prime sequences
         if os.path.getsize(bed_5prime) > 0:
@@ -597,50 +678,106 @@ def extract_prime_sequences(genome_fasta: str, patterns: List[FeatureGroup],
                 os.remove(bed_file)
 
 
-def create_prime_bed_files(patterns: List[FeatureGroup], flank_size: int,
-                          bed_5prime: str, bed_3prime: str) -> None:
-    """Create BED files for 5' and 3' prime sequence extraction.
+def create_prime_bed_files(patterns: List[FeatureGroup], all_features: List[GFF3Feature],
+                          flank_size: int, bed_5prime: str, bed_3prime: str,
+                          mask_features: List[GFF3Feature] = None,
+                          seq_lengths: Dict[str, int] = None) -> None:
+    """Create BED files for 5' and 3' prime sequence extraction with mask support.
 
     For plus strand: 5' is upstream, 3' is downstream (relative to feature direction)
     For minus strand: After reverse complement, what was downstream becomes 5', upstream becomes 3'
     So we need to swap the labels for minus strand to maintain biological orientation.
+
+    Flanking regions are limited by neighboring DANTE features, optional mask features, and sequence boundaries.
     """
     with open(bed_5prime, 'w') as f5, open(bed_3prime, 'w') as f3:
         for pattern in patterns:
+            # Get sequence length if available
+            seq_length = seq_lengths.get(pattern.seqname) if seq_lengths else None
             # Find ENDO domain and last domain (RT or RH)
             if pattern.strand == '+':
                 # Plus strand: ENDO is first, RT/RH is last
                 endo_feature = pattern.features[0]  # Should be ENDO
                 last_feature = pattern.features[-1]  # Should be RT or RH
 
-                # 5' upstream of ENDO (will remain 5' after extraction)
+                # Initial 5' upstream of ENDO
                 prime5_start = max(1, endo_feature.start - flank_size)
                 prime5_end = endo_feature.start - 1
 
-                # 3' downstream of RT/RH (will remain 3' after extraction)
+                # Initial 3' downstream of RT/RH
                 prime3_start = last_feature.end + 1
                 prime3_end = last_feature.end + flank_size
 
+                # Adjust 5' region based on DANTE features
+                seq_features = [f for f in all_features if f.seqname == pattern.seqname]
+                for feature in seq_features:
+                    if (feature.end < endo_feature.start and feature.end > prime5_start and
+                        feature not in pattern.features):
+                        prime5_start = feature.end + 1
+
+                # Adjust 3' region based on DANTE features
+                for feature in seq_features:
+                    if (feature.start > last_feature.end and feature.start < prime3_end and
+                        feature not in pattern.features):
+                        prime3_end = feature.start - 1
+
+                # Adjust based on mask features if provided
+                if mask_features:
+                    mask_seq_features = [f for f in mask_features if f.seqname == pattern.seqname]
+                    for feature in mask_seq_features:
+                        if feature.end < endo_feature.start and feature.end > prime5_start:
+                            prime5_start = feature.end + 1
+                    for feature in mask_seq_features:
+                        if feature.start > last_feature.end and feature.start < prime3_end:
+                            prime3_end = feature.start - 1
+
+
             else:
                 # Minus strand: RH/RT is first, ENDO is last
-                # After reverse complement: what was downstream (after ENDO) becomes 5'
-                #                          what was upstream (before RH/RT) becomes 3'
                 first_feature = pattern.features[0]  # Should be RH or RT
                 endo_feature = pattern.features[-1]  # Should be ENDO
 
-                # Downstream of ENDO → will become 5' after revcomp
+                # Initial downstream of ENDO → will become 5' after revcomp
                 prime5_start = endo_feature.end + 1
                 prime5_end = endo_feature.end + flank_size
 
-                # Upstream of first feature → will become 3' after revcomp
+                # Initial upstream of first feature → will become 3' after revcomp
                 prime3_start = max(1, first_feature.start - flank_size)
                 prime3_end = first_feature.start - 1
 
-            # Write BED entries if regions are valid
-            if prime5_end >= prime5_start:
+                # Adjust 5' region (downstream) based on DANTE features
+                seq_features = [f for f in all_features if f.seqname == pattern.seqname]
+                for feature in seq_features:
+                    if (feature.start > endo_feature.end and feature.start < prime5_end and
+                        feature not in pattern.features):
+                        prime5_end = feature.start - 1
+
+                # Adjust 3' region (upstream) based on DANTE features
+                for feature in seq_features:
+                    if (feature.end < first_feature.start and feature.end > prime3_start and
+                        feature not in pattern.features):
+                        prime3_start = feature.end + 1
+
+                # Adjust based on mask features if provided
+                if mask_features:
+                    mask_seq_features = [f for f in mask_features if f.seqname == pattern.seqname]
+                    for feature in mask_seq_features:
+                        if feature.start > endo_feature.end and feature.start < prime5_end:
+                            prime5_end = feature.start - 1
+                    for feature in mask_seq_features:
+                        if feature.end < first_feature.start and feature.end > prime3_start:
+                            prime3_start = feature.end + 1
+
+            # Constrain to sequence boundaries if seq_length is available
+            if seq_length:
+                prime5_end = min(prime5_end, seq_length)
+                prime3_end = min(prime3_end, seq_length)
+
+            # Write BED entries if regions are valid (start < end)
+            if prime5_end > prime5_start:
                 f5.write(f"{pattern.seqname}\t{prime5_start}\t{prime5_end}\t{pattern.group_id}_5prime\n")
 
-            if prime3_end >= prime3_start:
+            if prime3_end > prime3_start:
                 f3.write(f"{pattern.seqname}\t{prime3_start}\t{prime3_end}\t{pattern.group_id}_3prime\n")
 
 
@@ -1005,7 +1142,7 @@ def run_mmseqs_clustering(input_fasta: str, output_dir: Path, threads: int = 1) 
         return False
 
 
-def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments: int = 3) -> None:
+def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments: int = 3, verbose: bool = False) -> None:
     """Run all-vs-all alignment analysis on prime sequences.
 
     For 5' sequences: use --end 3 (3' end fixed, analyze 5' similarity)
@@ -1019,6 +1156,8 @@ def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments:
         Number of threads for parallel processing, default 1
     min_num_alignments : int, optional
         Minimum number of alignments for length threshold calculation, default 3
+    verbose : bool, optional
+        Print verbose progress messages for alignment analysis, default False
     """
     alignment_files = [
         ('ENDO_RT_5prime.fasta', 'ENDO_RT_5prime_alignment.tsv', '3'),  # 5' seqs -> fix 3' end
@@ -1060,7 +1199,7 @@ def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments:
                 mismatch=-2,
                 score_threshold=20,
                 threads=threads,
-                verbose=False  # Suppress detailed progress messages
+                verbose=verbose
             )
             print(f"    → {output_name}")
         except Exception as e:
@@ -1091,7 +1230,7 @@ def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sophisticated extraction of LINE regions with domain patterns",
+        description="Extraction of LINE regions with domain patterns",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Pattern Requirements:
@@ -1125,6 +1264,10 @@ Examples:
                        help='Number of threads for alignment analysis (default: 1)')
     parser.add_argument('--min-num-alignments', type=int, default=3,
                        help='Minimum number of alignments for length threshold calculation (default: 3)')
+    parser.add_argument('--mask-gff3',
+                       help='Optional: GFF3 file with features that can limit flanking regions')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='Print verbose progress messages for alignment analysis (default: False)')
 
     args = parser.parse_args()
 
@@ -1137,6 +1280,16 @@ Examples:
     print(f"Parsing GFF3 file: {args.annotations}")
     all_features = parse_gff3_features(args.annotations)
     print(f"Found {len(all_features)} total features")
+
+    # Parse mask GFF3 if provided
+    mask_features = None
+    if args.mask_gff3:
+        if not Path(args.mask_gff3).exists():
+            print(f"Error: Mask GFF3 file {args.mask_gff3} not found")
+            sys.exit(1)
+        print(f"Parsing mask GFF3 file: {args.mask_gff3}")
+        mask_features = parse_gff3_features(args.mask_gff3)
+        print(f"Found {len(mask_features)} mask features")
 
     print("Filtering LINE features...")
     line_features = get_line_features(all_features)
@@ -1175,7 +1328,7 @@ Examples:
         'endo_rt_3prime': output_dir / 'ENDO_RT_3prime.fasta',
         'endo_rt_rh_5prime': output_dir / 'ENDO_RT_RH_5prime.fasta',
         'endo_rt_rh_3prime': output_dir / 'ENDO_RT_RH_3prime.fasta',
-        'gff_out': output_dir / 'grouped_features.gff3'
+        'gff_out': output_dir / 'DANTE_LINE.gff3'
     }
 
     # Set up BED file
@@ -1186,12 +1339,17 @@ Examples:
         bed_file = tempfile.mktemp(suffix='.bed')
         keep_bed = args.keep_bed
 
+    # Load sequence lengths from genome FASTA index
+    print(f"Loading sequence lengths from genome index...")
+    seq_lengths = load_sequence_lengths(args.genome)
+    print(f"  Loaded lengths for {len(seq_lengths)} sequences")
+
     print(f"Creating BED file for core regions (no flanking)...")
     create_extraction_bed(patterns, all_features, args.flank, bed_file, include_flanking=False)
 
     print(f"Extracting sequences from {args.genome}...")
     success = extract_all_sequences(args.genome, bed_file, patterns, all_features,
-                                   output_files, args.flank)
+                                   output_files, args.flank, mask_features, seq_lengths)
 
     # Clean up BED file
     if not keep_bed and os.path.exists(bed_file):
@@ -1208,7 +1366,7 @@ Examples:
                 print(f"  {name}: {path.name}")
 
         # Run alignment analysis on prime sequences
-        run_prime_alignments(output_dir, threads=args.threads, min_num_alignments=args.min_num_alignments)
+        run_prime_alignments(output_dir, threads=args.threads, min_num_alignments=args.min_num_alignments, verbose=args.verbose)
 
         # Load alignment lengths and create LINE elements
         print("\nCreating LINE_element features from alignment data...")

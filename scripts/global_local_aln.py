@@ -516,6 +516,170 @@ def write_results_table(results, output_file):
             f.write('\t'.join(row) + '\n')
 
 
+def extract_end_region(fasta_file, end, region_length=30, output_file=None):
+    """
+    Extract a fixed-length region from the 5' or 3' end of sequences.
+
+    Parameters
+    ----------
+    fasta_file : str
+        Path to input FASTA file
+    end : str
+        Which end to extract ("5" or "3")
+    region_length : int, optional
+        Length of region to extract, default 30
+    output_file : str, optional
+        Output FASTA file. If None, creates a temporary file
+
+    Returns
+    -------
+    str
+        Path to output FASTA file with extracted regions
+    """
+    import tempfile
+
+    if output_file is None:
+        output_file = tempfile.mktemp(suffix='_end_region.fasta')
+
+    sequences = read_fasta_sequences(fasta_file)
+
+    with open(output_file, 'w') as f:
+        for seq_id, seq in sequences:
+            if end == "5":
+                # Extract first region_length nucleotides
+                region = seq[:region_length] if len(seq) >= region_length else seq
+            else:  # end == "3"
+                # Extract last region_length nucleotides
+                region = seq[-region_length:] if len(seq) >= region_length else seq
+
+            f.write(f">{seq_id}\n{region}\n")
+
+    return output_file
+
+
+def run_mmseqs_prefilter(fasta_file, end, min_identity=0.8, threads=1, verbose=True):
+    """
+    Run MMseqs2 easy-search to identify candidate pairs for alignment.
+
+    Uses a 30nt region from the correct end (matching the fixed end in alignment).
+
+    Parameters
+    ----------
+    fasta_file : str
+        Path to input FASTA file
+    end : str
+        Which end is fixed ("5" or "3")
+    min_identity : float, optional
+        Minimum sequence identity (0-1), default 0.8 (80%)
+    threads : int, optional
+        Number of threads, default 1
+    verbose : bool, optional
+        Print progress messages, default True
+
+    Returns
+    -------
+    set of tuple
+        Set of (seq1_id, seq2_id) pairs that passed prefiltering
+    """
+    import subprocess
+    import tempfile
+    import os
+
+    # Extract 30nt from the correct end
+    if verbose:
+        print(f"  Extracting 30nt from {end}' end for MMseqs2 prefiltering...")
+
+    end_region_file = extract_end_region(fasta_file, end, region_length=30)
+
+    # Create temporary directory for MMseqs2
+    tmp_dir = tempfile.mkdtemp(prefix='mmseqs_prefilter_')
+    output_file = os.path.join(tmp_dir, 'search_results.tsv')
+
+    try:
+        # Run MMseqs2 easy-search
+        # Format: query target identity alnlen mismatch gapopen qstart qend tstart tend evalue bits
+        if verbose:
+            print(f"  Running MMseqs2 easy-search with {min_identity*100:.0f}% identity threshold...")
+
+        cmd = [
+            'mmseqs', 'easy-search',
+            end_region_file,
+            end_region_file,  # Search against itself
+            output_file,
+            tmp_dir,
+            '--min-seq-id', str(min_identity),
+            '--threads', str(threads),
+            '--format-output', 'query,target',
+            '--search-type', '3'   #Nucleotide search
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+        # Parse results to get candidate pairs
+        candidate_pairs = set()
+        with open(output_file, 'r') as f:
+            for line in f:
+                fields = line.strip().split('\t')
+                if len(fields) >= 2:
+                    query_id = fields[0]
+                    target_id = fields[1]
+
+                    # Skip self-hits and ensure consistent ordering
+                    if query_id != target_id:
+                        pair = tuple(sorted([query_id, target_id]))
+                        candidate_pairs.add(pair)
+
+        if verbose:
+            print(f"  MMseqs2 prefiltering identified {len(candidate_pairs)} candidate pairs")
+
+        return candidate_pairs
+
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: MMseqs2 prefiltering failed: {e}", file=sys.stderr)
+        print(f"stderr: {e.stderr}", file=sys.stderr)
+        print("Falling back to all-vs-all comparison without prefiltering", file=sys.stderr)
+        return None
+    except FileNotFoundError:
+        print("Warning: mmseqs not found. Falling back to all-vs-all comparison without prefiltering",
+              file=sys.stderr)
+        return None
+    finally:
+        # Clean up temporary files
+        try:
+            os.remove(end_region_file)
+        except:
+            pass
+        try:
+            import shutil
+            shutil.rmtree(tmp_dir)
+        except:
+            pass
+
+
+def generate_sequence_pairs_filtered(sequences, candidate_pairs):
+    """
+    Generate sequence pairs from a filtered set of candidates.
+
+    Parameters
+    ----------
+    sequences : list of tuple
+        List of (seq_id, sequence) tuples
+    candidate_pairs : set of tuple
+        Set of (seq1_id, seq2_id) pairs to process
+
+    Yields
+    ------
+    tuple
+        (seq1_id, seq1, seq2_id, seq2) for each candidate pair
+    """
+    # Create lookup dict for fast access
+    seq_dict = {seq_id: seq for seq_id, seq in sequences}
+
+    for seq1_id, seq2_id in candidate_pairs:
+        if seq1_id in seq_dict and seq2_id in seq_dict:
+            yield (seq1_id, seq_dict[seq1_id], seq2_id, seq_dict[seq2_id])
+
+
 def run_all_vs_all_alignment(
     fasta_file,
     output_file,
@@ -526,7 +690,9 @@ def run_all_vs_all_alignment(
     mismatch=-2,
     score_threshold=20,
     threads=1,
-    verbose=True
+    verbose=True,
+    use_prefilter=True,
+    prefilter_identity=0.8
 ):
     """
     Run all-vs-all pairwise alignment analysis on sequences in a FASTA file.
@@ -553,6 +719,10 @@ def run_all_vs_all_alignment(
         Number of threads for parallel processing, default 1
     verbose : bool, optional
         Print progress messages, default True
+    use_prefilter : bool, optional
+        Use MMseqs2 prefiltering to speed up alignment, default True
+    prefilter_identity : float, optional
+        Minimum identity threshold for MMseqs2 prefiltering (0-1), default 0.8 (80%)
 
     Returns
     -------
@@ -581,34 +751,100 @@ def run_all_vs_all_alignment(
     if verbose:
         print(f"Found {len(sequences)} sequences")
 
-    # Perform all-to-all comparisons
-    results = []
-    total_comparisons = len(sequences) * (len(sequences) - 1) // 2
-
+    # Calculate total possible pairs
+    total_possible_pairs = len(sequences) * (len(sequences) - 1) // 2
     if verbose:
-        print(f"Performing {total_comparisons} pairwise alignments using {threads} threads...")
+        print(f"Total possible pairwise comparisons: {total_possible_pairs}")
+
+    # Run MMseqs2 prefiltering if enabled and sequence count is sufficient
+    candidate_pairs = None
+    if use_prefilter:
+        if len(sequences) < 100:
+            # Skip prefiltering for small datasets
+            if verbose:
+                print(f"\nSkipping prefiltering (fewer than 100 sequences)")
+            use_prefilter = False
+        else:
+            if verbose:
+                print(f"\nRunning MMseqs2 prefiltering...")
+            candidate_pairs = run_mmseqs_prefilter(
+                fasta_file,
+                end,
+                min_identity=prefilter_identity,
+                threads=threads,
+                verbose=verbose
+            )
+
+            # If prefiltering failed, fall back to all-vs-all
+            if candidate_pairs is None:
+                use_prefilter = False
+            elif verbose:
+                # Report filtering statistics
+                num_filtered = len(candidate_pairs)
+                reduction_pct = (1 - num_filtered / total_possible_pairs) * 100 if total_possible_pairs > 0 else 0
+                print(f"  Prefiltering reduced comparisons by {reduction_pct:.1f}% ({total_possible_pairs} → {num_filtered})")
+
+    # Determine comparison strategy
+    if use_prefilter and candidate_pairs is not None:
+        # Use prefiltered pairs
+        total_comparisons = len(candidate_pairs)
+        if verbose:
+            print(f"\nPerforming {total_comparisons} prefiltered pairwise alignments using {threads} threads...")
+        pair_generator = generate_sequence_pairs_filtered(sequences, candidate_pairs)
+    else:
+        # Use all-vs-all pairs
+        total_comparisons = len(sequences) * (len(sequences) - 1) // 2
+        if verbose:
+            print(f"\nPerforming {total_comparisons} pairwise alignments using {threads} threads...")
+        pair_generator = generate_sequence_pairs(sequences)
+
+    # Perform comparisons
+    results = []
 
     if threads == 1:
         # Serial processing for single thread
         comparison_count = 0
-        for pair_data in generate_sequence_pairs(sequences):
+        for pair_data in pair_generator:
             comparison_count += 1
             if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
                 print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
 
-            result = run_single_comparison(pair_data, args)
+            # Handle different tuple formats from generators
+            if len(pair_data) == 6:
+                # From generate_sequence_pairs: (i, j, seq1_id, seq1, seq2_id, seq2)
+                result = run_single_comparison(pair_data, args)
+            else:
+                # From generate_sequence_pairs_filtered: (seq1_id, seq1, seq2_id, seq2)
+                seq1_id, seq1, seq2_id, seq2 = pair_data
+                result = run_alignment_comparison(seq1_id, seq1, seq2_id, seq2, args)
+                # Apply score threshold
+                if result['max_score'] < args.score_threshold:
+                    result = None
+
             if result is not None:
                 results.append(result)
     else:
         # Parallel processing
         comparison_count = 0
         with ThreadPoolExecutor(max_workers=threads) as executor:
-            # Submit all tasks
-            future_to_pair = {executor.submit(run_single_comparison, pair_data, args): pair_data
-                            for pair_data in generate_sequence_pairs(sequences)}
+            # Submit all tasks - need to handle different tuple formats
+            futures = []
+            for pair_data in pair_generator:
+                if len(pair_data) == 6:
+                    # From generate_sequence_pairs
+                    future = executor.submit(run_single_comparison, pair_data, args)
+                else:
+                    # From generate_sequence_pairs_filtered
+                    seq1_id, seq1, seq2_id, seq2 = pair_data
+                    # Create a wrapper function that applies threshold
+                    def align_and_filter(s1_id, s1, s2_id, s2, a):
+                        res = run_alignment_comparison(s1_id, s1, s2_id, s2, a)
+                        return res if res['max_score'] >= a.score_threshold else None
+                    future = executor.submit(align_and_filter, seq1_id, seq1, seq2_id, seq2, args)
+                futures.append(future)
 
             # Collect results as they complete
-            for future in as_completed(future_to_pair):
+            for future in as_completed(futures):
                 comparison_count += 1
                 if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
                     print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
@@ -646,8 +882,16 @@ def main():
                     help="Minimum max_score for alignment to be reported (default 20)")
     ap.add_argument("-t", "--threads", type=int, default=1,
                     help="Number of threads for parallel processing (default 1)")
+    ap.add_argument("--no-prefilter", action="store_true",
+                    help="Disable MMseqs2 prefiltering (use full all-vs-all comparison)")
+    ap.add_argument("--prefilter-identity", type=float, default=0.8,
+                    help="Minimum identity for MMseqs2 prefiltering (0-1, default 0.8)")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="Print progress messages (default: False)")
     args = ap.parse_args()
-    print(args)
+
+    if args.verbose:
+        print(args)
 
     # Call the main function with parsed arguments
     run_all_vs_all_alignment(
@@ -660,7 +904,9 @@ def main():
         mismatch=args.mismatch,
         score_threshold=args.score_threshold,
         threads=args.threads,
-        verbose=True
+        verbose=args.verbose,
+        use_prefilter=not args.no_prefilter,
+        prefilter_identity=args.prefilter_identity
     )
 
 
