@@ -130,14 +130,17 @@ sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.
 
 
 ## Changelog:
-- v 0.5.1 - graphical output to PDF added
-- v 0.5.2 - RepeatMasker sensitivity can be set
-- v 0.6.0 - REXdb Viridiplante v4.0, library size reduction added, RepeatMasker parallelization added, missing full LTR-RT handling added
-- v 0.6.1 DANTE_LTR update to 0.4.0.3 (bugfix)
-- v 0.6.2 bugfix in bigwig calculation
-- v 0.6.3 dante update to 0.2.5 - bugfix
-- v 0.6.4 dante_ltr runs on smaller chunks (50000000) -> better memory usage
-- v 0.6.5 bugfix  in gff3 merging
-- v 0.6.6 DANTE_LTR updated to 0.6.0.4, tidecluster updated to 1.6
-- v 0.6.7 more efficient calculation of bigwig files
+
+- v 0.7.2 DANTE_LINE added
 - v 0.7.1 DANTE_TIR added
+- v 0.6.7 more efficient calculation of bigwig files
+- v 0.6.6 DANTE_LTR updated to 0.6.0.4, tidecluster updated to 1.6
+- v 0.6.5 bugfix  in gff3 merging
+- v 0.6.4 dante_ltr runs on smaller chunks (50000000) -> better memory usage
+- v 0.6.3 dante update to 0.2.5 - bugfix
+- v 0.6.2 bugfix in bigwig calculation
+- v 0.6.1 DANTE_LTR update to 0.4.0.3 (bugfix)
+- v 0.6.0 - REXdb Viridiplante v4.0, library size reduction added, RepeatMasker parallelization added, missing full LTR-RT handling added
+- v 0.5.2 - RepeatMasker sensitivity can be set
+- v 0.5.1 - graphical output to PDF added
+- 
