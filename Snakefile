@@ -5,7 +5,7 @@ def create_dirs(*dirs):
         if not os.path.exists(d):
             os.makedirs(d)
 print(config)
-subdirs = [config['output_dir']+"/"+i for i in ['DANTE', 'DANTE_TIR', 'DANTE_LTR',
+subdirs = [config['output_dir']+"/"+i for i in ['DANTE', 'DANTE_TIR', 'DANTE_LINE', 'DANTE_LTR',
                                                 'TideCluster/default',
                                                 'TideCluster/short_monomer',
                                                 'Libraries', 'RepeatMasker']]
@@ -138,6 +138,9 @@ rule dante_tir:
         touch {output.checkpoint}
         """
 
+
+
+
 rule filter_dante:
     input:
         F"{config['output_dir']}/DANTE/DANTE.gff3"
@@ -151,6 +154,33 @@ rule filter_dante:
     shell:
         """
         dante_gff_output_filtering.py --dom_gff {input} --domains_filtered {output.gff} --domains_prot_seq {output.fasta}
+        """
+
+rule dante_line:
+    input:
+        gff=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
+        genome=config["genome_fasta"]
+    output:
+        line_rep_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta",
+        gff_out=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
+        line_regions=F"{config['output_dir']}/DANTE_LINE/LINE_regions.fasta",
+        line_regions_extended=F"{config['output_dir']}/DANTE_LINE/LINE_regions_extended.fasta"
+    params:
+        output_dir=F"{config['output_dir']}/DANTE_LINE"
+    conda:
+        "envs/dante_line.yaml"
+    threads: workflow.cores
+    shell:
+        """
+        # Add scripts directory to PATH
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+
+        # Run dante_line.py - it may fail if no LINE elements are found
+        dante_line.py -g {input.genome} -a {input.gff} -o {params.output_dir} -t {threads} || true
+
+        # Ensure all output files exist (create empty ones if needed)
+        touch {output.gff_out} {output.line_regions} {output.line_regions_extended} {output.line_rep_lib}
         """
 
 rule dante_ltr:
@@ -445,6 +475,8 @@ rule filter_ltr_rt_library:
 rule concatenate_libraries:
     input:
         ltr_rt_library=F"{config['output_dir']}/Libraries/LTR_RTs_library_clean.fasta",
+        dante_tir_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_min3.fasta",
+        line_rep_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta"
     output:
         full_names=F"{config['output_dir']}/Libraries/combined_library.fasta",
         short_names=F"{config['output_dir']}/Libraries/combined_library_short_names.fasta",
@@ -453,13 +485,27 @@ rule concatenate_libraries:
         rdna_library = os.path.join(snakemake_dir, "data/rdna_library.fasta")
     shell:
         """
+        # Start with LTR library or custom library
         if [ -z "{params.custom_library}" ]; then
             cp {input.ltr_rt_library} {output.full_names}
         else
             cat {input.ltr_rt_library} {params.custom_library} > {output.full_names}
         fi
-        # append rDNA library
+
+        # Append DANTE_TIR library if not empty
+        if [ -s {input.dante_tir_lib} ]; then
+            cat {input.dante_tir_lib} >> {output.full_names}
+        fi
+
+        # Append LINE library if not empty
+        if [ -s {input.line_rep_lib} ]; then
+            cat {input.line_rep_lib} >> {output.full_names}
+        fi
+
+        # Append rDNA library
         cat {params.rdna_library} >> {output.full_names}
+
+        # Create short names version
         awk '/^>/{{count++; split($0,a,"#"); print ">" count "#" a[2]; next}} {{print}}' {output.full_names} > {output.short_names}
         """
 

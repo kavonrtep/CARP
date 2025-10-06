@@ -1328,7 +1328,8 @@ Examples:
         'endo_rt_3prime': output_dir / 'ENDO_RT_3prime.fasta',
         'endo_rt_rh_5prime': output_dir / 'ENDO_RT_RH_5prime.fasta',
         'endo_rt_rh_3prime': output_dir / 'ENDO_RT_RH_3prime.fasta',
-        'gff_out': output_dir / 'DANTE_LINE.gff3'
+        'gff_out': output_dir / 'DANTE_LINE.gff3',
+        'line_rep_lib': output_dir / 'LINE_rep_lib.fasta'
     }
 
     # Set up BED file
@@ -1388,7 +1389,27 @@ Examples:
             # Run MMseqs2 clustering on extended sequences
             clustering_success = run_mmseqs_clustering(str(extended_fasta_path), output_dir, threads=args.threads)
 
-            if not clustering_success:
+            if clustering_success:
+                # Process cluster representative sequences to create repeat library
+                print(f"\nCreating LINE repeat library from cluster representatives...")
+                mmseqs_rep_fasta = output_dir / 'mmseqs' / 'cluster_rep_seq.fasta'
+                line_rep_lib = output_files['line_rep_lib']
+                if mmseqs_rep_fasta.exists():
+                    try:
+                        with open(mmseqs_rep_fasta, 'r') as inf, open(line_rep_lib, 'w') as outf:
+                            for line in inf:
+                                if line.startswith('>'):
+                                    # Add #Class_I/LINE suffix to sequence name
+                                    seq_name = line.strip()
+                                    outf.write(f"{seq_name}#Class_I/LINE\n")
+                                else:
+                                    outf.write(line)
+                        print(f"  → LINE_rep_lib.fasta ({line_rep_lib})")
+                    except Exception as e:
+                        print(f"  Warning: Failed to create LINE repeat library: {e}", file=sys.stderr)
+                else:
+                    print(f"  Warning: Cluster representative file not found: {mmseqs_rep_fasta}", file=sys.stderr)
+            else:
                 print("  Warning: MMseqs2 clustering failed", file=sys.stderr)
         else:
             print("  Warning: Failed to extract extended LINE regions", file=sys.stderr)

@@ -1,0 +1,8 @@
+name: seqtk
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - seqkit
+  - parasail-python
+  - mmseqs2
