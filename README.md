@@ -6,6 +6,8 @@ elements in genomic sequences.
 
 - The pipeline uses DANTE/DANTE_LTR to identify intact
 LTR retrotransposons.
+- DANTE_TIR is used to identify DNA transposons
+- DANTE_LINE is used to identify LINE elements.
 - TideCluster is employed to identify tandem repeats, with separate processes
 for default-length and short monomer repeats.
 - The pipeline then creates custom libraries of repeat sequences, including those from LTR
@@ -42,7 +44,7 @@ repeatmasker_sensitivity: default
 reduce_library: True  
 ```
 
-The pipeline allows to provide the custome repeat library by specifying
+The pipeline allows providing the custom repeat library by specifying
 the `custom_library` parameter. This parameter is optional.
 This library is used by RepeatMasker for similarity-based annotation. The sequences must
 be in FASTA format with sequence IDs in the format `>repeatname#class/subclass`. The
@@ -97,10 +99,10 @@ inserted DNA transposons. Such composite elements are removed from the library t
 incorrect or ambiguous annotations when RepeatMasker is applied later in the pipeline.
 
 File `tandem_repeat_library` (optional) is used by TideCluster to annotate discovered tandem repeats based
-on the similarity. Format is the same as above repeat database. E.g. 
+on the similarity. Format is the same as the above repeat database. E.g. 
 `>sequence_id/Satellite/PisTR-B`
 
-To run annotation pipeline, execute following command:
+To run an annotation pipeline, execute the following command:
 
 ```bash
 singularity run -B /path/to/ -B $PWD assembly_repeat_annotation_pipeline.sif -c config.yaml -t 20
@@ -114,7 +116,96 @@ Use [./scripts/annotate_repeats_metacentrum.sh](./scripts/annotate_repeats_metac
 
 
 ## Output structure
-TODO
+
+The pipeline generates a structured output directory with the following key files and subdirectories:
+
+### Top-level Output Files (Symlinks)
+
+Main annotation files for easy access:
+- `DANTE_filtered.gff3` - Filtered DANTE protein domain annotations
+- `DANTE_LTR.gff3` - Complete LTR retrotransposons identified by DANTE_LTR
+- `DANTE_TIR.gff3` - DNA transposons with Terminal Inverted Repeats
+- `Tandem_repeats_TideCluster.gff3` - Tandem repeats detected by TideCluster
+- `Tandem_repeats_TideCluster_annotated.gff3` - Annotated tandem repeats (if custom library provided)
+- `Tandem_repeats_RepeatMasker.gff3` - RepeatMasker annotation of tandem repeat library
+- `Mobile_elements_RepeatMasker.gff3` - Mobile elements (Class_I and Class_II transposons)
+- `Simple_repeats_RepeatMasker.gff3` - Simple/low complexity repeats
+- `Low_complexity_RepeatMasker.gff3` - Low complexity regions
+- `rDNA_RepeatMasker.gff3` - Ribosomal DNA annotations
+- `All_Ty1_Copia_RepeatMasker.gff3` - All Ty1/Copia LTR retrotransposons
+- `All_Ty3_Gypsy_RepeatMasker.gff3` - All Ty3/Gypsy LTR retrotransposons
+
+Summary files:
+- `summary_statistics.csv` - Genome-wide repeat statistics by classification
+- `summary_plots.pdf` - Visualization of repeat content and distribution
+- `all_repeats_for_masking.bed` - Merged coordinates of all repeats (BED format)
+- `gaps_10plus.bed` - Assembly gaps (N regions ≥10 bp)
+
+HTML reports:
+- `TideCluster_report.html` - Interactive report for tandem repeat analysis
+- `DANTE_LTR_report.html` - Summary of LTR retrotransposon findings
+
+### Subdirectory Structure
+
+**DANTE/** - Protein domain-based repeat detection
+- `DANTE.gff3` - Raw DANTE domain annotations
+- `DANTE_filtered.gff3` - Filtered domain annotations
+- `DANTE_filtered.fasta` - Protein sequences for filtered domains
+
+**DANTE_LTR/** - Complete LTR retrotransposon detection
+- `DANTE_LTR.gff3` - Complete LTR-RT annotations with both LTRs
+- `DANTE_LTR_summary.html` - Summary report with statistics and visualizations
+- `LTR_RTs_library.fasta` - Representative LTR-RT sequences for RepeatMasker
+- `library/` - Detailed clustering and library construction results
+
+**DANTE_TIR/** - DNA transposon with TIR detection
+- `DANTE_TIR_final.gff3` - Final TIR transposon annotations
+- `DANTE_TIR_final.fasta` - TIR transposon sequences
+- `TIR_classification_summary.txt` - Classification statistics
+- `all_representative_elements_min3.fasta` - Representative TIR elements library
+
+**DANTE_LINE/** - LINE element detection
+- `DANTE_LINE.gff3` - LINE element annotations
+- `LINE_rep_lib.fasta` - LINE representative library for RepeatMasker
+- `LINE_regions.fasta` - Extracted LINE sequences
+- `LINE_regions_extended.fasta` - Extended LINE regions for analysis
+
+**TideCluster/** - Tandem repeat detection
+- `default/` - Standard parameter run (40-5000 bp monomers)
+  - `TideCluster_clustering.gff3` - Clustered tandem repeat families
+  - `TideCluster_tidehunter.gff3` - Raw TideHunter detections
+  - `TideCluster_annotation.gff3` - Annotated based on custom library (if provided)
+  - `TideCluster_index.html` - Interactive HTML report
+  - `TideCluster_consensus_dimer_library.fasta` - Consensus sequences
+  - `TideCluster_clustering_10k.bw` and `TideCluster_clustering_100k.bw` - BigWig density tracks
+  - `TideCluster_clustering_split_files/` - Split GFF3 files by cluster
+  - `TideCluster_clustering_split_files_bigwig/` - BigWig files for each cluster
+  - `RM_on_TideCluster_Library.gff3` - RepeatMasker annotation using tandem repeat library
+- `short_monomer/` - Short monomer run (10-39 bp)
+  - Similar structure to `default/` directory
+- `TideCluster_clustering_default_and_short_merged.gff3` - Merged results from both runs
+
+**Libraries/** - Custom repeat libraries
+- `combined_library.fasta` - Full library with complete names
+- `combined_library_short_names.fasta` - Library with shortened IDs
+- `combined_library_reduced.fasta` - Size-reduced library (if `reduce_library: True`)
+- `LTR_RTs_library_clean.fasta` - LTR library filtered for Class_II contamination
+- `class_ii_library.fasta` - Class_II/Subclass_1 elements for filtering
+
+**RepeatMasker/** - Similarity-based annotation
+- `RM_on_combined_library.out` - RepeatMasker standard output
+- `RM_on_combined_library.gff3` - RepeatMasker annotations in GFF3
+- `RM_on_combined_library_plus_DANTE.gff3` - Merged RepeatMasker and DANTE annotations
+- `Repeat_Annotation_NoSat.gff3` - Final annotation excluding tandem repeats
+- `Repeat_Annotation_NoSat_10k.bw` and `Repeat_Annotation_NoSat_100k.bw` - Density tracks
+
+**Repeat_Annotation_NoSat_split_by_class_gff3/** - Classification-specific annotations
+- Individual GFF3 files for each major repeat class
+- Used for generating class-specific density tracks
+
+**Repeat_Annotation_NoSat_split_by_class_bigwig/** - Density visualizations
+- BigWig files for each repeat class at 10kb and 100kb windows
+- Suitable for genome browsers (IGV, UCSC, JBrowse)
 
 ## Build the container
 
