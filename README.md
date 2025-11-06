@@ -213,11 +213,10 @@ To build the container, run the following command:
 
 ```bash
 SINGULARITY=`which singularity`
-sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.7.2.sif Singularity
+sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.7.3.sif Singularity
 ```
 
-```bash
-```
+
 
 
 ## Changelog:

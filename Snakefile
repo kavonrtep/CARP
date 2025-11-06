@@ -159,6 +159,7 @@ rule filter_dante:
 rule dante_line:
     input:
         gff=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
+        gff3_tidehunter=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter.gff3",
         genome=config["genome_fasta"]
     output:
         line_rep_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta",
@@ -177,7 +178,7 @@ rule dante_line:
         export PATH=$scripts_dir:$PATH
 
         # Run dante_line.py - it may fail if no LINE elements are found
-        dante_line.py -g {input.genome} -a {input.gff} -o {params.output_dir} -t {threads} || true
+        dante_line.py -g {input.genome} -a {input.gff} -o {params.output_dir} -t {threads}  --mask_gff3 {input.gff3_tidehunter} || true
 
         # Ensure all output files exist (create empty ones if needed)
         touch {output.gff_out} {output.line_regions} {output.line_regions_extended} {output.line_rep_lib}
@@ -583,7 +584,7 @@ rule subtract_satellites_from_rm:
         "envs/bedtools.yaml"
     shell:
         """
-        bedtools subtract -a {input.rm_gff} -b {input.satellite_annotation} -A > {output}
+        bedtools subtract -a {input.rm_gff} -b {input.satellite_annotation}  > {output}
         """
 
 rule merge_rm_and_dante:
