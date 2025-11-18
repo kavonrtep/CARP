@@ -275,12 +275,12 @@ rule tidecluster_long:
         if [ -z "{params.library}" ]; then
             cd $wd
             echo "Running TideCluster without a library"
-            TideCluster.py run_all -pr $prefix -c {threads}  -f $genome_absolute_path
+            TideCluster.py run_all -pr $prefix -c {threads}  -f $genome_absolute_path --long
         else
             library_absolute_path=$(realpath {params.library})
             echo "Running TideCluster with a custom library"
             cd $wd
-            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -l $library_absolute_path
+            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -l $library_absolute_path --long
         fi
         # if gff3_annot was not created but exit code is 0, it means that there were no clusters found, create an empty file
         # but check if gff3_tidehunter was created
