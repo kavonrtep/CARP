@@ -222,6 +222,7 @@ sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.
 
 
 ## Changelog:
+- v 0.8 - Bug fixe in DANTE_LINE, filtering of tandem repeats from DANTE_LINE added
 - v 0.7.4 - TideCluster updated to v. 1.8.0  with --long option added to detect tandem repeats with monomer up to 25kb. Bugfix in subtracting tandem repeats from dispersed repeats.
 - v 0.7.2 DANTE_LINE added,
 - v 0.7.1 DANTE_TIR added
