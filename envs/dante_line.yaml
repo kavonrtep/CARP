@@ -1,4 +1,4 @@
-name: seqtk
+name: dante_line
 channels:
   - conda-forge
   - bioconda

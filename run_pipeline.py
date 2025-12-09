@@ -135,7 +135,7 @@ rDNA_45S/ITS1
 
     cmd = (F"snakemake --snakefile {script_dir}/Snakefile --configfile {args.config} "
            F"--cores {args.threads} --use-conda --conda-prefix {CONDA_ENVS_PATH} "
-           F"--conda-frontend conda --show-failed-logs"
+           F"--conda-frontend conda --show-failed-logs --keep-incomplete"
            F" {args.snakemake_args}")
 
     # append cache dir to other environment variables

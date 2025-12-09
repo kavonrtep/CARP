@@ -53,8 +53,12 @@ rm_engine = config["repeatmasker_engine"]
 if rm_engine not in ["ncbi", "abblast"]:
     raise ValueError("Invalid RepeatMasker engine. Must be either 'ncbi' or 'abblast'.")
 
+# Define path to cleaned genome (will be created by clean_genome_fasta rule)
+genome_fasta_cleaned = F"{config['output_dir']}/genome_cleaned.fasta"
+
 rule all:
     input:
+        genome_fasta_cleaned,
         F"{config['output_dir']}/DANTE/DANTE.gff3",
         F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
         F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
@@ -83,9 +87,25 @@ rule all:
         F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done",
         F"{config['output_dir']}/summary_plots.pdf"
 
+rule clean_genome_fasta:
+    """
+    Clean FASTA headers by removing everything after the first whitespace character.
+    This ensures consistent sequence IDs across all downstream analyses and prevents
+    issues with tools that handle whitespace differently in FASTA headers.
+    """
+    input:
+        config["genome_fasta"]
+    output:
+        genome_fasta_cleaned
+    shell:
+        """
+        # Clean FASTA headers - keep only ID before first whitespace
+        awk '/^>/ {{split($1, a, " "); print a[1]; next}} {{print}}' {input} > {output}
+        """
+
 rule dante:
     input:
-        config["genome_fasta"],
+        genome_fasta_cleaned,
     output:
         F"{config['output_dir']}/DANTE/DANTE.gff3"
     conda:
@@ -101,7 +121,7 @@ rule dante:
 rule dante_tir:
     input:
         gff=F"{config['output_dir']}/DANTE/DANTE.gff3",
-        fasta=config["genome_fasta"]
+        fasta=genome_fasta_cleaned
     output:
         checkpoint=F"{config['output_dir']}/DANTE_TIR/.done",
         gff=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
@@ -160,7 +180,7 @@ rule dante_line:
     input:
         gff=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
         gff3_tidehunter=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter.gff3",
-        genome=config["genome_fasta"]
+        genome=genome_fasta_cleaned
     output:
         line_rep_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta",
         gff_out=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
@@ -168,25 +188,37 @@ rule dante_line:
         line_regions_extended=F"{config['output_dir']}/DANTE_LINE/LINE_regions_extended.fasta"
     params:
         output_dir=F"{config['output_dir']}/DANTE_LINE"
+    log:
+        stdout=F"{config['output_dir']}/DANTE_LINE/dante_line.log",
+        stderr=F"{config['output_dir']}/DANTE_LINE/dante_line.err"
+    priority: 50
     conda:
         "envs/dante_line.yaml"
     threads: workflow.cores
     shell:
         """
+        # Enable verbose output
+        set -x
+
         # Add scripts directory to PATH
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
 
-        # Run dante_line.py - it may fail if no LINE elements are found
-        dante_line.py -g {input.genome} -a {input.gff} -o {params.output_dir} -t {threads}  --mask_gff3 {input.gff3_tidehunter} || true
+        # Run dante_line.py - capture stdout and stderr
+        dante_line.py -g {input.genome} -a {input.gff} -o {params.output_dir} -t {threads} --mask-gff3 {input.gff3_tidehunter} > {log.stdout} 2> {log.stderr}
 
-        # Ensure all output files exist (create empty ones if needed)
-        touch {output.gff_out} {output.line_regions} {output.line_regions_extended} {output.line_rep_lib}
+        # Capture exit status
+        exit_status=$?
+
+        echo "dante_line.py completed with exit status: $exit_status" >> {log.stdout}
+
+        # Exit with the captured status
+        exit $exit_status
         """
 
 rule dante_ltr:
     input:
-        fasta=config["genome_fasta"],
+        fasta=genome_fasta_cleaned,
         gff=F"{config['output_dir']}/DANTE/DANTE.gff3"
 
     output:
@@ -217,7 +249,7 @@ rule dante_ltr:
 rule make_library_of_ltrs:
     input:
         gff3=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
-        genome_fasta=F"{config['genome_fasta']}"
+        genome_fasta=genome_fasta_cleaned
     output:
         dir=directory(F"{config['output_dir']}/DANTE_LTR/library"),
         fasta=F"{config['output_dir']}/DANTE_LTR/LTR_RTs_library.fasta"
@@ -243,7 +275,7 @@ rule make_library_of_ltrs:
 
 rule tidecluster_long:
     input:
-        genome_fasta=config["genome_fasta"],
+        genome_fasta=genome_fasta_cleaned,
         library= config.get("tandem_repeat_library", []),
         genome_seqlengths=F"{config['output_dir']}/genome_seqlengths.rds"
     output:
@@ -319,7 +351,7 @@ rule tidecluster_long:
 
 rule tidecluster_short:
     input:
-        genome_fasta=config["genome_fasta"],
+        genome_fasta=genome_fasta_cleaned,
     output:
         gff3_clust=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_clustering.gff3",
         gff3_tidehunter=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_tidehunter.gff3",
@@ -373,7 +405,7 @@ rule tidecluster_short:
 
 rule tidecluster_reannotate:
     input:
-        genome_fasta=config["genome_fasta"],
+        genome_fasta=genome_fasta_cleaned,
         dimer_library_default=F"{config['output_dir']}/TideCluster/default/TideCluster_consensus_dimer_library.fasta",
     output:
         gff3=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3"
@@ -535,7 +567,7 @@ rule reduce_library:
 
 rule repeatmasker:
     input:
-        genome_fasta=config["genome_fasta"],
+        genome_fasta=genome_fasta_cleaned,
         library=F"{config['output_dir']}/Libraries/combined_library.fasta",
         library_short=F"{config['output_dir']}/Libraries/combined_library_short_names.fasta",
         library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced.fasta"
@@ -632,7 +664,7 @@ rule make_track_for_masking:
 
 rule make_track_for_Ns:
     input:
-        genome_fasta=config["genome_fasta"]
+        genome_fasta=genome_fasta_cleaned
     output:
         F"{config['output_dir']}/gaps_10plus.bed"
     conda:
@@ -646,7 +678,7 @@ rule make_summary_statistics_and_split_by_class:
     input:
         rm=F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
         sat_tc=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
-        genome_fasta=config["genome_fasta"]
+        genome_fasta=genome_fasta_cleaned
     output:
         csv=F"{config['output_dir']}/summary_statistics.csv",
         dir=directory(F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3"),
@@ -678,7 +710,7 @@ rule make_bigwig_density:
     params:
         bwdir=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig",
         gffdir=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3",
-        genome_fasta=config["genome_fasta"]
+        genome_fasta=genome_fasta_cleaned
     conda:
         "envs/tidecluster.yaml"
     shell:
@@ -783,7 +815,7 @@ rule add_html_outputs:
 
 rule calculate_seqlengths:
     input:
-        genome_fasta=config["genome_fasta"]
+        genome_fasta=genome_fasta_cleaned
     output:
         F"{config['output_dir']}/genome_seqlengths.rds"
     conda:
