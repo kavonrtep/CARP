@@ -1,4 +1,5 @@
-# Assembly Repeat Annotation Pipeline
+# CARP (Comprehensive Annotation of Repeats pipeline)
+![./figs/CARP.png]
 
 The Assembly annotation pipeline is a comprehensive genome annotation workflow that
 integrates multiple specialized tools to identify and classify various types of repetitive
@@ -215,14 +216,14 @@ To build the container, run the following command:
 SINGULARITY=`which singularity`
 sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.7.4.sif Singularity
 sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.7.5.sif Singularity
-sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.sif Singularity
+sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.0.sif Singularity
 ```
 
 
 
 
 ## Changelog:
-- v 0.8 - Bug fixe in DANTE_LINE, filtering of tandem repeats from DANTE_LINE added
+- v 0.8.0 - Bug fixe in DANTE_LINE, filtering of tandem repeats from DANTE_LINE added
 - v 0.7.4 - TideCluster updated to v. 1.8.0  with --long option added to detect tandem repeats with monomer up to 25kb. Bugfix in subtracting tandem repeats from dispersed repeats.
 - v 0.7.2 DANTE_LINE added,
 - v 0.7.1 DANTE_TIR added
