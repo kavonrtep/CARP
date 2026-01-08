@@ -1,7 +1,8 @@
-# CARP (Comprehensive Annotation of Repeats pipeline)
-![./figs/CARP.png]
 
-The Assembly annotation pipeline is a comprehensive genome annotation workflow that
+
+![CARP.png](figs/CARP.png)
+The Comprehensive Annotation of Repeats Pipeline (CARP) is a
+workflow that
 integrates multiple specialized tools to identify and classify various types of repetitive
 elements in genomic sequences. 
 
