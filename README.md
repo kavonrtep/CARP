@@ -1,6 +1,6 @@
 
+<img src="figs/CARP.png" alt="CARP logo" width="400"/>
 
-![CARP.png](figs/CARP.png)
 The Comprehensive Annotation of Repeats Pipeline (CARP) is a
 workflow that
 integrates multiple specialized tools to identify and classify various types of repetitive
