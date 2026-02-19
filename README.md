@@ -168,7 +168,7 @@ HTML reports:
 - `TIR_classification_summary.txt` - Classification statistics
 - `all_representative_elements_min3.fasta` - Representative TIR elements library
 
-**DANTE_LINE/** - LINE element detection
+**DANTE_LINE/** - LINE element detection - this is experimental and may not work well for all genomes
 - `DANTE_LINE.gff3` - LINE element annotations
 - `LINE_rep_lib.fasta` - LINE representative library for RepeatMasker
 - `LINE_regions.fasta` - Extracted LINE sequences
@@ -220,6 +220,7 @@ SINGULARITY=`which singularity`
 sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.7.4.sif Singularity
 sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.7.5.sif Singularity
 sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.0.sif Singularity
+sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.1.sif Singularity
 ```
 
 
