@@ -4,4 +4,4 @@ channels:
   - bioconda
   - petrnovak
 dependencies:
-  - dante_tir=0.2.2
+  - dante_tir=0.2.4
