@@ -1013,6 +1013,8 @@ rule make_benchmark_report:
                rule_name=BENCHMARKED_RULES)
     output:
         F"{config['output_dir']}/benchmark_report.html"
+    params:
+        benchmark_dir=F"{config['output_dir']}/benchmarks"
     log:
         stdout=F"{config['output_dir']}/logs/make_benchmark_report.log",
         stderr=F"{config['output_dir']}/logs/make_benchmark_report.err"
@@ -1027,5 +1029,3 @@ rule make_benchmark_report:
         export PATH=$scripts_dir:$PATH
         make_benchmark_report.R {params.benchmark_dir} {output}
         """
-    params:
-        benchmark_dir=F"{config['output_dir']}/benchmarks"
