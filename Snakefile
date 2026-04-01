@@ -12,6 +12,19 @@ subdirs = [config['output_dir']+"/"+i for i in ['DANTE', 'DANTE_TIR', 'DANTE_LIN
                                                 'logs', 'benchmarks']]
 create_dirs(*subdirs)
 snakemake_dir = os.path.dirname(workflow.snakefile)
+
+BENCHMARKED_RULES = [
+    "clean_genome_fasta", "dante", "dante_tir", "filter_dante",
+    "dante_line", "dante_ltr", "make_library_of_ltrs",
+    "tidecluster_long", "tidecluster_short", "tidecluster_reannotate",
+    "merge_tidecluster_default_and_short", "make_subclass_2_library",
+    "filter_ltr_rt_library", "concatenate_libraries", "reduce_library",
+    "repeatmasker", "subtract_satellites_from_rm", "merge_rm_and_dante",
+    "make_track_for_masking", "make_track_for_Ns",
+    "make_summary_statistics_and_split_by_class", "make_bigwig_density",
+    "add_top_level_outputs", "calculate_bigwig_density", "add_html_outputs",
+    "calculate_seqlengths", "make_summary_plots",
+]
 print(snakemake_dir)
 def filter_fasta(input_file, output_file, filter_string):
     """Filter FASTA files based on a filter_string, which is a regular expression."""
@@ -86,7 +99,8 @@ rule all:
         F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_100k.bw",
         F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
         F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done",
-        F"{config['output_dir']}/summary_plots.pdf"
+        F"{config['output_dir']}/summary_plots.pdf",
+        F"{config['output_dir']}/benchmark_report.html"
 
 rule clean_genome_fasta:
     """
@@ -991,3 +1005,27 @@ rule make_summary_plots:
         make_summary_plots.R {params.output_dir} {output} || true
         touch {output}
         """
+
+
+rule make_benchmark_report:
+    input:
+        expand(F"{config['output_dir']}/benchmarks/{{rule_name}}.tsv",
+               rule_name=BENCHMARKED_RULES)
+    output:
+        F"{config['output_dir']}/benchmark_report.html"
+    log:
+        stdout=F"{config['output_dir']}/logs/make_benchmark_report.log",
+        stderr=F"{config['output_dir']}/logs/make_benchmark_report.err"
+    conda:
+        "envs/tidecluster.yaml"
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        make_benchmark_report.R {params.benchmark_dir} {output}
+        """
+    params:
+        benchmark_dir=F"{config['output_dir']}/benchmarks"
