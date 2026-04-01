@@ -221,6 +221,7 @@ sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.
 sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.7.5.sif Singularity
 sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.0.sif Singularity
 sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.1.sif Singularity
+sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.2.sif Singularity
 ```
 
 
