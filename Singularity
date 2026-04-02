@@ -40,6 +40,10 @@ From: continuumio/miniconda3
     # Clean up
     conda clean --all
 
+    # Download Plotly.js for standalone HTML reports (no CDN needed at view time)
+    wget -q -O /opt/pipeline/data/plotly.min.js \
+        https://cdn.plot.ly/plotly-2.35.2.min.js
+
     # make root accessible for everyone
     chmod -R 777 /root
     # remove all temp files

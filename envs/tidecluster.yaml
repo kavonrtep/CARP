@@ -4,8 +4,9 @@ channels:
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.8.0
+  - tidecluster=1.8.1
   - dante_ltr=0.4.0.4
   - dante=0.2.5
   - seqkit=2.8.2
   - cap3=10.2011
+  - r-jsonlite
