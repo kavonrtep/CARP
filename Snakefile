@@ -23,7 +23,7 @@ BENCHMARKED_RULES = [
     "make_track_for_masking", "make_track_for_Ns",
     "make_summary_statistics_and_split_by_class", "make_bigwig_density",
     "add_top_level_outputs", "calculate_bigwig_density", "add_html_outputs",
-    "calculate_seqlengths", "make_summary_plots",
+    "calculate_seqlengths", "make_summary_plots", "make_repeat_report",
 ]
 print(snakemake_dir)
 def filter_fasta(input_file, output_file, filter_string):
@@ -51,6 +51,16 @@ rm_sensitivity_option = {
     "quick": "-q",
     "" : ""
     }[config["repeatmasker_sensitivity"]]
+
+# TideCluster sensitivity preset (--sensitivity {quick,default,fast}).
+# Kept in sync with the RepeatMasker sensitivity setting: TideCluster uses
+# RepeatMasker internally for its reannotation step.
+tc_sensitivity = {
+    "default":   "default",
+    "sensitive": "default",   # TideCluster has no "sensitive"; default is closest
+    "quick":     "quick",
+    "":          "default",
+}.get(config["repeatmasker_sensitivity"], "default")
 
 if "reduce_library" not in config:
     config["reduce_library"] = True
@@ -100,7 +110,8 @@ rule all:
         F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
         F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done",
         F"{config['output_dir']}/summary_plots.pdf",
-        F"{config['output_dir']}/benchmark_report.html"
+        F"{config['output_dir']}/benchmark_report.html",
+        F"{config['output_dir']}/repeat_annotation_report.html"
 
 rule clean_genome_fasta:
     """
@@ -462,6 +473,7 @@ rule tidecluster_reannotate:
         gff3=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3"
     params:
         outdir=directory(F"{config['output_dir']}/TideCluster"),
+        tc_sensitivity=tc_sensitivity
     log:
         stdout=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.log",
         stderr=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.err"
@@ -487,7 +499,7 @@ rule tidecluster_reannotate:
         gff_absolute_path=$(realpath {output.gff3})
         cd {params.outdir}
         cp $dl_absolute_path .
-        tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path  -c {threads}
+        tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path  -c {threads} --sensitivity {params.tc_sensitivity}
         rm $dl_basename
         """
 
@@ -1028,4 +1040,45 @@ rule make_benchmark_report:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         make_benchmark_report.R {params.benchmark_dir} {output}
+        """
+
+rule make_repeat_report:
+    input:
+        fai   = genome_fasta_cleaned,
+        stats = F"{config['output_dir']}/summary_statistics.csv",
+        bw_rm = F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done",
+        bw_tc = F"{config['output_dir']}/TideCluster/default/.bigwig_done",
+        ltr   = F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
+        tir   = F"{config['output_dir']}/DANTE_TIR/TIR_classification_summary.txt",
+        line  = F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3"
+    output:
+        F"{config['output_dir']}/repeat_annotation_report.html"
+    params:
+        output_dir       = config['output_dir'],
+        bin_width        = config.get("report_bin_width", 100000),
+        min_len_chart    = config.get("report_min_len_chart", 500000),
+        min_len_tracks   = config.get("report_min_len_tracks", 1000000),
+        max_tracks       = config.get("report_max_tracks", 50),
+        top_sat_clusters = config.get("report_top_sat_clusters", 10)
+    log:
+        stdout = F"{config['output_dir']}/logs/make_repeat_report.log",
+        stderr = F"{config['output_dir']}/logs/make_repeat_report.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/make_repeat_report.tsv"
+    conda:
+        "envs/tidecluster.yaml"
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        make_repeat_report.R \
+            --output_dir {params.output_dir} \
+            --bin_width {params.bin_width} \
+            --min_len_chart {params.min_len_chart} \
+            --min_len_tracks {params.min_len_tracks} \
+            --max_tracks {params.max_tracks} \
+            --top_sat_clusters {params.top_sat_clusters}
         """
