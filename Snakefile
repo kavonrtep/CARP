@@ -69,13 +69,6 @@ else:
     if config["reduce_library"] not in [True, False]:
         raise ValueError("Invalid value for reduce_library_size. Must be either True or False.")
 
-# repeatmasker engine:
-if "repeatmasker_engine" not in config:
-    config["repeatmasker_engine"] = "ncbi"
-rm_engine = config["repeatmasker_engine"]
-# check that the engine is valid - must be either ncbi or abblast
-if rm_engine not in ["ncbi", "abblast"]:
-    raise ValueError("Invalid RepeatMasker engine. Must be either 'ncbi' or 'abblast'.")
 
 # Define path to cleaned genome (will be created by clean_genome_fasta rule)
 genome_fasta_cleaned = F"{config['output_dir']}/genome_cleaned.fasta"
@@ -694,7 +687,6 @@ rule repeatmasker:
     params:
         rm_dir=directory(F"{config['output_dir']}/RepeatMasker"),
         rm_sensitivity_option=rm_sensitivity_option,
-        rm_engine=rm_engine,
         rm_sensitivity=config["repeatmasker_sensitivity"]
     log:
         stdout=F"{config['output_dir']}/RepeatMasker/repeatmasker.log",
