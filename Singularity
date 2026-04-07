@@ -41,7 +41,6 @@ From: continuumio/miniconda3
     touch /opt/pipeline/data/FabTR_all_sequences_210901.db.RM_format.fasta
 
     snakemake --use-conda --conda-prefix /opt/conda/envs --conda-create-envs-only --cores 4 --configfile /opt/pipeline/config.yaml --conda-frontend conda
-    snakemake install_wublast --conda-prefix /opt/conda/envs --snakefile Snakefile_install_dependencies --cores 1 --use-conda --conda-frontend conda
     # Clean up
     conda clean --all
 
@@ -56,13 +55,10 @@ From: continuumio/miniconda3
 %files
     envs /opt/pipeline/envs
     Snakefile /opt/pipeline/Snakefile
-    Snakefile_install_dependencies /opt/pipeline/Snakefile_install_dependencies
     config.yaml /opt/pipeline/config.yaml
     data/rdna_library.fasta /opt/pipeline/data/rdna_library.fasta
     run_pipeline.py /opt/pipeline/run_pipeline.py
     scripts /opt/pipeline/scripts
-    wublast/ab-blast-20200317-linux-x64 /opt/pipeline/wublast
-    wublast/ab-blast-20200317-linux-x64/license.xml /root/.config/ab-blast/license.xml
 
 
 %environment
