@@ -473,7 +473,8 @@ rule tidecluster_reannotate:
         gff3=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3"
     params:
         outdir=directory(F"{config['output_dir']}/TideCluster"),
-        tc_sensitivity=tc_sensitivity
+        tc_sensitivity=tc_sensitivity,
+        reduce_library=config["reduce_library"]
     log:
         stdout=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.log",
         stderr=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.err"
@@ -487,19 +488,32 @@ rule tidecluster_reannotate:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
-        # run only if dimer_library_default is not empty
+        scripts_dir=$(realpath scripts)
+
+        # skip entirely if the dimer library is empty
         if [ ! -s {input.dimer_library_default} ]; then
             echo "No dimer library found, skipping reannotation"
             : > {output}
             exit 0
         fi
-        gf_absolute_path=$(realpath {input.dimer_library_default})
+
+        if [ "{params.reduce_library}" = "True" ]; then
+            reduced={params.outdir}/default/TideCluster_consensus_dimer_library_reduced.fasta
+            python3 $scripts_dir/reduce_dimer_library.py \
+                -i {input.dimer_library_default} \
+                -o $reduced \
+                -t {threads}
+            gf_absolute_path=$(realpath $reduced)
+        else
+            gf_absolute_path=$(realpath {input.dimer_library_default})
+        fi
+
         dl_absolute_path=$(realpath {input.genome_fasta})
         dl_basename=$(basename {input.genome_fasta})
         gff_absolute_path=$(realpath {output.gff3})
         cd {params.outdir}
         cp $dl_absolute_path .
-        tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path  -c {threads} --sensitivity {params.tc_sensitivity}
+        tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path -c {threads} --sensitivity {params.tc_sensitivity}
         rm $dl_basename
         """
 

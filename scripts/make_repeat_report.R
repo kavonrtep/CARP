@@ -368,6 +368,45 @@ smooth_vec <- function(x, N) {
   sm
 }
 
+# Ramer-Douglas-Peucker simplification for a monotonic-x time series.
+# NA values in y are always preserved (they mark visual segment breaks).
+# Returns integer indices of points to keep.
+rdp_simplify <- function(x, y, epsilon) {
+  n <- length(x)
+  if (n <= 2L || epsilon <= 0) return(seq_len(n))
+  keep <- logical(n)
+
+  rdp_seg <- function(a, b) {
+    keep[a] <<- TRUE
+    keep[b] <<- TRUE
+    if (b <= a + 1L) return(invisible(NULL))
+    xi    <- x[(a + 1L):(b - 1L)]
+    yi    <- y[(a + 1L):(b - 1L)]
+    frac  <- (xi - x[a]) / (x[b] - x[a])
+    dists <- abs(yi - (y[a] + frac * (y[b] - y[a])))
+    dists[is.na(dists)] <- Inf   # NA interior points are always splitting candidates
+    j <- which.max(dists)
+    if (dists[j] > epsilon) {
+      mid <- a + j
+      rdp_seg(a, mid)
+      rdp_seg(mid, b)
+    }
+  }
+
+  is_na <- is.na(y)
+  keep[is_na] <- TRUE   # preserve NA gap markers
+  non_na <- which(!is_na)
+  if (length(non_na) > 0) {
+    # identify start/end of each run of non-NA values
+    brk <- c(TRUE, diff(non_na) > 1L)
+    seg_s <- non_na[brk]
+    seg_e <- non_na[c(brk[-1L], TRUE)]
+    for (k in seq_along(seg_s))
+      rdp_seg(seg_s[k], seg_e[k])
+  }
+  sort(which(keep))
+}
+
 # Find lineage-level BigWig files in a repeat-annotation directory
 discover_lineage_bw_files <- function(rm_dir, bin_width) {
   suffix <- if (bin_width == 100000L) "_100k.bw" else "_10k.bw"
@@ -680,6 +719,10 @@ json_concat_density_plot <- function(bw_map, seq_info, bin_width, n_smooth = 10)
   if (!is.finite(ymax) || ymax == 0) ymax <- 1
   y_step <- 1.1 * ymax
 
+  # RDP epsilon relative to the global y range
+  eps_raw <- ymax * 0.01    # 1 % of range — aggressive (raw is decorative)
+  eps_sm  <- ymax * 0.002   # 0.2 % of range — conservative (smooth is informative)
+
   # Build traces: for each track, raw (gray thin) + smooth (red thick)
   traces <- list()
   tidx   <- 0L
@@ -687,20 +730,25 @@ json_concat_density_plot <- function(bw_map, seq_info, bin_width, n_smooth = 10)
     lbl   <- track_names[ti]
     y_off <- (ti - 1) * y_step
 
+    raw_y  <- track_y_raw[[lbl]] + y_off
+    idx_rw <- rdp_simplify(x_all, raw_y, eps_raw)
     # Raw gray line
     tidx <- tidx + 1L
     traces[[tidx]] <- list(
-      type = "scatter", mode = "lines",
-      x = x_all, y = track_y_raw[[lbl]] + y_off,
+      type = "scattergl", mode = "lines",
+      x = x_all[idx_rw], y = raw_y[idx_rw],
       showlegend = FALSE, hoverinfo = "skip",
       line = list(width = 0.5, color = "#00000030"),
       name = paste0(lbl, "_raw")
     )
+
+    sm_y   <- track_y_sm[[lbl]] + y_off
+    idx_sm <- rdp_simplify(x_all, sm_y, eps_sm)
     # Smoothed red line (NA values create gaps at sequence boundaries)
     tidx <- tidx + 1L
     traces[[tidx]] <- list(
-      type = "scatter", mode = "lines",
-      x = x_all, y = track_y_sm[[lbl]] + y_off,
+      type = "scattergl", mode = "lines",
+      x = x_all[idx_sm], y = sm_y[idx_sm],
       showlegend = FALSE, connectgaps = FALSE,
       name = lbl,
       line = list(width = 1.5, color = "#cc0000bb"),

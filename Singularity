@@ -6,7 +6,6 @@ From: continuumio/miniconda3
     apt-get install -y libxml2 libxml2-dev
     mkdir -p /opt/conda/config
     export CONDARC=/opt/conda/config/.condarc
-    export CONDA_PLUGINS_AUTO_ACCEPT_TOS=yes
 
     conda install python=3.11
 
@@ -26,6 +25,12 @@ From: continuumio/miniconda3
     conda activate base
     # Verify that strict channel priority is set
     conda config --show | grep channel_priority
+
+    # anaconda-anon-usage (Anaconda telemetry plugin) is incompatible with
+    # conda 26.x: it prints "Error loading anaconda-anon-usage: ..." to STDOUT
+    # before the JSON, corrupting 'conda info --json' output that Snakemake
+    # 8.12+ parses. Remove it so conda info returns clean JSON.
+    conda remove anaconda-anon-usage --force -y || true
 
     cd /opt/pipeline
     # make dummy data so snakemake can create the environments
