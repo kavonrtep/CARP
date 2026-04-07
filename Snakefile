@@ -489,6 +489,7 @@ rule tidecluster_reannotate:
         set -euo pipefail
         set -x
         scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
 
         # skip entirely if the dimer library is empty
         if [ ! -s {input.dimer_library_default} ]; then
@@ -499,7 +500,7 @@ rule tidecluster_reannotate:
 
         if [ "{params.reduce_library}" = "True" ]; then
             reduced={params.outdir}/default/TideCluster_consensus_dimer_library_reduced.fasta
-            python3 $scripts_dir/reduce_dimer_library.py \
+            reduce_dimer_library.py \
                 -i {input.dimer_library_default} \
                 -o $reduced \
                 -t {threads}
