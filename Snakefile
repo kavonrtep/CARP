@@ -47,19 +47,19 @@ if "repeatmasker_sensitivity" not in config:
 
 rm_sensitivity_option = {
     "default": "",
-    "sensitive": "-s",
-    "quick": "-q",
-    "" : ""
+    "rush":    "-qq",
+    "quick":   "-q",
+    "" :       ""
     }[config["repeatmasker_sensitivity"]]
 
-# TideCluster sensitivity preset (--sensitivity {quick,default,fast}).
+# TideCluster sensitivity preset (--sensitivity {quick,default,rush}).
 # Kept in sync with the RepeatMasker sensitivity setting: TideCluster uses
 # RepeatMasker internally for its reannotation step.
 tc_sensitivity = {
-    "default":   "default",
-    "sensitive": "default",   # TideCluster has no "sensitive"; default is closest
-    "quick":     "quick",
-    "":          "default",
+    "default": "default",
+    "rush":    "rush",
+    "quick":   "quick",
+    "":        "default",
 }.get(config["repeatmasker_sensitivity"], "default")
 
 if "reduce_library" not in config:

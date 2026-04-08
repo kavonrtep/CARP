@@ -221,7 +221,7 @@ def repeatmasker(fasta_file, library, workdir='.', sensitivity='default'):
     """
     # run RepeatMasker
 
-    sensitivity_options = {'quick': '-q', 'default': '', 'fast': '-s'}
+    sensitivity_options = {'quick': '-q', 'default': '', 'rush': '-qq'}
 
     command = ['RepeatMasker', '-pa', '1', '-dir', workdir,
                '-lib', library, '-xsmall', '-e ncbi', '-no_is', fasta_file,
@@ -262,7 +262,7 @@ def main():
     parser.add_argument('-o', '--out', help='output file (required)', required=True)
     parser.add_argument('-l', '--library', help='RepeatMasker library', required=True)
     parser.add_argument('-s', '--sensitivity', help='Sensitivity, possible values are '
-                                                    'quick, default and fast',
+                                                    'quick, default and rush',
                         required=False,default='default')
     args = parser.parse_args()
 
