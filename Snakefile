@@ -5,7 +5,8 @@ def create_dirs(*dirs):
         if not os.path.exists(d):
             os.makedirs(d)
 print(config)
-subdirs = [config['output_dir']+"/"+i for i in ['DANTE', 'DANTE_TIR', 'DANTE_LINE', 'DANTE_LTR',
+subdirs = [config['output_dir']+"/"+i for i in ['DANTE', 'DANTE_TIR', 'DANTE_TIR_FALLBACK',
+                                                'DANTE_LINE', 'DANTE_LTR',
                                                 'TideCluster/default',
                                                 'TideCluster/short_monomer',
                                                 'Libraries', 'RepeatMasker',
@@ -14,7 +15,8 @@ create_dirs(*subdirs)
 snakemake_dir = os.path.dirname(workflow.snakefile)
 
 BENCHMARKED_RULES = [
-    "clean_genome_fasta", "dante", "dante_tir", "filter_dante",
+    "clean_genome_fasta", "dante", "dante_tir", "dante_tir_fallback",
+    "merge_dante_tir_with_fallback", "make_tir_combined_library", "filter_dante",
     "dante_line", "dante_ltr", "make_library_of_ltrs",
     "tidecluster_long", "tidecluster_short", "tidecluster_reannotate",
     "merge_tidecluster_default_and_short", "make_subclass_2_library",
@@ -24,6 +26,7 @@ BENCHMARKED_RULES = [
     "make_summary_statistics_and_split_by_class", "make_bigwig_density",
     "add_top_level_outputs", "calculate_bigwig_density", "add_html_outputs",
     "calculate_seqlengths", "make_summary_plots", "make_repeat_report",
+    "make_unified_annotation",
 ]
 print(snakemake_dir)
 def filter_fasta(input_file, output_file, filter_string):
@@ -79,6 +82,7 @@ rule all:
         F"{config['output_dir']}/DANTE/DANTE.gff3",
         F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
         F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
+        F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_combined.gff3",
         F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
         F"{config['output_dir']}/DANTE_LTR/LTR_RTs_library.fasta",
         F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
@@ -104,7 +108,8 @@ rule all:
         F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done",
         F"{config['output_dir']}/summary_plots.pdf",
         F"{config['output_dir']}/benchmark_report.html",
-        F"{config['output_dir']}/repeat_annotation_report.html"
+        F"{config['output_dir']}/repeat_annotation_report.html",
+        F"{config['output_dir']}/Repeat_Annotation_Unified.gff3"
 
 rule clean_genome_fasta:
     """
@@ -128,6 +133,19 @@ rule clean_genome_fasta:
         set -x
         # Clean FASTA headers - keep only ID before first whitespace
         awk '/^>/ {{split($1, a, " "); print a[1]; next}} {{print}}' {input} > {output}
+        """
+
+rule index_genome_fasta:
+    """Create FASTA index (.fai) for the cleaned genome."""
+    input:
+        genome_fasta_cleaned
+    output:
+        F"{config['output_dir']}/genome_cleaned.fasta.fai"
+    conda:
+        "envs/tidecluster.yaml"
+    shell:
+        """
+        seqkit faidx {input}
         """
 
 rule dante:
@@ -200,6 +218,142 @@ rule dante_tir:
         """
 
 
+rule dante_tir_fallback:
+    """
+    Fallback TIR detection using TPase domain flanking-region analysis.
+    Identifies partial TIR elements that DANTE_TIR may have missed.
+    """
+    input:
+        gff=F"{config['output_dir']}/DANTE/DANTE.gff3",
+        genome=genome_fasta_cleaned,
+        dante_tir_checkpoint=F"{config['output_dir']}/DANTE_TIR/.done",
+        mask_gff=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter.gff3"
+    output:
+        gff=F"{config['output_dir']}/DANTE_TIR_FALLBACK/DANTE_TIR_FALLBACK.gff3",
+        rep_lib=F"{config['output_dir']}/DANTE_TIR_FALLBACK/TIR_fallback_rep_lib.fasta",
+        extended_fasta=F"{config['output_dir']}/DANTE_TIR_FALLBACK/TIR_fallback_extended.fasta"
+    params:
+        output_dir=F"{config['output_dir']}/DANTE_TIR_FALLBACK"
+    log:
+        stdout=F"{config['output_dir']}/DANTE_TIR_FALLBACK/dante_tir_fallback.log",
+        stderr=F"{config['output_dir']}/DANTE_TIR_FALLBACK/dante_tir_fallback.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/dante_tir_fallback.tsv"
+    conda:
+        "envs/dante_line.yaml"
+    threads: workflow.cores
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+
+        dante_tir_fallback.py \
+            -g {input.genome} \
+            -a {input.gff} \
+            -o {params.output_dir} \
+            -t {threads} \
+            --mask-gff3 {input.mask_gff}
+
+        # Ensure outputs exist even if no TIR elements were found
+        touch {output.gff} {output.rep_lib} {output.extended_fasta}
+        """
+
+
+rule merge_dante_tir_with_fallback:
+    """
+    Merge primary DANTE_TIR and fallback annotations.
+    Fallback elements overlapping any primary element are discarded.
+    Surviving fallback elements are labeled as partial.
+    """
+    input:
+        primary_gff=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
+        fallback_gff=F"{config['output_dir']}/DANTE_TIR_FALLBACK/DANTE_TIR_FALLBACK.gff3",
+        fallback_fasta=F"{config['output_dir']}/DANTE_TIR_FALLBACK/TIR_fallback_extended.fasta"
+    output:
+        combined_gff=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_combined.gff3",
+        filtered_fallback_fasta=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_fallback_filtered.fasta"
+    log:
+        stdout=F"{config['output_dir']}/DANTE_TIR/merge_tir_fallback.log",
+        stderr=F"{config['output_dir']}/DANTE_TIR/merge_tir_fallback.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/merge_dante_tir_with_fallback.tsv"
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+
+        merge_tir_fallback.py \
+            --primary-gff {input.primary_gff} \
+            --fallback-gff {input.fallback_gff} \
+            --fallback-fasta {input.fallback_fasta} \
+            --output-gff {output.combined_gff} \
+            --output-fasta {output.filtered_fallback_fasta}
+        """
+
+
+rule make_tir_combined_library:
+    """
+    Build a combined TIR repeat library by clustering all primary DANTE_TIR
+    elements together with non-overlapping fallback elements using mmseqs2.
+    """
+    input:
+        primary_fasta=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.fasta",
+        fallback_fasta=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_fallback_filtered.fasta"
+    output:
+        combined_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_combined.fasta"
+    params:
+        mmseqs_dir=F"{config['output_dir']}/DANTE_TIR/mmseqs_combined"
+    log:
+        stdout=F"{config['output_dir']}/DANTE_TIR/make_tir_combined_library.log",
+        stderr=F"{config['output_dir']}/DANTE_TIR/make_tir_combined_library.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/make_tir_combined_library.tsv"
+    conda:
+        "envs/dante_line.yaml"
+    threads: workflow.cores
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+
+        mkdir -p {params.mmseqs_dir}
+
+        # Concatenate primary and fallback FASTA sequences
+        COMBINED_INPUT={params.mmseqs_dir}/combined_input.fasta
+        cat {input.primary_fasta} > "$COMBINED_INPUT"
+        if [ -s {input.fallback_fasta} ]; then
+            cat {input.fallback_fasta} >> "$COMBINED_INPUT"
+        fi
+
+        # If input is empty, create empty output
+        if [ ! -s "$COMBINED_INPUT" ]; then
+            touch {output.combined_lib}
+            exit 0
+        fi
+
+        # Run mmseqs2 clustering on all TIR elements
+        mmseqs easy-cluster \
+            "$COMBINED_INPUT" \
+            {params.mmseqs_dir}/cluster \
+            {params.mmseqs_dir}/tmp \
+            --threads {threads}
+
+        # Use cluster representatives as the combined library
+        if [ -s {params.mmseqs_dir}/cluster_rep_seq.fasta ]; then
+            cp {params.mmseqs_dir}/cluster_rep_seq.fasta {output.combined_lib}
+        else
+            touch {output.combined_lib}
+        fi
+        """
 
 
 rule filter_dante:
@@ -538,7 +692,7 @@ rule make_subclass_2_library:
     params:
         library=config.get("custom_library", "")
     input:
-        dante_tir_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_min3.fasta",
+        dante_tir_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_combined.fasta",
     output:
         library=F"{config['output_dir']}/Libraries/class_ii_library.fasta"
     log:
@@ -605,7 +759,7 @@ rule filter_ltr_rt_library:
 rule concatenate_libraries:
     input:
         ltr_rt_library=F"{config['output_dir']}/Libraries/LTR_RTs_library_clean.fasta",
-        dante_tir_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_min3.fasta",
+        dante_tir_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_combined.fasta",
         line_rep_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta"
     output:
         full_names=F"{config['output_dir']}/Libraries/combined_library.fasta",
@@ -766,6 +920,57 @@ rule merge_rm_and_dante:
         """
 
 
+rule make_unified_annotation:
+    """
+    Produce a single, tier-prioritised repeat annotation GFF3 from all pipeline layers.
+    Structure-based annotations (DANTE_LTR, DANTE_TIR, DANTE_LINE) take priority over
+    similarity-based ones (RepeatMasker). See annotation_rules.md for full tier hierarchy.
+    """
+    input:
+        ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
+        tir=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_combined.gff3",
+        line=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
+        dante=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
+        tc_default=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
+        tc_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_clustering.gff3",
+        tc_rm=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3",
+        rm=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_plus_DANTE.gff3",
+        th_default=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter_short.gff3",
+        th_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_tidehunter_short.gff3",
+        fai=F"{config['output_dir']}/genome_cleaned.fasta.fai"
+    output:
+        gff=F"{config['output_dir']}/Repeat_Annotation_Unified.gff3"
+    log:
+        stdout=F"{config['output_dir']}/Repeat_Annotation_Unified.log",
+        stderr=F"{config['output_dir']}/Repeat_Annotation_Unified.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/make_unified_annotation.tsv"
+    conda:
+        "envs/tidecluster.yaml"
+    threads: workflow.cores
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        make_unified_annotation.R \
+            --ltr      {input.ltr} \
+            --tir      {input.tir} \
+            --line     {input.line} \
+            --dante    {input.dante} \
+            --tc_default {input.tc_default} \
+            --tc_short   {input.tc_short} \
+            --tc_rm      {input.tc_rm} \
+            --rm       {input.rm} \
+            --th_default {input.th_default} \
+            --th_short   {input.th_short} \
+            --fai      {input.fai} \
+            --output   {output.gff} \
+            --threads  {threads}
+        """
+
+
 rule make_track_for_masking:
     input:
         rm=F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
@@ -880,7 +1085,7 @@ rule add_top_level_outputs:
     input:
         dante=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
         dante_ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
-        dante_tir=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
+        dante_tir=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_combined.gff3",
         sat_tc=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
         sat_rm=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3",
         simple_repeats=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3/Simple_repeats.gff3",
