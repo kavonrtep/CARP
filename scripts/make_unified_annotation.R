@@ -10,6 +10,38 @@ suppressPackageStartupMessages({
   library(parallel)
 })
 
+# ── Progress / timing helpers ─────────────────────────────────────────────────
+# Simple wall-clock timers. All messages go to stderr so they interleave
+# correctly with mclapply worker output.
+.script_start <- proc.time()[3]
+elapsed <- function() sprintf("[+%6.1fs]", proc.time()[3] - .script_start)
+
+log_msg <- function(...) message(elapsed(), " ", ...)
+
+# Time a single expression: x <- timed("label", expr); x is the result.
+timed <- function(label, expr) {
+  t0 <- proc.time()[3]
+  res <- force(expr)
+  dt <- proc.time()[3] - t0
+  log_msg(sprintf("%6.2fs  %s", dt, label))
+  res
+}
+
+# Start/stop pair for multi-line operations:
+#   t0 <- tic("label"); ...; toc(t0)
+tic <- function(label) {
+  log_msg("▶ ", label)
+  list(label = label, t0 = proc.time()[3])
+}
+toc <- function(tic_state, detail = NULL) {
+  dt <- proc.time()[3] - tic_state$t0
+  if (is.null(detail))
+    log_msg(sprintf("◀ %s  (%.2fs)", tic_state$label, dt))
+  else
+    log_msg(sprintf("◀ %s  (%.2fs) — %s", tic_state$label, dt, detail))
+  invisible(dt)
+}
+
 # ── 0. CLI arguments ─────────────────────────────────────────────────────────
 
 option_list <- list(
@@ -279,69 +311,110 @@ make_batches <- function(seqlengths, batch_target_bp = 200e6) {
 # ── 4. Resolution helpers ─────────────────────────────────────────────────────
 
 # Trim each feature in `lower` to its non-overlapping portion against `higher`.
-# Fragments shorter than min_len bp are discarded.
-# Metadata is propagated from the source feature to all resulting fragments.
+# Metadata is propagated from the first overlapping source feature to each
+# resulting fragment (within-tier overlaps are resolved later by
+# resolve_within_tier via disjoin+LCA).
+#
+# Implementation: single vectorized disjoin() over the union of lower+higher
+# with a revmap, then mask-filter to keep pieces that come from a lower feature
+# but NOT from any higher feature. Avoids the per-feature lapply + keepSeqlevels
+# + setdiff that dominated the previous runtime.
+#
+# min_len semantics (matching the legacy per-feature implementation): the
+# filter only applies to pieces that came from a feature that actually got
+# trimmed. Features that don't overlap any higher region pass through
+# unchanged — even if they are shorter than min_len.
 trim_to_nonoverlap <- function(lower, higher, min_len = 50L) {
   if (length(lower) == 0 || length(higher) == 0) return(lower)
 
   higher_r <- reduce(higher, ignore.strand = TRUE)
-  hits     <- findOverlaps(lower, higher_r, ignore.strand = TRUE)
-  if (length(hits) == 0) return(lower)
 
-  ov_idx  <- as.integer(unique(queryHits(hits)))
-  intact  <- lower[setdiff(seq_along(lower), ov_idx)]
+  # Which lower features actually overlap something in higher? Pieces derived
+  # from features NOT in this set are "intact" — skip the min_len filter.
+  lower_overlaps_higher <- overlapsAny(lower, higher_r, ignore.strand = TRUE)
 
-  # Columns to propagate from the source feature to trimmed fragments
-  keep_cols <- intersect(c("Name", "classification", "source_tier", "source_tool",
-                            "element_type"),
-                         colnames(mcols(lower)))
+  # Fast exit: no lower feature overlaps any higher region → return as-is.
+  if (!any(lower_overlaps_higher)) return(lower)
 
-  trimmed_list <- lapply(ov_idx, function(i) {
-    feat    <- lower[i]
-    feat_sl <- as.character(seqnames(feat))
-    # Restrict higher_r to the seqname of this feature so setdiff seqlevels match
-    hr_sub  <- keepSeqlevels(higher_r,
-                              intersect(seqlevels(higher_r), feat_sl),
-                              pruning.mode = "coarse")
-    seqlevels(feat, pruning.mode = "coarse") <- feat_sl
-    remaining <- GenomicRanges::setdiff(feat, hr_sub, ignore.strand = TRUE)
-    if (length(remaining) == 0) return(NULL)
-    remaining <- remaining[width(remaining) >= min_len]
-    if (length(remaining) == 0) return(NULL)
-    for (col in keep_cols) {
-      val <- mcols(lower)[[col]][i]
-      mcols(remaining)[[col]] <- rep(val, length(remaining))
-    }
-    remaining
-  })
+  n_lower      <- length(lower)
+  lower_plain  <- granges(lower)
+  higher_plain <- granges(higher_r)
+  strand(lower_plain)  <- "*"
+  strand(higher_plain) <- "*"
+  combined <- c(lower_plain, higher_plain)
 
-  trimmed_list <- Filter(Negate(is.null), trimmed_list)
-  if (length(trimmed_list) == 0) return(intact)
-  suppressWarnings(c(intact, do.call(c, trimmed_list)))
+  # Single disjoin with revmap: indices 1..n_lower are lower features,
+  # indices n_lower+1..end are higher regions.
+  dis    <- disjoin(combined, with.revmap = TRUE, ignore.strand = TRUE)
+  revmap <- dis$revmap  # IntegerList
+
+  # Vectorized list-ops: which pieces come from lower only, none from higher?
+  has_higher <- any(revmap > n_lower)
+  has_lower  <- any(revmap <= n_lower)
+  base_mask  <- has_lower & !has_higher
+
+  if (!any(base_mask)) return(lower[integer(0)])
+
+  kept     <- dis[base_mask]
+  kept_rev <- revmap[base_mask]
+  # Kept pieces have only lower-source indices → min() gives the first lower parent.
+  lower_idx <- as.integer(min(kept_rev))
+
+  # Apply min_len only to pieces whose source lower feature was actually
+  # trimmed (i.e. overlapped higher_r). Intact features pass through.
+  source_was_trimmed <- lower_overlaps_higher[lower_idx]
+  piece_widths       <- width(kept)
+  keep_by_len        <- !source_was_trimmed | piece_widths >= min_len
+  kept               <- kept[keep_by_len]
+  lower_idx          <- lower_idx[keep_by_len]
+  source_was_trimmed <- source_was_trimmed[keep_by_len]
+
+  if (length(kept) == 0) return(lower[integer(0)])
+
+  mcols(kept) <- mcols(lower)[lower_idx, , drop = FALSE]
+  # Strand handling (matches the legacy per-feature implementation):
+  #   - intact pieces (from features not overlapping higher) keep their
+  #     original strand from the source lower feature;
+  #   - trimmed pieces get "*" because the legacy setdiff-based path
+  #     returned "*" for them under ignore.strand = TRUE.
+  new_strand <- as.character(strand(lower))[lower_idx]
+  new_strand[source_was_trimmed] <- "*"
+  strand(kept) <- new_strand
+  kept$revmap  <- NULL  # defensive
+  kept
 }
 
 # For each feature in `children`, return the ID of the Level 1 parent
 # (the overlapping feature in `parents` with the maximum intersection width).
+# Fully vectorized — no R-level loop. Called once per pool type in
+# finalise_output(); do NOT call this once per child.
 get_parent_id <- function(children, parents) {
   n <- length(children)
   if (n == 0 || length(parents) == 0)
     return(rep(NA_character_, n))
 
-  hits <- findOverlaps(children, parents)
+  hits <- findOverlaps(children, parents, ignore.strand = TRUE)
   if (length(hits) == 0)
     return(rep(NA_character_, n))
 
-  # Manual intersection width (avoids pintersect version incompatibilities)
-  ch_r   <- children[queryHits(hits)]
-  par_r  <- parents[subjectHits(hits)]
-  ov_w   <- pmax(0L, pmin(end(ch_r), end(par_r)) - pmax(start(ch_r), start(par_r)) + 1L)
-  qi     <- queryHits(hits)
+  qi <- queryHits(hits)
+  si <- subjectHits(hits)
+
+  # Vectorized intersection width using start/end position arrays
+  ch_start <- start(children)[qi]
+  ch_end   <- end(children)[qi]
+  pa_start <- start(parents)[si]
+  pa_end   <- end(parents)[si]
+  ov_w     <- pmin(ch_end, pa_end) - pmax(ch_start, pa_start) + 1L
+
+  # Sort (qi ASC, ov_w DESC) → first entry per qi group is the best overlap.
+  ord        <- order(qi, -ov_w)
+  qi_ord     <- qi[ord]
+  si_ord     <- si[ord]
+  first_seen <- !duplicated(qi_ord)
+
   result <- rep(NA_character_, n)
-  for (ci in unique(qi)) {
-    idx  <- which(qi == ci)
-    best <- subjectHits(hits)[idx[which.max(ov_w[idx])]]
-    result[ci] <- parents$ID[best]
-  }
+  result[qi_ord[first_seen]] <- parents$ID[si_ord[first_seen]]
   result
 }
 
@@ -385,10 +458,13 @@ resolve_within_tier <- function(gr) {
 # ── 5. Per-batch resolution ───────────────────────────────────────────────────
 
 process_batch <- function(seqs, data, min_len) {
-  message("  Processing batch: ", paste(head(seqs, 3), collapse=", "),
-          if (length(seqs) > 3) paste0(" ... (", length(seqs), " seqs)") else "")
+  batch_label <- sprintf("batch[%s%s]",
+                         paste(head(seqs, 2), collapse=","),
+                         if (length(seqs) > 2) sprintf(",...+%d", length(seqs)-2) else "")
+  t_batch <- tic(sprintf("%s  (%d seqs)", batch_label, length(seqs)))
 
-  sub     <- lapply(data, subset_seqs, seqs = seqs)
+  sub     <- timed(sprintf("  %s  subset+normalise all tiers", batch_label),
+                   lapply(data, subset_seqs, seqs = seqs))
   t1      <- sub$t1
   t1_ltr  <- if (length(t1) > 0) t1[t1$source_tool == "DANTE_LTR"] else GRanges()
   t2      <- sub$t2
@@ -399,15 +475,25 @@ process_batch <- function(seqs, data, min_len) {
   t5_sc   <- sub$t5_sc
   t6      <- sub$t6
 
+  log_msg(sprintf("  %s  input sizes: t1=%d t2=%d t3_def=%d t3_sho=%d t4=%d t5_te=%d t5_sc=%d t6=%d",
+                  batch_label, length(t1), length(t2), length(t3_def), length(t3_sho),
+                  length(t4), length(t5_te), length(t5_sc), length(t6)))
+
   level1 <- GRanges()
   level2 <- GRanges()
 
   # ── Step 1: Tier 1 — structure-based elements (no trimming) ──────────────
   if (length(t1) > 0) level1 <- t1
+  log_msg(sprintf("  %s  step1 done: level1=%d (+ %d tier1)",
+                  batch_label, length(level1), length(t1)))
 
   # ── Step 2: Tier 2 — DANTE domains, trim against Tier 1 ──────────────────
-  t2_trimmed <- resolve_within_tier(trim_to_nonoverlap(t2, t1, min_len))
+  t2_trimmed <- timed(sprintf("  %s  step2: trim Tier2 (%d) vs Tier1 (%d)",
+                               batch_label, length(t2), length(t1)),
+                       resolve_within_tier(trim_to_nonoverlap(t2, t1, min_len)))
   if (length(t2_trimmed) > 0) level1 <- suppressWarnings(c(level1, t2_trimmed))
+  log_msg(sprintf("  %s  step2 done: +%d → level1=%d",
+                  batch_label, length(t2_trimmed), length(level1)))
 
   # ── Step 3: Tier 3 default — TideCluster satellite clusters ──────────────
   # Rare case: cluster entirely within an LTR element → Level 2 nested
@@ -423,28 +509,48 @@ process_batch <- function(seqs, data, min_len) {
     }
   }
   if (length(t3_def_l1) > 0) level1 <- suppressWarnings(c(level1, t3_def_l1))
+  log_msg(sprintf("  %s  step3 done: +%d (L1), +%d (L2 nested in LTR) → level1=%d",
+                  batch_label, length(t3_def_l1),
+                  length(t3_def) - length(t3_def_l1), length(level1)))
 
   # ── Step 4: Tier 3 short monomer — trim against Tier 3 default + Tier 1 ──
-  t3s_trimmed <- trim_to_nonoverlap(t3_sho, suppressWarnings(c(t3_def_l1, t1)), min_len)
+  t3s_trimmed <- timed(sprintf("  %s  step4: trim Tier3 short (%d) vs Tier3 def+Tier1",
+                                batch_label, length(t3_sho)),
+                        trim_to_nonoverlap(t3_sho, suppressWarnings(c(t3_def_l1, t1)), min_len))
   if (length(t3s_trimmed) > 0) level1 <- suppressWarnings(c(level1, t3s_trimmed))
+  log_msg(sprintf("  %s  step4 done: +%d → level1=%d",
+                  batch_label, length(t3s_trimmed), length(level1)))
 
   # ── Step 5: Tier 4 — RM on TideCluster library, trim against Tiers 1–3 ──
-  higher_1_3  <- if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges()
-  t4_trimmed  <- resolve_within_tier(trim_to_nonoverlap(t4, higher_1_3, min_len))
+  higher_1_3  <- timed(sprintf("  %s  step5: reduce(level1) [%d]", batch_label, length(level1)),
+                        if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges())
+  t4_trimmed  <- timed(sprintf("  %s  step5: trim Tier4 (%d) vs Tiers1-3 (%d regions)",
+                                batch_label, length(t4), length(higher_1_3)),
+                        resolve_within_tier(trim_to_nonoverlap(t4, higher_1_3, min_len)))
   if (length(t4_trimmed) > 0) level1 <- suppressWarnings(c(level1, t4_trimmed))
+  log_msg(sprintf("  %s  step5 done: +%d → level1=%d",
+                  batch_label, length(t4_trimmed), length(level1)))
 
   # ── Step 6: Tier 5 TE hits — trim against Tiers 1–4 ─────────────────────
-  higher_1_4 <- if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges()
-  t5_trimmed <- resolve_within_tier(trim_to_nonoverlap(t5_te, higher_1_4, min_len))
+  higher_1_4 <- timed(sprintf("  %s  step6: reduce(level1) [%d]", batch_label, length(level1)),
+                       if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges())
+  t5_trimmed <- timed(sprintf("  %s  step6: trim Tier5 TE (%d) vs Tiers1-4 (%d regions)",
+                               batch_label, length(t5_te), length(higher_1_4)),
+                       resolve_within_tier(trim_to_nonoverlap(t5_te, higher_1_4, min_len)))
   if (length(t5_trimmed) > 0) level1 <- suppressWarnings(c(level1, t5_trimmed))
+  log_msg(sprintf("  %s  step6 done: +%d → level1=%d",
+                  batch_label, length(t5_trimmed), length(level1)))
 
   # ── Step 7: Tier 5 Simple/Low complexity ─────────────────────────────────
   # Overlapping an existing Level 1 feature → Level 2 nested
   # Not overlapping → Level 1
   if (length(t5_sc) > 0) {
-    cur_l1 <- if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges()
+    cur_l1 <- timed(sprintf("  %s  step7: reduce(level1) [%d]", batch_label, length(level1)),
+                     if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges())
     if (length(cur_l1) > 0) {
-      sc_hits <- suppressWarnings(findOverlaps(t5_sc, cur_l1, ignore.strand = TRUE))
+      sc_hits <- timed(sprintf("  %s  step7: findOverlaps Simple/Low (%d) vs L1 (%d)",
+                                batch_label, length(t5_sc), length(cur_l1)),
+                        suppressWarnings(findOverlaps(t5_sc, cur_l1, ignore.strand = TRUE)))
       sc_in   <- as.integer(unique(queryHits(sc_hits)))
       if (length(sc_in) > 0) {
         sc_l2            <- t5_sc[sc_in]
@@ -458,13 +564,17 @@ process_batch <- function(seqs, data, min_len) {
       sc_l1 <- t5_sc
     }
     if (length(sc_l1) > 0) level1 <- suppressWarnings(c(level1, sc_l1))
+    log_msg(sprintf("  %s  step7 done: +%d (L1), +%d (L2 nested) → level1=%d, level2=%d",
+                    batch_label, length(sc_l1), length(t5_sc) - length(sc_l1),
+                    length(level1), length(level2)))
   }
 
   # ── Step 8: Tier 6 — TideHunter residuals ────────────────────────────────
   # Within LTR body → Level 2 nested
   # Not covered by any higher tier → Level 1
   if (length(t6) > 0) {
-    all_higher <- if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges()
+    all_higher <- timed(sprintf("  %s  step8: reduce(level1) [%d]", batch_label, length(level1)),
+                         if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges())
 
     t6_rest <- t6
     if (length(t1_ltr) > 0) {
@@ -485,22 +595,25 @@ process_batch <- function(seqs, data, min_len) {
         t6_rest <- t6_rest[setdiff(seq_along(t6_rest), cov_idx)]
     }
     if (length(t6_rest) > 0) level1 <- suppressWarnings(c(level1, t6_rest))
+    log_msg(sprintf("  %s  step8 done: +%d → level1=%d, level2=%d",
+                    batch_label, length(t6_rest), length(level1), length(level2)))
   }
 
+  toc(t_batch, sprintf("final: level1=%d, level2=%d", length(level1), length(level2)))
   list(level1 = level1, level2 = level2)
 }
 
 # ── 6. Output assembly ────────────────────────────────────────────────────────
 
 finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
-  message("Finalising: ", length(level1), " Level 1, ",
-          length(level2), " Level 2 features")
+  t_fin <- tic(sprintf("finalise_output: L1=%d, L2=%d", length(level1), length(level2)))
 
   # ── Sort Level 1 ──────────────────────────────────────────────────────────
   all_seqs <- names(seqlengths_vec)
   seqlevels(level1, pruning.mode = "coarse") <- all_seqs
   seqlengths(level1) <- seqlengths_vec
-  level1 <- sort(sortSeqlevels(level1))
+  level1 <- timed(sprintf("sort Level 1 (%d features)", length(level1)),
+                  sort(sortSeqlevels(level1)))
 
   # ── Assign globally unique IDs to Level 1 ────────────────────────────────
   level1$ID <- paste0("UA_L1_", formatC(seq_along(level1), width = 8, flag = "0"))
@@ -518,20 +631,31 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
   if (length(level2) > 0) {
     seqlevels(level2, pruning.mode = "coarse") <- all_seqs
     seqlengths(level2) <- seqlengths_vec
-    level2 <- sort(sortSeqlevels(level2))
+    level2 <- timed("sort Level 2", sort(sortSeqlevels(level2)))
     level2$ID <- paste0("UA_L2_", formatC(seq_along(level2), width = 8, flag = "0"))
 
-    # For Level 2 features with temp_parent_tool == "DANTE_LTR": parent from LTR tier1
-    ltr_l1   <- level1[level1$source_tool == "DANTE_LTR"]
-    any_l1   <- level1
+    # Split Level 2 by pool type and call get_parent_id in batch for each
+    # pool. Previous per-feature loop was O(n_l2 × n_l1) findOverlaps calls;
+    # this is 1–2 batched findOverlaps calls total.
+    ltr_l1 <- level1[level1$source_tool == "DANTE_LTR"]
 
-    parent_ids <- character(length(level2))
-    for (i in seq_along(level2)) {
-      ptype <- if (!is.null(level2$temp_parent_tool)) level2$temp_parent_tool[i] else "any"
-      ptype <- if (is.na(ptype)) "any" else ptype
-      pool  <- if (ptype == "DANTE_LTR") ltr_l1 else any_l1
-      pid   <- get_parent_id(level2[i], pool)
-      parent_ids[i] <- if (!is.na(pid[1])) pid[1] else NA_character_
+    parent_tool <- if (!is.null(level2$temp_parent_tool))
+      as.character(level2$temp_parent_tool) else rep(NA_character_, length(level2))
+    parent_tool[is.na(parent_tool)] <- "any"
+
+    is_ltr     <- parent_tool == "DANTE_LTR"
+    parent_ids <- rep(NA_character_, length(level2))
+    if (any(is_ltr)) {
+      parent_ids[is_ltr] <- timed(
+        sprintf("Level 2 → LTR parent lookup (%d children, %d parents)",
+                sum(is_ltr), length(ltr_l1)),
+        get_parent_id(level2[is_ltr], ltr_l1))
+    }
+    if (any(!is_ltr)) {
+      parent_ids[!is_ltr] <- timed(
+        sprintf("Level 2 → ANY parent lookup (%d children, %d parents)",
+                sum(!is_ltr), length(level1)),
+        get_parent_id(level2[!is_ltr], level1))
     }
     level2$Parent <- parent_ids
     # Remove Level 2 features with no parent found (can't be nested)
@@ -557,27 +681,31 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
   level1$temp_parent_tool <- NULL
 
   # ── Combine, final sort, export ───────────────────────────────────────────
-  all_feats <- if (length(level2) > 0) c(level1, level2) else level1
+  all_feats <- if (length(level2) > 0) suppressWarnings(c(level1, level2)) else level1
   seqlevels(all_feats, pruning.mode = "coarse") <- all_seqs
   seqlengths(all_feats) <- seqlengths_vec
-  all_feats <- sort(sortSeqlevels(all_feats))
+  all_feats <- timed(sprintf("final sort (L1+L2 = %d features)", length(all_feats)),
+                     sort(sortSeqlevels(all_feats)))
 
-  message("Exporting to: ", output_path)
-  export(all_feats, output_path, format = "gff3")
+  timed(sprintf("export GFF3 to %s", output_path),
+        export(all_feats, output_path, format = "gff3"))
 
+  toc(t_fin, sprintf("%d total features written", length(all_feats)))
   invisible(all_feats)
 }
 
 # ── 7. Sanity checks ──────────────────────────────────────────────────────────
 
-sanity_check <- function(output_path, seqlengths_vec) {
-  message("\n── Sanity checks ──────────────────────────────────────────────")
-  gr <- import.gff3(output_path)
+sanity_check <- function(gr, seqlengths_vec) {
+  log_msg("── Sanity checks ──────────────────────────────────────────────")
+  # gr is the in-memory GRanges returned by finalise_output — no GFF3 re-parse
+  # required (saves ~30s on a large file and avoids CharacterList coercions).
+  t0 <- tic("sanity check")
 
-  # After GFF3 round-trip, multi-valued attributes come back as CharacterList;
-  # use the standard source column (col 2) and unlist for safe access.
-  parent_col <- suppressWarnings(gr$Parent)
-  if (is(parent_col, "CharacterList")) {
+  parent_col <- if ("Parent" %in% colnames(mcols(gr))) gr$Parent else NULL
+  if (is.null(parent_col)) {
+    has_parent <- rep(FALSE, length(gr))
+  } else if (is(parent_col, "CharacterList")) {
     has_parent <- lengths(parent_col) > 0
   } else {
     has_parent <- !is.na(parent_col)
@@ -624,48 +752,54 @@ sanity_check <- function(output_path, seqlengths_vec) {
 
   # 4. Summary — use the source column (GFF3 col 2) which is always a plain vector
   message("\nLevel 1 breakdown by source (tool):")
-  print(sort(table(as.character(l1$source)), decreasing = TRUE))
+  tool_col <- if (!is.null(l1$source)) l1$source else l1$source_tool
+  print(sort(table(as.character(tool_col)), decreasing = TRUE))
   message("\nLevel 1 breakdown by source_tier attribute:")
   tier_col <- suppressWarnings(l1$source_tier)
   if (!is.null(tier_col)) print(sort(table(as.character(tier_col))))
+  toc(t0)
   message("──────────────────────────────────────────────────────────────\n")
 }
 
 # ── 8. Main ───────────────────────────────────────────────────────────────────
 
-message("=== make_unified_annotation.R ===")
+log_msg("=== make_unified_annotation.R ===")
 
 # Load all tiers
-message("\n── Loading inputs ─────────────────────────────────────────────")
-ltr_data  <- load_tier1_ltr(opt$ltr)
-tir_data  <- load_tier1_tir(opt$tir)
-line_data <- load_tier1_line(opt$line)
+log_msg("── Loading inputs ─────────────────────────────────────────────")
+t_load <- tic("loading all tiers")
+ltr_data  <- timed("load DANTE_LTR",   load_tier1_ltr(opt$ltr))
+tir_data  <- timed("load DANTE_TIR",   load_tier1_tir(opt$tir))
+line_data <- timed("load DANTE_LINE",  load_tier1_line(opt$line))
 
-t1 <- c(ltr_data$top, tir_data, line_data$top)
-message("Tier 1 total: ", length(t1), " top-level features")
+t1 <- suppressWarnings(c(ltr_data$top, tir_data, line_data$top))
+log_msg("Tier 1 total: ", length(t1), " top-level features")
 
-t2 <- load_tier2_dante(opt$dante)
-message("Tier 2 total: ", length(t2), " features")
+t2 <- timed("load DANTE filtered (Tier 2)", load_tier2_dante(opt$dante))
+log_msg("Tier 2 total: ", length(t2), " features")
 
-tc_data <- load_tier3_tidecluster(opt$tc_default, opt$tc_short)
-message("Tier 3 total: ", length(tc_data$default), " default + ",
+tc_data <- timed("load TideCluster (Tier 3)",
+                 load_tier3_tidecluster(opt$tc_default, opt$tc_short))
+log_msg("Tier 3 total: ", length(tc_data$default), " default + ",
         length(tc_data$short), " short monomer features")
 
-t4 <- load_tier4_tc_rm(opt$tc_rm)
-message("Tier 4 total: ", length(t4), " features")
+t4 <- timed("load RM-on-TC (Tier 4)", load_tier4_tc_rm(opt$tc_rm))
+log_msg("Tier 4 total: ", length(t4), " features")
 
-rm_data <- load_tier5_rm(opt$rm)
-message("Tier 5 total: ", length(rm_data$te), " TE + ",
+rm_data <- timed("load RepeatMasker+DANTE (Tier 5)", load_tier5_rm(opt$rm))
+log_msg("Tier 5 total: ", length(rm_data$te), " TE + ",
         length(rm_data$simple), " Simple/Low features")
 
-t6 <- load_tier6_tidehunter(opt$th_default, opt$th_short)
-message("Tier 6 total: ", length(t6), " features")
+t6 <- timed("load TideHunter (Tier 6)",
+            load_tier6_tidehunter(opt$th_default, opt$th_short))
+log_msg("Tier 6 total: ", length(t6), " features")
+toc(t_load)
 
 # Read genome FAI
-message("\n── Reading FAI ────────────────────────────────────────────────")
+log_msg("── Reading FAI ────────────────────────────────────────────────")
 seqlengths_vec <- read_fai(opt$fai)
 genome_bp      <- sum(as.numeric(seqlengths_vec))
-message("Genome: ", length(seqlengths_vec), " sequences, ",
+log_msg("Genome: ", length(seqlengths_vec), " sequences, ",
         format(genome_bp, big.mark=","), " bp total")
 
 # Decide whether to chunk
@@ -680,41 +814,61 @@ data <- list(
   t6     = t6
 )
 
-if (genome_bp <= opt$chunk_threshold) {
-  message("\n── Processing genome as single batch (", format(genome_bp, big.mark=","),
-          " bp ≤ threshold) ─────────")
+# Decide batching. Even when the genome is below the "chunked processing"
+# threshold we still want to split the work across threads — otherwise
+# --threads > 1 is wasted on small-to-medium genomes. Pick a batch target
+# that creates roughly one batch per thread, capped by opt$batch_size.
+if (opt$threads <= 1 || length(seqlengths_vec) == 1) {
+  # Nothing to parallelise — one batch, one worker.
   batches <- list(names(seqlengths_vec))
+  log_msg("── Single batch (threads=1 or single-sequence genome) ─────────")
 } else {
-  message("\n── Activating chunked processing (genome ", format(genome_bp, big.mark=","),
-          " bp > threshold) ───────")
-  batches <- make_batches(seqlengths_vec, opt$batch_size)
-  message("Created ", length(batches), " batches (target ", opt$batch_size/1e6, " Mb each)")
+  effective_target <- min(
+    opt$batch_size,
+    max(1e6, ceiling(genome_bp / opt$threads))
+  )
+  batches <- make_batches(seqlengths_vec, effective_target)
+  log_msg(sprintf(
+    "── Batching: %d batch(es), target ~%.1f Mb/batch, %d threads ─────────",
+    length(batches), effective_target / 1e6, opt$threads))
+  # Optional: report the largest batch to help diagnose skew.
+  batch_bp <- vapply(batches, function(b) sum(as.numeric(seqlengths_vec[b])), numeric(1))
+  log_msg(sprintf(
+    "   batch sizes: min=%.1f Mb  median=%.1f Mb  max=%.1f Mb  (features cluster on largest)",
+    min(batch_bp)/1e6, stats::median(batch_bp)/1e6, max(batch_bp)/1e6))
 }
 
-# Run resolution — parallel over batches
-message("\n── Running tier resolution (", opt$threads, " threads, ",
-        length(batches), " batch(es)) ─────────────────────")
+# Run resolution — always via mclapply so the code path is uniform.
+log_msg(sprintf("── Running tier resolution (%d threads, %d batch(es)) ─────",
+                opt$threads, length(batches)))
+t_resolve <- tic("tier resolution (all batches)")
+results <- mclapply(batches,
+                    function(seqs) process_batch(seqs, data, opt$min_feature_length),
+                    mc.cores = min(opt$threads, length(batches)))
+toc(t_resolve)
 
-if (length(batches) == 1) {
-  results <- list(process_batch(batches[[1]], data, opt$min_feature_length))
-} else {
-  results <- mclapply(batches,
-                      function(seqs) process_batch(seqs, data, opt$min_feature_length),
-                      mc.cores = opt$threads)
+# Check for worker errors (mclapply returns error objects on failure)
+err_idx <- which(vapply(results, function(r) inherits(r, "try-error"), logical(1)))
+if (length(err_idx) > 0) {
+  for (i in err_idx) message("Batch ", i, " failed: ", as.character(results[[i]]))
+  stop("One or more batches failed — see messages above")
 }
 
 # Combine batch results
-message("\n── Combining results ──────────────────────────────────────────")
-level1_all <- do.call(c, lapply(results, `[[`, "level1"))
-level2_all <- do.call(c, lapply(results, `[[`, "level2"))
-message("Combined: ", length(level1_all), " Level 1, ",
+log_msg("── Combining batch results ─────────────────────────────────────")
+level1_all <- timed("combine level1 across batches",
+                    suppressWarnings(do.call(c, lapply(results, `[[`, "level1"))))
+level2_all <- timed("combine level2 across batches",
+                    suppressWarnings(do.call(c, lapply(results, `[[`, "level2"))))
+log_msg("Combined: ", length(level1_all), " Level 1, ",
         length(level2_all), " Level 2 features")
 
 # Finalise and export
-message("\n── Finalising output ──────────────────────────────────────────")
-finalise_output(level1_all, level2_all, seqlengths_vec, opt$output)
+log_msg("── Finalising output ──────────────────────────────────────────")
+all_feats <- finalise_output(level1_all, level2_all, seqlengths_vec, opt$output)
 
-# Sanity checks
-sanity_check(opt$output, seqlengths_vec)
+# Sanity checks on the in-memory GRanges (avoids re-parsing the GFF3)
+sanity_check(all_feats, seqlengths_vec)
 
-message("Done. Output: ", opt$output)
+log_msg("Done. Output: ", opt$output,
+        sprintf("  (total wall time: %.1fs)", proc.time()[3] - .script_start))
