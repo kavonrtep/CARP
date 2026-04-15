@@ -206,7 +206,8 @@ build_sunburst_data <- function(comp) {
 }
 
 # ── C3. Build composition tree for hierarchical table ─────────────────────
-build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL) {
+build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL,
+                            genome_size = NULL) {
   # Compute the closure of all node paths (CSV rows + synthetic parents)
   csv_ids  <- comp$type
   csv_bp   <- setNames(comp$bp,  comp$type)
@@ -240,7 +241,8 @@ build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL) {
   }
   subtree_bp_cache <- sapply(all_ids, subtree_bp)
 
-  genome_size <- sum(comp$bp)  # approximate; used for pct of synthetic nodes
+  if (is.null(genome_size)) genome_size <- sum(as.numeric(comp$bp))  # fallback
+  # genome_size is the total assembly size, NOT the repeat content
 
   # Build DANTE lookup: path → count
   dante_counts <- setNames(integer(0), character(0))
@@ -1357,7 +1359,8 @@ main <- function() {
   # ── Build Plotly charts ────────────────────────────────────────────────
   message("Generating Plotly JSON...")
   sb_data        <- build_sunburst_data(comp)
-  tree_df        <- build_comp_tree(comp, ltr_stats, tir_stats, line_stats)
+  tree_df        <- build_comp_tree(comp, ltr_stats, tir_stats, line_stats,
+                                     genome_size = genome_size)
   sunburst_chart <- json_sunburst(sb_data)
 
   comp_bar_chart <- if (nrow(cov_mat) > 0)
