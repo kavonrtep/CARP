@@ -638,10 +638,13 @@ def process_subtype(
             return output_files["gff_out"], None, len(tir_elements)
 
         # Append #classification suffix to extended-FASTA headers so that
-        # reduce_library_size.R can group these sequences correctly. The
-        # slash form "Class_II/Subclass_1/TIR_<subtype>" matches the format
-        # produced by primary DANTE_TIR (e.g. ">hAT_142#Class_II/Subclass_1/TIR_hAT").
-        classification_with_slashes = f"Class_II/Subclass_1/TIR_{subtype_slug}"
+        # reduce_library_size.R can group these sequences correctly. Use the
+        # canonical slash form "Class_II/Subclass_1/TIR/<subtype>" so that
+        # similarity-based hits line up with structure-based DANTE annotations
+        # (clean_DANTE_names.R converts Class_II|Subclass_1|TIR|hAT to
+        # Class_II/Subclass_1/TIR/hAT). Primary DANTE_TIR_final.fasta headers
+        # are normalized to the same slash form by make_tir_combined_library.
+        classification_with_slashes = f"Class_II/Subclass_1/TIR/{subtype_slug}"
         annotate_extended_fasta_headers(
             str(output_files["extended_fasta"]),
             classification_with_slashes,

@@ -327,9 +327,15 @@ rule make_tir_combined_library:
 
         mkdir -p {params.mmseqs_dir}
 
-        # Concatenate primary and fallback FASTA sequences
+        # Concatenate primary and fallback FASTA sequences. Primary DANTE_TIR
+        # writes headers like ">hAT_142#Class_II/Subclass_1/TIR_hAT" (underscore
+        # between TIR and subtype). Normalize to the canonical slash form
+        # ">hAT_142#Class_II/Subclass_1/TIR/hAT" so that reduce_library_size.R
+        # groups primary+fallback under one classification and RepeatMasker hits
+        # match the slash form used by structure-based DANTE annotation
+        # (clean_DANTE_names.R).
         COMBINED_INPUT={params.mmseqs_dir}/combined_input.fasta
-        cat {input.primary_fasta} > "$COMBINED_INPUT"
+        sed -E '/^>/ s@(#Class_II/Subclass_[12]/TIR)_@\1/@' {input.primary_fasta} > "$COMBINED_INPUT"
         if [ -s {input.fallback_fasta} ]; then
             cat {input.fallback_fasta} >> "$COMBINED_INPUT"
         fi

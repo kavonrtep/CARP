@@ -80,8 +80,14 @@ fix_sep <- function(x) gsub("|", "/", as.character(x), fixed = TRUE)
 
 # Convert DANTE_TIR underscore-encoded hierarchy to slash-separated
 # e.g. "Class_II_Subclass_1_TIR_hAT" → "Class_II/Subclass_1/TIR/hAT"
+# Order matters: the TIR-specific subs must run first so the full TIR prefix
+# (including the separator between TIR and subtype) gets converted to slashes,
+# matching the canonical form produced by structure-based DANTE annotation
+# (clean_DANTE_names.R converts Class_II|Subclass_1|TIR|hAT → Class_II/Subclass_1/TIR/hAT).
 convert_tir_cls <- function(x) {
   x <- as.character(x)
+  x <- sub("^Class_II_Subclass_1_TIR_", "Class_II/Subclass_1/TIR/", x)
+  x <- sub("^Class_II_Subclass_2_TIR_", "Class_II/Subclass_2/TIR/", x)
   x <- sub("^Class_II_Subclass_1_", "Class_II/Subclass_1/", x)
   x <- sub("^Class_II_Subclass_2_", "Class_II/Subclass_2/", x)
   x
