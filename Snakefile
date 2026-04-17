@@ -335,7 +335,7 @@ rule make_tir_combined_library:
         # match the slash form used by structure-based DANTE annotation
         # (clean_DANTE_names.R).
         COMBINED_INPUT={params.mmseqs_dir}/combined_input.fasta
-        sed -E '/^>/ s@(#Class_II/Subclass_[12]/TIR)_@\1/@' {input.primary_fasta} > "$COMBINED_INPUT"
+        sed -E '/^>/ s@(#Class_II/Subclass_[12]/TIR)_@\\1/@' {input.primary_fasta} > "$COMBINED_INPUT"
         if [ -s {input.fallback_fasta} ]; then
             cat {input.fallback_fasta} >> "$COMBINED_INPUT"
         fi
