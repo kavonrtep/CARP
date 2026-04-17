@@ -80,6 +80,7 @@ Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Athila
 Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat
 Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Ogre
 Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Retand
+Class_I/pararetrovirus
 Class_II/Subclass_1/TIR/EnSpm_CACTA
 Class_II/Subclass_1/TIR/hAT
 Class_II/Subclass_1/TIR/MITE
@@ -91,8 +92,20 @@ Class_II/Subclass_2/Helitron
 rDNA_45S/18S
 rDNA_45S/25S
 rDNA_45S/5.8S
+rDNA_45S/IGS
+rDNA_45S/ITS1
+rDNA_45S/ITS2
 rDNA_5S/5S
 ```
+
+The authoritative, machine-readable list (including intermediate nodes
+emitted when a tool cannot resolve a full lineage) lives in
+[`classification_vocabulary.yaml`](classification_vocabulary.yaml). All
+translation between tool-native encodings and canonical slash form is
+performed by `scripts/classification.py` (Python) and
+`scripts/classification.R` (R); the vocabulary file is the single source
+of truth. To add a new classification, append it to the `classifications`
+list in that file — no code changes required.
 
 An important feature of pipeline is the filtering process where
 `Class_II/Subclass_1` repeats from the custom library are used to screen the LTR

@@ -1,0 +1,77 @@
+source	raw	expected	notes
+# Empty / whitespace handling ───────────────────────────────────────────────
+# (blank lines below are stripped by the test harness)
+
+# ── DANTE (pipe separator, "/" allowed inside leaf) ─────────────────────────
+DANTE	Class_I|LTR|Ty1/copia|Ale	Class_I/LTR/Ty1_copia/Ale	REXdb Ty1/copia leaf becomes Ty1_copia
+DANTE	Class_I|LTR|Ty1/copia|SIRE	Class_I/LTR/Ty1_copia/SIRE
+DANTE	Class_I|LTR|Ty3/gypsy|chromovirus|Tekay	Class_I/LTR/Ty3_gypsy/chromovirus/Tekay
+DANTE	Class_I|LTR|Ty3/gypsy|non-chromovirus|OTA|Tat|Ogre	Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Ogre
+DANTE	Class_II|Subclass_1|TIR|EnSpm/CACTA	Class_II/Subclass_1/TIR/EnSpm_CACTA	EnSpm/CACTA → EnSpm_CACTA leaf
+DANTE	Class_II|Subclass_1|TIR|MuDR/Mutator	Class_II/Subclass_1/TIR/MuDR_Mutator
+DANTE	Class_II|Subclass_1|TIR|PIF/Harbinger	Class_II/Subclass_1/TIR/PIF_Harbinger
+DANTE	Class_II|Subclass_1|TIR|Tc1/Mariner	Class_II/Subclass_1/TIR/Tc1_Mariner
+DANTE	Class_II|Subclass_1|TIR|hAT	Class_II/Subclass_1/TIR/hAT	hAT has no alias rewrite
+DANTE	Class_II|Subclass_2|Helitron	Class_II/Subclass_2/Helitron
+DANTE	Class_I|LINE	Class_I/LINE
+DANTE	Class_I|pararetrovirus	Class_I/pararetrovirus	observed in JI2822 real data
+DANTE	Class_I|LTR	Class_I/LTR	intermediate node (lineage not resolved)
+DANTE	Class_I	Class_I	top-level only
+DANTE	Class_II|Subclass_1|TIR	Class_II/Subclass_1/TIR
+DANTE	Class_I|LTR|Ty1/copia	Class_I/LTR/Ty1_copia	leaf alias without further hierarchy
+
+# ── DANTE_LTR (same dialect as DANTE) ───────────────────────────────────────
+DANTE_LTR	Class_I|LTR|Ty1/copia|Angela	Class_I/LTR/Ty1_copia/Angela
+DANTE_LTR	Class_I|LTR|Ty3/gypsy|non-chromovirus|OTA|Athila	Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Athila
+
+# ── DANTE_LINE ──────────────────────────────────────────────────────────────
+DANTE_LINE	Class_I|LINE	Class_I/LINE
+
+# ── DANTE_TIR (underscore-encoded hierarchy, "_" allowed inside leaf) ───────
+DANTE_TIR	Class_II_Subclass_1_TIR_hAT	Class_II/Subclass_1/TIR/hAT	simplest leaf
+DANTE_TIR	Class_II_Subclass_1_TIR_Tc1_Mariner	Class_II/Subclass_1/TIR/Tc1_Mariner	underscore inside leaf must survive
+DANTE_TIR	Class_II_Subclass_1_TIR_EnSpm_CACTA	Class_II/Subclass_1/TIR/EnSpm_CACTA
+DANTE_TIR	Class_II_Subclass_1_TIR_MuDR_Mutator	Class_II/Subclass_1/TIR/MuDR_Mutator
+DANTE_TIR	Class_II_Subclass_1_TIR_PIF_Harbinger	Class_II/Subclass_1/TIR/PIF_Harbinger
+DANTE_TIR	Class_II_Subclass_1_TIR_MITE	Class_II/Subclass_1/TIR/MITE
+DANTE_TIR	Class_II_Subclass_2_Helitron	Class_II/Subclass_2/Helitron	bare Subclass_2 prefix (no TIR segment)
+DANTE_TIR	Class_II/Subclass_1/TIR/hAT	Class_II/Subclass_1/TIR/hAT	already slash form passes through
+DANTE_TIR	Class_II/Subclass_1/TIR_hAT	Class_II/Subclass_1/TIR/hAT	mixed FASTA-header form (slashes + final _)
+DANTE_TIR	Class_II/Subclass_1/TIR_Tc1_Mariner	Class_II/Subclass_1/TIR/Tc1_Mariner	mixed form with underscore leaf
+
+# ── DANTE_TIR_FALLBACK (already canonical) ──────────────────────────────────
+DANTE_TIR_FALLBACK	Class_II/Subclass_1/TIR/hAT	Class_II/Subclass_1/TIR/hAT
+DANTE_TIR_FALLBACK	Class_II/Subclass_1/TIR/Tc1_Mariner	Class_II/Subclass_1/TIR/Tc1_Mariner
+
+# ── RepeatMasker (canonical slash form) ─────────────────────────────────────
+RepeatMasker	Class_I/LTR/Ty1_copia/SIRE	Class_I/LTR/Ty1_copia/SIRE	passthrough
+RepeatMasker	Class_II/Subclass_1/TIR/Tc1_Mariner	Class_II/Subclass_1/TIR/Tc1_Mariner
+RepeatMasker	Low_complexity	Low_complexity	special class
+RepeatMasker	Simple_repeat	Simple_repeat
+RepeatMasker	Satellite	Satellite	RepeatMasker leaf
+RepeatMasker	Unknown	Unknown
+RepeatMasker	rDNA_45S/IGS	rDNA_45S/IGS	observed in JI2822 real data
+RepeatMasker	rDNA_45S/ITS1	rDNA_45S/ITS1
+RepeatMasker	rDNA_45S/ITS2	rDNA_45S/ITS2
+RepeatMasker	Class_I/pararetrovirus	Class_I/pararetrovirus
+
+# ── TideCluster (custom-library class with similarity suffix) ───────────────
+TideCluster	Satellite/FabTR-1 (98.8%25)	Satellite/FabTR-1	suffix stripped
+TideCluster	Satellite/FabTR_PisTR-B (98.8%25)	Satellite/FabTR_PisTR-B	underscore in sublabel preserved
+TideCluster	Satellite/FabTR-1	Satellite/FabTR-1	no suffix
+TideCluster	Satellite/TideCluster/TRC_1	Satellite/TideCluster/TRC_1	synthetic pipeline subpath
+
+# ── custom_library (slash form required on input) ───────────────────────────
+custom_library	Class_II/Subclass_1/TIR/MITE/Stowaway	Class_II/Subclass_1/TIR/MITE/Stowaway
+custom_library	Satellite/FabTR-1	Satellite/FabTR-1
+
+# ── Auto-detection (source=None) ────────────────────────────────────────────
+	Class_I|LTR|Ty1/copia|Ale	Class_I/LTR/Ty1_copia/Ale	pipe → DANTE dialect
+	Class_II_Subclass_1_TIR_hAT	Class_II/Subclass_1/TIR/hAT	underscore-prefix → DANTE_TIR dialect
+	Class_I/LTR/Ty1_copia/Ale	Class_I/LTR/Ty1_copia/Ale	already slash → passthrough
+
+# ── Negative cases (must raise UnknownClassification) ───────────────────────
+RepeatMasker	Class_III/foo	!!ERROR	unknown top-level class
+RepeatMasker	Class_I/LTR/Ty5_unknown	!!ERROR	unknown Ty lineage
+DANTE_TIR	Class_II_Subclass_9_TIR_hAT	!!ERROR	unknown Subclass number
+RepeatMasker		!!ERROR	empty string

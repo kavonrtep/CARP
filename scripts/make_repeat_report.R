@@ -11,6 +11,9 @@ suppressPackageStartupMessages({
   library(jsonlite)
 })
 
+source(file.path(dirname(sub("^--file=", "",
+  grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "classification.R"))
+
 # ═══════════════════════════════════════════════════════════════════════════
 # A. ARGUMENT PARSING
 # ═══════════════════════════════════════════════════════════════════════════
@@ -69,14 +72,7 @@ load_dante_ltr_stats <- function(outdir) {
   if (length(te) == 0) return(NULL)
   cls <- te$Final_Classification
   if (is.null(cls)) cls <- te$Name
-  # Convert pipe-separated DANTE notation to slash-separated path.
-  # Each |-delimited level may contain "/" within its name (e.g. "Ty1/copia"),
-  # so split by "|", replace "/" within each component with "_", then rejoin.
-  cls_path <- sapply(strsplit(trimws(as.character(cls)), "\\|"), function(parts) {
-    parts <- trimws(parts)          # strip trailing whitespace per component
-    parts <- gsub("/", "_", parts)  # Ty1/copia → Ty1_copia
-    paste(parts, collapse = "/")
-  })
+  cls_path <- canonicalise(cls, source = "DANTE_LTR", validate = FALSE)
   tmp_df <- data.frame(path = cls_path, count = 1L, bp = as.numeric(width(te)))
   agg <- aggregate(cbind(count, bp) ~ path, data = tmp_df, FUN = sum)
   agg
@@ -88,12 +84,7 @@ load_dante_tir_stats <- function(outdir) {
   if (!file.exists(f) || file.size(f) == 0) return(NULL)
   df <- read.table(f, header = TRUE, sep = "\t", check.names = FALSE)
   colnames(df) <- c("raw_name", "count")
-  # Convert Class_II_Subclass_1_TIR_X to Class_II/Subclass_1/TIR/X path
-  df$path <- gsub("_", "/", df$raw_name)
-  # Fix: "Class/II/Subclass/1/TIR/X" → should be "Class_II/Subclass_1/TIR/X"
-  # The raw names use underscores within tokens too, so do targeted replacements
-  df$path <- sub("^Class_II_Subclass_1_TIR_", "Class_II/Subclass_1/TIR/", df$raw_name)
-  df$path <- sub("^Class_II_Subclass_2_", "Class_II/Subclass_2/", df$path)
+  df$path <- canonicalise(df$raw_name, source = "DANTE_TIR", validate = FALSE)
   df[, c("path", "count")]
 }
 
