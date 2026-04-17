@@ -84,8 +84,8 @@ if (any(rm_out$V11 == "Unspecified")){
   ## set Name from prefix
   ## TODO
   inc <- rm_out$V11 == "Unspecified"
-  Name <- gsub("__.+", "", rm_out$V10)
-  # chanche Usnpsecified to new name
+  Name <- gsub("__.+", "", rm_out$V10[inc])
+  # change Unspecified to new name
   gff$Name[inc] <- Name
 }
 
