@@ -10,3 +10,5 @@ dependencies:
   - seqkit=2.8.2
   - cap3=10.2011
   - r-jsonlite
+  - r-yaml
+  - pyyaml

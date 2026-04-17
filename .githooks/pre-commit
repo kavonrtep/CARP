@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""
+Pre-commit hook: enforce Singularity %files coverage for new runtime files.
+
+The CARP pipeline ships as a Singularity container. Files the pipeline reads
+at runtime MUST be listed in the %files section of the Singularity definition,
+otherwise the container builds cleanly but fails at run time — as happened
+with classification_vocabulary.yaml in April 2026.
+
+This hook runs on every `git commit`. It fails the commit if any newly-added
+file looks like a runtime artifact but is not covered by %files.
+
+  * Install once per checkout:   git config core.hooksPath .githooks
+  * Bypass when you're sure:     git commit --no-verify   (not recommended)
+  * Exempt a dev-only path:      add a pattern to EXCLUDE_PATTERNS below.
+"""
+from __future__ import annotations
+
+import fnmatch
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+
+# Glob patterns (relative to repo root) that are known dev-only — docs,
+# tests, IDE config, CI config, generated artefacts. Everything else is
+# considered potentially runtime-relevant and must be covered by %files
+# (or explicitly added here if it's dev-only).
+EXCLUDE_PATTERNS = [
+    # documentation and plans
+    "*.md",
+    "*_PLAN.md", "*_AUDIT.md",
+    "annotation_rules.md",
+    "README.md", "CLAUDE.md", "AGENTS.md",
+    # test harness
+    "tests/*", "tests/**/*",
+    # VCS / CI / hook / editor config
+    ".gitignore", ".gitattributes",
+    ".github/*", ".github/**/*",
+    ".githooks/*",
+    ".claude/*", ".claude/**/*",
+    ".codex*",
+    ".idea/*", ".idea/**/*",
+    ".pre-commit-config.yaml",
+    # generated / scratch
+    ".snakemake/*", ".snakemake/**/*",
+    "output/*", "output/**/*",
+    "tmp/*", "tmp/**/*",
+    "hermit/*", "hermit/**/*",
+    # figures, images, wublast legacy dir
+    "figs/*", "figs/**/*",
+    "images/*", "images/**/*",
+    "wublast/*", "wublast/**/*",
+    "*.svg", "*.png", "*.pdf", "*.odg",
+    # build entry / env setup — not runtime
+    "Makefile",
+    "setup.sh", "bootstrap.sh",
+]
+
+
+def is_excluded(path: str) -> bool:
+    return any(fnmatch.fnmatch(path, pat) for pat in EXCLUDE_PATTERNS)
+
+
+def parse_singularity_files(text: str) -> list[tuple[str, str]]:
+    """Return [(source, dest), ...] entries from the %files section."""
+    entries: list[tuple[str, str]] = []
+    in_files = False
+    for line in text.splitlines():
+        if re.match(r"^%files\b", line):
+            in_files = True
+            continue
+        if in_files and line.startswith("%"):
+            break
+        if not in_files:
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split()
+        if len(parts) >= 2:
+            entries.append((parts[0], parts[1]))
+    return entries
+
+
+def is_covered(path: str, sources: list[str]) -> bool:
+    for src in sources:
+        if src == path or path.startswith(src + "/"):
+            return True
+    return False
+
+
+def git(*args: str) -> str:
+    return subprocess.check_output(["git", *args], cwd=REPO, text=True)
+
+
+def main() -> int:
+    added = [p for p in git("diff", "--cached", "--diff-filter=A",
+                             "--name-only").splitlines() if p]
+    if not added:
+        return 0
+
+    sing_path = REPO / "Singularity"
+    if not sing_path.exists():
+        return 0
+
+    sources = [src for src, _ in parse_singularity_files(sing_path.read_text())]
+
+    violations = [
+        p for p in added
+        if not is_excluded(p) and not is_covered(p, sources)
+    ]
+    if not violations:
+        return 0
+
+    singularity_staged = "Singularity" in git(
+        "diff", "--cached", "--name-only"
+    ).splitlines()
+
+    if singularity_staged:
+        # User is actively editing Singularity; trust them and just report.
+        print("[pre-commit] Singularity is staged — verify these files are "
+              "listed in its %files section:", file=sys.stderr)
+        for v in violations:
+            print(f"  {v}", file=sys.stderr)
+        return 0
+
+    print("", file=sys.stderr)
+    print("pre-commit: Singularity %files not updated", file=sys.stderr)
+    print("-" * 65, file=sys.stderr)
+    print("", file=sys.stderr)
+    print("These newly-added files are NOT covered by the Singularity %files", file=sys.stderr)
+    print("section. If the pipeline reads them at run time, the container will", file=sys.stderr)
+    print("build cleanly but fail at run time:", file=sys.stderr)
+    print("", file=sys.stderr)
+    for v in violations:
+        print(f"  * {v}", file=sys.stderr)
+        print(f"      suggested line:  {v} /opt/pipeline/{v}", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("Options:", file=sys.stderr)
+    print("  1. Add the file(s) to %files in Singularity, stage the change,", file=sys.stderr)
+    print("     and commit again.", file=sys.stderr)
+    print("  2. If the file is dev-only (not read at run time), add its", file=sys.stderr)
+    print("     path/glob to EXCLUDE_PATTERNS in .githooks/pre-commit.", file=sys.stderr)
+    print("  3. Bypass: `git commit --no-verify`  (use sparingly).", file=sys.stderr)
+    print("", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

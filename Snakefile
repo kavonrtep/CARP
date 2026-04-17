@@ -109,7 +109,8 @@ rule all:
         F"{config['output_dir']}/summary_plots.pdf",
         F"{config['output_dir']}/benchmark_report.html",
         F"{config['output_dir']}/repeat_annotation_report.html",
-        F"{config['output_dir']}/Repeat_Annotation_Unified.gff3"
+        F"{config['output_dir']}/Repeat_Annotation_Unified.gff3",
+        F"{config['output_dir']}/.classifications_validated"
 
 rule clean_genome_fasta:
     """
@@ -327,15 +328,14 @@ rule make_tir_combined_library:
 
         mkdir -p {params.mmseqs_dir}
 
-        # Concatenate primary and fallback FASTA sequences. Primary DANTE_TIR
-        # writes headers like ">hAT_142#Class_II/Subclass_1/TIR_hAT" (underscore
-        # between TIR and subtype). Normalize to the canonical slash form
-        # ">hAT_142#Class_II/Subclass_1/TIR/hAT" so that reduce_library_size.R
-        # groups primary+fallback under one classification and RepeatMasker hits
-        # match the slash form used by structure-based DANTE annotation
-        # (clean_DANTE_names.R).
+        # Normalise primary DANTE_TIR FASTA headers into canonical slash form
+        # (#Class_II/Subclass_1/TIR/hAT) via classification_vocabulary.yaml, then
+        # append fallback sequences (already canonical). Previously done by sed;
+        # now vocabulary-aware so any unknown leaf fails loudly here.
         COMBINED_INPUT={params.mmseqs_dir}/combined_input.fasta
-        sed -E '/^>/ s@(#Class_II/Subclass_[12]/TIR)_@\\1/@' {input.primary_fasta} > "$COMBINED_INPUT"
+        scripts_dir=$(realpath {workflow.basedir}/scripts)
+        python3 "$scripts_dir/classification.py" canonicalise-fasta-headers \
+            --source DANTE_TIR {input.primary_fasta} "$COMBINED_INPUT"
         if [ -s {input.fallback_fasta} ]; then
             cat {input.fallback_fasta} >> "$COMBINED_INPUT"
         fi
@@ -382,6 +382,42 @@ rule filter_dante:
         set -euo pipefail
         set -x
         dante_gff_output_filtering.py --dom_gff {input} --domains_filtered {output.gff} --domains_prot_seq {output.fasta}
+        """
+
+
+rule validate_classifications:
+    """
+    Fail fast if any upstream tool emits a classification not listed in
+    classification_vocabulary.yaml. Runs after every producer of a
+    classification-bearing file; consumers (library construction,
+    RepeatMasker, unified annotation) depend on this rule's marker.
+    """
+    input:
+        dante_filtered=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
+        dante_ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
+        dante_tir_final=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
+        dante_tir_combined=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_combined.gff3",
+        dante_line=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3"
+    output:
+        marker=F"{config['output_dir']}/.classifications_validated"
+    log:
+        stdout=F"{config['output_dir']}/logs/validate_classifications.log",
+        stderr=F"{config['output_dir']}/logs/validate_classifications.err"
+    conda:
+        "envs/tidecluster.yaml"
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+        scripts_dir=$(realpath {workflow.basedir}/scripts)
+        CLS="python3 $scripts_dir/classification.py validate --mode gff3"
+        $CLS --source DANTE       --attribute Final_Classification {input.dante_filtered}
+        $CLS --source DANTE_LTR   --attribute Final_Classification {input.dante_ltr}
+        $CLS --source DANTE_TIR   --attribute Classification       {input.dante_tir_final}
+        $CLS --source DANTE_TIR   --attribute Classification       {input.dante_tir_combined}
+        $CLS --source DANTE_LINE  --attribute Final_Classification {input.dante_line}
+        touch {output.marker}
         """
 
 rule dante_line:
@@ -745,8 +781,13 @@ rule filter_ltr_rt_library:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
-        # reformat header (convert | to / and / to _) then filter using blast
-        sed  's/\//_/g' {input.dante_library} |  sed 's/|/\//g'  > {input.dante_library}.reformatted
+        # Canonicalise DANTE_LTR library headers (#Class_I|LTR|Ty1/copia|Ale
+        # → #Class_I/LTR/Ty1_copia/Ale) via classification_vocabulary.yaml.
+        # Replaces the previous two-step sed that relied on the accident that
+        # legitimate leaf underscores never sit next to a pipe.
+        scripts_dir=$(realpath {workflow.basedir}/scripts)
+        python3 "$scripts_dir/classification.py" canonicalise-fasta-headers \
+            --source DANTE_LTR {input.dante_library} {input.dante_library}.reformatted
         # if the input.subclass_2_library is empty, just copy the reformatted library
         if [ ! -s {input.subclass_2_library} ]; then
             cp {input.dante_library}.reformatted {output.library}
@@ -766,7 +807,11 @@ rule concatenate_libraries:
     input:
         ltr_rt_library=F"{config['output_dir']}/Libraries/LTR_RTs_library_clean.fasta",
         dante_tir_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_combined.fasta",
-        line_rep_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta"
+        line_rep_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta",
+        # Barrier: don't build the combined library (or run the expensive
+        # RepeatMasker that depends on it) until every upstream tool's
+        # classifications are known to resolve against the vocabulary.
+        validation_marker=F"{config['output_dir']}/.classifications_validated"
     output:
         full_names=F"{config['output_dir']}/Libraries/combined_library.fasta",
         short_names=F"{config['output_dir']}/Libraries/combined_library_short_names.fasta",
@@ -943,7 +988,8 @@ rule make_unified_annotation:
         rm=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_plus_DANTE.gff3",
         th_default=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter_short.gff3",
         th_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_tidehunter_short.gff3",
-        fai=F"{config['output_dir']}/genome_cleaned.fasta.fai"
+        fai=F"{config['output_dir']}/genome_cleaned.fasta.fai",
+        validation_marker=F"{config['output_dir']}/.classifications_validated"
     output:
         gff=F"{config['output_dir']}/Repeat_Annotation_Unified.gff3"
     log:

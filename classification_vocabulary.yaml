@@ -1,0 +1,281 @@
+# ============================================================================
+# CARP repeat-classification vocabulary
+# ============================================================================
+# Authoritative, machine-readable list of repeat classifications recognised
+# by the Comprehensive Annotation of Repeats Pipeline (CARP).
+#
+# Canonical form is slash-separated (required by RepeatMasker and used
+# internally). Underscores inside a path component are ALWAYS part of the
+# component's name (e.g. Ty1_copia, Tc1_Mariner) — never separators.
+#
+# This file is the single source of truth; scripts/classification.py and
+# scripts/classification.R load it and perform all normalisation against it.
+# Tool-native dialects (pipe-separated from DANTE, fully underscore-encoded
+# from DANTE_TIR) are translated into canonical form via the aliases and
+# tool_dialects sections below.
+#
+# ----------------------------------------------------------------------------
+# Update policy
+# ----------------------------------------------------------------------------
+#  * Add a new classification by appending it (in canonical slash form) to
+#    `classifications`. If it is reachable under an existing leaf alias
+#    (Ty1/copia -> Ty1_copia, etc.) no alias update is needed.
+#  * Add a new leaf-name alias only when a tool emits a spelling that cannot
+#    be resolved by generic separator conversion.
+#  * Add a new tool dialect when a new upstream tool is integrated.
+#  * README.md lists the user-facing subset; this file is the superset.
+# ============================================================================
+
+version: 1
+canonical_separator: "/"
+
+# ---------------------------------------------------------------------------
+# Hierarchical classifications
+# ---------------------------------------------------------------------------
+# Every recognised classification listed exactly once, in canonical form.
+# Intermediate nodes ARE included because DANTE/DANTE_LTR can emit them
+# when lineage resolution is incomplete (e.g. just "Class_I/LTR/Ty1_copia"
+# with no sub-lineage). Any string that normalises to an entry here is
+# accepted by the pipeline without warning.
+# ---------------------------------------------------------------------------
+classifications:
+  # Class I — retroelements --------------------------------------------------
+  - Class_I
+  - Class_I/LINE
+  - Class_I/LTR
+  - Class_I/LTR/Ty1_copia
+  - Class_I/LTR/Ty1_copia/Ale
+  - Class_I/LTR/Ty1_copia/Alexandra
+  - Class_I/LTR/Ty1_copia/Angela
+  - Class_I/LTR/Ty1_copia/Bianca
+  - Class_I/LTR/Ty1_copia/Bryana
+  - Class_I/LTR/Ty1_copia/Ferco
+  - Class_I/LTR/Ty1_copia/Ikeros
+  - Class_I/LTR/Ty1_copia/Ivana
+  - Class_I/LTR/Ty1_copia/SIRE
+  - Class_I/LTR/Ty1_copia/TAR
+  - Class_I/LTR/Ty1_copia/Tork
+  - Class_I/LTR/Ty3_gypsy
+  - Class_I/LTR/Ty3_gypsy/chromovirus
+  - Class_I/LTR/Ty3_gypsy/chromovirus/CRM
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Ferney
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Reina
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Tekay
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Athila
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Ogre
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Retand
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tatius
+  - Class_I/pararetrovirus
+
+  # Class II — DNA transposons ---------------------------------------------
+  - Class_II
+  - Class_II/Subclass_1
+  - Class_II/Subclass_1/TIR
+  - Class_II/Subclass_1/TIR/EnSpm_CACTA
+  - Class_II/Subclass_1/TIR/hAT
+  - Class_II/Subclass_1/TIR/MITE
+  - Class_II/Subclass_1/TIR/MITE/Stowaway
+  - Class_II/Subclass_1/TIR/MuDR_Mutator
+  - Class_II/Subclass_1/TIR/PIF_Harbinger
+  - Class_II/Subclass_1/TIR/Tc1_Mariner
+  - Class_II/Subclass_2
+  - Class_II/Subclass_2/Helitron
+
+  # rDNA --------------------------------------------------------------------
+  - rDNA_45S
+  - rDNA_45S/18S
+  - rDNA_45S/25S
+  - rDNA_45S/5.8S
+  - rDNA_45S/IGS
+  - rDNA_45S/ITS1
+  - rDNA_45S/ITS2
+  - rDNA_5S
+  - rDNA_5S/5S
+
+# ---------------------------------------------------------------------------
+# Leaf-name aliases
+# ---------------------------------------------------------------------------
+# Alternative spellings of individual path components. The normaliser
+# rewrites the LHS to the RHS *inside a single component* before hierarchy
+# parsing. This is what disambiguates "Ty1/copia" (DANTE convention, one
+# leaf containing a slash) from "Ty1_copia/Ale" (canonical, two levels).
+#
+# Mechanism:
+#   1. Any component equal to a key on the left is rewritten to the value.
+#   2. Applied per-component, so it never affects separators.
+# ---------------------------------------------------------------------------
+leaf_aliases:
+  "Ty1/copia":      Ty1_copia
+  "Ty3/gypsy":      Ty3_gypsy
+  "EnSpm/CACTA":    EnSpm_CACTA
+  "MuDR/Mutator":   MuDR_Mutator
+  "PIF/Harbinger":  PIF_Harbinger
+  "Tc1/Mariner":    Tc1_Mariner
+
+# ---------------------------------------------------------------------------
+# Special classes produced by RepeatMasker's default classification scheme
+# ---------------------------------------------------------------------------
+# These live outside the Class_I/Class_II hierarchy. User-supplied custom
+# libraries may extend Satellite with sub-paths (e.g. Satellite/FabTR-1);
+# such extensions are accepted even though they are not enumerated above.
+# The other three do NOT take sub-paths — monomer sequences belong in the
+# Original_names attribute, not in Name.
+# ---------------------------------------------------------------------------
+special_classes:
+  Satellite:
+    description: Tandem repeat / satellite from RepeatMasker default library
+    accepts_subpath: true
+    examples:
+      - Satellite
+      - Satellite/FabTR-1
+      - Satellite/FabTR_PisTR-B
+  Simple_repeat:
+    description: Simple sequence repeats (SSRs) from RepeatMasker
+    accepts_subpath: false
+  Low_complexity:
+    description: Low-complexity regions from RepeatMasker
+    accepts_subpath: false
+  Unknown:
+    description: RepeatMasker fallback when classification cannot be resolved
+    accepts_subpath: false
+
+# ---------------------------------------------------------------------------
+# Aggregation buckets (report-only)
+# ---------------------------------------------------------------------------
+# These labels appear in summary_statistics.csv, split-by-class GFF3
+# filenames, and density-track outputs. They are NOT feature classifications;
+# they are groupings computed by pipeline scripts. Kept here so reporting
+# code has a canonical reference (and so Satellites/Satellite cannot be
+# confused — note the plural form).
+# ---------------------------------------------------------------------------
+aggregation_buckets:
+  Mobile_elements:
+    description: Union of all Class_I and Class_II features
+    produced_by: calculate_statistics_and_make_groups.R
+  Simple_repeats:
+    description: Plural form used in top-level symlink; same features as Simple_repeat leaf
+    produced_by: Snakefile symlinking rule
+  Satellites:
+    description: Union of TideCluster tandem-repeat calls (final annotated set)
+    produced_by: calculate_statistics_and_make_groups.R
+    distinct_from: Satellite   # RepeatMasker leaf class, much smaller
+  All_Ty1_Copia:
+    description: All Class_I/LTR/Ty1_copia/* lineages combined
+    produced_by: calculate_statistics_and_make_groups.R
+  All_Ty3_Gypsy:
+    description: All Class_I/LTR/Ty3_gypsy/* lineages combined (both chromovirus and non-chromovirus)
+    produced_by: calculate_statistics_and_make_groups.R
+
+# ---------------------------------------------------------------------------
+# Tool-native dialects
+# ---------------------------------------------------------------------------
+# Documents how each upstream tool encodes classifications, so the
+# normaliser can dispatch on the source rather than sniffing separators.
+# Fields list GFF3 attribute names (or column indices for tabular outputs)
+# where the classification appears unmodified from the tool.
+# ---------------------------------------------------------------------------
+tool_dialects:
+  DANTE:
+    separator: "|"
+    leaf_may_contain_slash: true       # Ty1/copia, EnSpm/CACTA, ...
+    leaf_may_contain_underscore: false
+    gff3_attributes: [Final_Classification]
+    notes: >
+      Pipe-separated hierarchy. Leaf names from REXdb use "/" as an
+      intra-name separator (Ty1/copia, Ty3/gypsy, EnSpm/CACTA, ...).
+      Normaliser must apply leaf_aliases BEFORE splitting on "|".
+
+  DANTE_LTR:
+    separator: "|"
+    leaf_may_contain_slash: true
+    gff3_attributes: [Final_Classification, Name]
+    notes: Same dialect as DANTE; inherits REXdb leaf conventions.
+
+  DANTE_LINE:
+    separator: "|"
+    leaf_may_contain_slash: false
+    gff3_attributes: [Final_Classification]
+    notes: LINE has no sub-lineage resolution; always Class_I|LINE.
+
+  DANTE_TIR:
+    separator: "_"
+    leaf_may_contain_underscore: true   # hAT, Tc1_Mariner, EnSpm_CACTA, ...
+    gff3_attributes: [Classification]
+    fasta_header_suffix_form: "#Class_II/Subclass_{1,2}/TIR_<LEAF>"
+    # DANTE_TIR uses "_" as hierarchy separator in GFF3 Classification,
+    # but "/" in FASTA headers except for the final "TIR_<leaf>" join.
+    # Canonical recognition requires explicit prefix-to-slash-form pairs,
+    # because tokens themselves contain underscores (Class_II, Subclass_1)
+    # and leaves contain underscores (Tc1_Mariner, EnSpm_CACTA). The
+    # normaliser matches the longest "underscore" prefix and substitutes
+    # the corresponding "canonical" form, leaving the remainder untouched.
+    hierarchy_prefixes:
+      # Fully underscore-encoded (GFF3 Classification attribute)
+      - underscore: "Class_II_Subclass_1_TIR_"
+        canonical:  "Class_II/Subclass_1/TIR/"
+      - underscore: "Class_II_Subclass_2_TIR_"
+        canonical:  "Class_II/Subclass_2/TIR/"
+      - underscore: "Class_II_Subclass_1_"
+        canonical:  "Class_II/Subclass_1/"
+      - underscore: "Class_II_Subclass_2_"
+        canonical:  "Class_II/Subclass_2/"
+      # Mixed form used in DANTE_TIR FASTA headers
+      # (#Class_II/Subclass_1/TIR_hAT — slashes for hierarchy, "_" before leaf)
+      - underscore: "Class_II/Subclass_1/TIR_"
+        canonical:  "Class_II/Subclass_1/TIR/"
+      - underscore: "Class_II/Subclass_2/TIR_"
+        canonical:  "Class_II/Subclass_2/TIR/"
+    notes: >
+      Because tokens contain "_" (Class_II, Subclass_1) AND leaves contain
+      "_" (Tc1_Mariner, EnSpm_CACTA, MuDR_Mutator, PIF_Harbinger, hAT),
+      the prefix → canonical mapping must be enumerated explicitly rather
+      than derived by regex. Leaves pass through unchanged.
+
+  DANTE_TIR_FALLBACK:
+    separator: "/"
+    leaf_may_contain_underscore: true
+    gff3_attributes: [Classification]
+    fasta_header_format: ">name#Class_II/Subclass_1/TIR/<LEAF>"
+    produced_by: scripts/dante_tir_fallback.py
+    already_canonical: true
+    notes: >
+      Partial TIR elements rescued from DANTE TPase domain flanks when
+      primary DANTE_TIR misses them. Emits canonical slash form directly
+      (dante_tir_fallback.py builds the string as
+      "Class_II/Subclass_1/TIR/{subtype_slug}"). No translation needed —
+      recorded here so the validator (D6) can still target it by source
+      and so future changes to the fallback script's output format land
+      here rather than drifting silently.
+
+  RepeatMasker:
+    separator: "/"
+    leaf_may_contain_underscore: true
+    sources:
+      - path: RM_on_combined_library.out
+        column: 11
+      - path: any .gff3 converted from .out by clean_rm_output.R
+        gff3_attributes: [Name, Original_names]
+    notes: >
+      Already canonical slash form when the input library uses canonical
+      headers. Simple_repeat monomer id is carried in Original_names, not
+      folded into the classification.
+
+  TideCluster:
+    separator: "/"
+    gff3_attributes: [annotation]
+    annotation_suffix_pattern: ' \([0-9.]+%25\)$'
+    # The "annotation" attribute appends " (NN.N%25)" similarity score —
+    # normaliser must strip this trailing pattern before parsing.
+    notes: >
+      TideCluster itself does not classify; it looks up hits in the
+      user-supplied tandem_repeat_library and writes library header
+      (e.g. Satellite/FabTR_PisTR-B) plus a similarity suffix.
+
+  custom_library:
+    separator: "/"
+    gff3_attributes: []
+    fasta_header_format: ">name#class/subclass[/...]"
+    notes: User-supplied FASTA; required to use canonical form on input.

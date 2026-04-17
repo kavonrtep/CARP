@@ -10,6 +10,9 @@ suppressPackageStartupMessages({
   library(parallel)
 })
 
+source(file.path(dirname(sub("^--file=", "",
+  grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "classification.R"))
+
 # ── Progress / timing helpers ─────────────────────────────────────────────────
 # Simple wall-clock timers. All messages go to stderr so they interleave
 # correctly with mclapply worker output.
@@ -74,24 +77,8 @@ for (arg in c("ltr","tir","line","dante","tc_default","tc_short","tc_rm",
 }
 
 # ── 1. Utility functions ──────────────────────────────────────────────────────
-
-# Convert | separator to /  in classification paths (DANTE_LTR / DANTE_LINE)
-fix_sep <- function(x) gsub("|", "/", as.character(x), fixed = TRUE)
-
-# Convert DANTE_TIR underscore-encoded hierarchy to slash-separated
-# e.g. "Class_II_Subclass_1_TIR_hAT" → "Class_II/Subclass_1/TIR/hAT"
-# Order matters: the TIR-specific subs must run first so the full TIR prefix
-# (including the separator between TIR and subtype) gets converted to slashes,
-# matching the canonical form produced by structure-based DANTE annotation
-# (clean_DANTE_names.R converts Class_II|Subclass_1|TIR|hAT → Class_II/Subclass_1/TIR/hAT).
-convert_tir_cls <- function(x) {
-  x <- as.character(x)
-  x <- sub("^Class_II_Subclass_1_TIR_", "Class_II/Subclass_1/TIR/", x)
-  x <- sub("^Class_II_Subclass_2_TIR_", "Class_II/Subclass_2/TIR/", x)
-  x <- sub("^Class_II_Subclass_1_", "Class_II/Subclass_1/", x)
-  x <- sub("^Class_II_Subclass_2_", "Class_II/Subclass_2/", x)
-  x
-}
+# Classification handling lives in scripts/classification.R — canonicalise()
+# replaces the former fix_sep / convert_tir_cls helpers (see CLAUDE.md).
 
 # Attach standard metadata columns to a GRanges
 set_meta <- function(gr, name_vec, cls_vec, tier, tool) {
@@ -155,7 +142,7 @@ load_tier1_ltr <- function(path) {
   top      <- raw[raw$type == "transposable_element"]
   children <- raw[raw$type %in% c("protein_domain", "long_terminal_repeat",
                                    "target_site_duplication", "primer_binding_site")]
-  cls <- fix_sep(top$Final_Classification)
+  cls <- canonicalise(top$Final_Classification, source = "DANTE_LTR")
   top <- set_meta(top, cls, cls, 1L, "DANTE_LTR")
   top$element_type <- ifelse(grepl("^TE_partial_", top$ID, perl = TRUE),
                              "partial", "complete")
@@ -178,7 +165,7 @@ load_tier1_tir <- function(path) {
   if (length(raw) == 0) return(GRanges())
 
   raw$type <- "transposable_element"
-  cls <- convert_tir_cls(raw$Classification)
+  cls <- canonicalise(raw$Classification, source = "DANTE_TIR")
   raw <- set_meta(raw, cls, cls, 1L, "DANTE_TIR")
   message("  ", length(raw), " TIR elements")
   raw
@@ -204,7 +191,7 @@ load_tier2_dante <- function(path) {
   if (length(raw) == 0) return(GRanges())
 
   raw <- raw[raw$type == "protein_domain"]
-  cls <- fix_sep(raw$Final_Classification)
+  cls <- canonicalise(raw$Final_Classification, source = "DANTE")
   raw <- set_meta(raw, cls, cls, 2L, "DANTE")
   message("  ", length(raw), " domain features")
   raw

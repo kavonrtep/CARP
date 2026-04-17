@@ -2,6 +2,9 @@
 suppressPackageStartupMessages(library(rtracklayer))
 suppressPackageStartupMessages(library(parallel))
 
+source(file.path(dirname(sub("^--file=", "",
+  grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "classification.R"))
+
 gff_cleanup <- function(gff){
   ## remove overlapin annotation track - assign new annot
   gff_disjoin <- disjoin(gff, with.revmap=TRUE)
@@ -44,38 +47,27 @@ resolve_name <- function(x){
   }
 }
 
-convert_names <- function(n, old_sep = "|" , new_sep = "\""){
-  # remove all characters which are new_sep with -
-  n_new <- gsub(old_sep, new_sep,
-                gsub(new_sep,"-", n, fixed = TRUE),
-                fixed = TRUE)
-  return(n_new)
-}
-
-
-infile <- commandArgs(T)[1]
-outfile <- commandArgs(T)[2]
-
-
-## infile = "./test_data/raw_rm.out"
+args <- commandArgs(trailingOnly = TRUE)
+infile <- args[1]
+outfile <- args[2]
 
 rm_out <- read.table(infile, as.is=TRUE, sep="", skip = 2, fill=TRUE, header=FALSE, col.names=paste0("V", 1:16))
 
 gff <- GRanges(seqnames = rm_out$V5, ranges = IRanges(start = rm_out$V6, end=rm_out$V7))
 
-# repeat class after # symbol - syntax 1
-# detect separator
-# if "|" is present replace "|" -> "/" and "/" -> "-"
-if (any(grepl("|", rm_out$V11, fixed = TRUE))){
-  gff$Name <- convert_names(rm_out$V11, old_sep = "|", new_sep = "/")
-  message('replacing classification separator character "|" with "/"')
-  print(gff)
-}else{
-  gff$Name <- rm_out$V11
-}
-# if rm_out$V11 is Simple_repeat, add column V10 to Name
-new_name <- ifelse(rm_out$V11 == "Simple_repeat", paste0(rm_out$V11,"", rm_out$V10), rm_out$V11)
-gff$Name <- new_name
+# Canonicalise V11 separators (pipe-encoded libraries become slash-encoded);
+# validation is off because this is raw RepeatMasker output and may contain
+# entries like "Simple_repeat" that we decorate with V10 on the next line.
+pipe_source <- any(grepl("|", rm_out$V11, fixed = TRUE))
+if (pipe_source) message('normalising classification separator "|" -> "/"')
+v11_norm <- canonicalise(rm_out$V11,
+                         source = if (pipe_source) "DANTE" else "RepeatMasker",
+                         validate = FALSE)
+# Simple_repeat entries carry the monomer sequence in V10; RepeatMasker
+# consumers expect that motif in Name (e.g. "Simple_repeat(TAAACCC)n").
+gff$Name <- ifelse(v11_norm == "Simple_repeat",
+                   paste0(v11_norm, rm_out$V10),
+                   v11_norm)
 
 
 ## is repeat type is specifies by double underscore:
