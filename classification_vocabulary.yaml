@@ -39,47 +39,84 @@ canonical_separator: "/"
 # accepted by the pipeline without warning.
 # ---------------------------------------------------------------------------
 classifications:
-  # Class I — retroelements --------------------------------------------------
+  # ── Class I — retroelements (REXdb Viridiplantae v4.0 tree) ─────────────
+  # Reference: https://github.com/repeatexplorer/rexdb README and
+  # Viridiplantae_v4.0.classification. Every leaf below corresponds to an
+  # entry in that file except SINE (present in the tree, no sequences yet).
   - Class_I
+  - Class_I/DIRS
   - Class_I/LINE
   - Class_I/LTR
   - Class_I/LTR/Ty1_copia
   - Class_I/LTR/Ty1_copia/Ale
+  - Class_I/LTR/Ty1_copia/Alesia
   - Class_I/LTR/Ty1_copia/Alexandra
   - Class_I/LTR/Ty1_copia/Angela
   - Class_I/LTR/Ty1_copia/Bianca
   - Class_I/LTR/Ty1_copia/Bryana
+  - Class_I/LTR/Ty1_copia/Bryco
   - Class_I/LTR/Ty1_copia/Ferco
+  - Class_I/LTR/Ty1_copia/Gymco-I
+  - Class_I/LTR/Ty1_copia/Gymco-II
+  - Class_I/LTR/Ty1_copia/Gymco-III
+  - Class_I/LTR/Ty1_copia/Gymco-IV
   - Class_I/LTR/Ty1_copia/Ikeros
   - Class_I/LTR/Ty1_copia/Ivana
+  - Class_I/LTR/Ty1_copia/Lyco
+  - Class_I/LTR/Ty1_copia/Osser
   - Class_I/LTR/Ty1_copia/SIRE
   - Class_I/LTR/Ty1_copia/TAR
   - Class_I/LTR/Ty1_copia/Tork
+  - Class_I/LTR/Ty1_copia/Ty1-outgroup
   - Class_I/LTR/Ty3_gypsy
   - Class_I/LTR/Ty3_gypsy/chromovirus
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Chlamyvir
+  - Class_I/LTR/Ty3_gypsy/chromovirus/chromo-outgroup
+  - Class_I/LTR/Ty3_gypsy/chromovirus/chromo-unclass
   - Class_I/LTR/Ty3_gypsy/chromovirus/CRM
   - Class_I/LTR/Ty3_gypsy/chromovirus/Ferney
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Galadriel
   - Class_I/LTR/Ty3_gypsy/chromovirus/Reina
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Tcn1
   - Class_I/LTR/Ty3_gypsy/chromovirus/Tekay
   - Class_I/LTR/Ty3_gypsy/non-chromovirus
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/non-chromo-outgroup
   - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA
   - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Athila
   - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat
   - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Ogre
   - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Retand
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatI
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatII
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatIII
   - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tatius
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/Phygy
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/Selgy
   - Class_I/pararetrovirus
+  - Class_I/Penelope
+  - Class_I/SINE
 
-  # Class II — DNA transposons ---------------------------------------------
+  # ── Class II — DNA transposons ──────────────────────────────────────────
+  # TIR subfamilies below Class_II/Subclass_1/TIR come from REXdb v4.0 plus
+  # MITE (and MITE/Stowaway), which REXdb omits because MITEs are non-
+  # autonomous and carry no protein domains — they enter the pipeline via
+  # DANTE_TIR's structural caller and user custom libraries.
   - Class_II
   - Class_II/Subclass_1
   - Class_II/Subclass_1/TIR
   - Class_II/Subclass_1/TIR/EnSpm_CACTA
   - Class_II/Subclass_1/TIR/hAT
+  - Class_II/Subclass_1/TIR/Kolobok
+  - Class_II/Subclass_1/TIR/Merlin
   - Class_II/Subclass_1/TIR/MITE
   - Class_II/Subclass_1/TIR/MITE/Stowaway
   - Class_II/Subclass_1/TIR/MuDR_Mutator
+  - Class_II/Subclass_1/TIR/Novosib
+  - Class_II/Subclass_1/TIR/P
   - Class_II/Subclass_1/TIR/PIF_Harbinger
+  - Class_II/Subclass_1/TIR/PiggyBac
+  - Class_II/Subclass_1/TIR/Sola1
+  - Class_II/Subclass_1/TIR/Sola2
   - Class_II/Subclass_1/TIR/Tc1_Mariner
   - Class_II/Subclass_2
   - Class_II/Subclass_2/Helitron

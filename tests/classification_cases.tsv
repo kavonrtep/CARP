@@ -70,6 +70,26 @@ custom_library	Satellite/FabTR-1	Satellite/FabTR-1
 	Class_II_Subclass_1_TIR_hAT	Class_II/Subclass_1/TIR/hAT	underscore-prefix → DANTE_TIR dialect
 	Class_I/LTR/Ty1_copia/Ale	Class_I/LTR/Ty1_copia/Ale	already slash → passthrough
 
+# ── REXdb v4.0 additions (previously missing leaves) ────────────────────────
+DANTE	Class_I|DIRS	Class_I/DIRS
+DANTE	Class_I|Penelope	Class_I/Penelope
+DANTE	Class_I|SINE	Class_I/SINE
+DANTE	Class_I|LTR|Ty1/copia|Alesia	Class_I/LTR/Ty1_copia/Alesia
+DANTE	Class_I|LTR|Ty1/copia|Bryco	Class_I/LTR/Ty1_copia/Bryco
+DANTE	Class_I|LTR|Ty1/copia|Gymco-II	Class_I/LTR/Ty1_copia/Gymco-II
+DANTE	Class_I|LTR|Ty1/copia|Osser	Class_I/LTR/Ty1_copia/Osser
+DANTE	Class_I|LTR|Ty1/copia|Ty1-outgroup	Class_I/LTR/Ty1_copia/Ty1-outgroup
+DANTE	Class_I|LTR|Ty3/gypsy|chromovirus|Chlamyvir	Class_I/LTR/Ty3_gypsy/chromovirus/Chlamyvir
+DANTE	Class_I|LTR|Ty3/gypsy|chromovirus|Galadriel	Class_I/LTR/Ty3_gypsy/chromovirus/Galadriel
+DANTE	Class_I|LTR|Ty3/gypsy|chromovirus|chromo-outgroup	Class_I/LTR/Ty3_gypsy/chromovirus/chromo-outgroup
+DANTE	Class_I|LTR|Ty3/gypsy|non-chromovirus|Phygy	Class_I/LTR/Ty3_gypsy/non-chromovirus/Phygy
+DANTE	Class_I|LTR|Ty3/gypsy|non-chromovirus|OTA|Tat|TatII	Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatII
+DANTE	Class_II|Subclass_1|TIR|Kolobok	Class_II/Subclass_1/TIR/Kolobok
+DANTE	Class_II|Subclass_1|TIR|PiggyBac	Class_II/Subclass_1/TIR/PiggyBac
+DANTE	Class_II|Subclass_1|TIR|Sola1	Class_II/Subclass_1/TIR/Sola1
+DANTE_TIR	Class_II_Subclass_1_TIR_Kolobok	Class_II/Subclass_1/TIR/Kolobok	DANTE_TIR encoding, new leaf
+DANTE_TIR	Class_II_Subclass_1_TIR_PiggyBac	Class_II/Subclass_1/TIR/PiggyBac
+
 # ── Negative cases (must raise UnknownClassification) ───────────────────────
 RepeatMasker	Class_III/foo	!!ERROR	unknown top-level class
 RepeatMasker	Class_I/LTR/Ty5_unknown	!!ERROR	unknown Ty lineage

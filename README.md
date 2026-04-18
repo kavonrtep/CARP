@@ -54,39 +54,72 @@ This library is used by RepeatMasker for similarity-based annotation. The sequen
 be in FASTA format with sequence IDs in the format `>repeatname#class/subclass`. The
 classification categories used by the pipeline are listed below.
 
+The mobile-element hierarchy below is taken verbatim from REXdb Viridiplantae
+v4.0 (https://github.com/repeatexplorer/rexdb), which is the protein-domain
+reference used by DANTE / DANTE_LTR. Satellite, Simple_repeat, Low_complexity,
+Unknown and the rDNA classes are produced by RepeatMasker / custom libraries,
+not REXdb.
+
 ```text
+Class_I/DIRS
 Class_I/LINE
 Class_I/LTR/Ty1_copia
 Class_I/LTR/Ty1_copia/Ale
+Class_I/LTR/Ty1_copia/Alesia
+Class_I/LTR/Ty1_copia/Alexandra
 Class_I/LTR/Ty1_copia/Angela
 Class_I/LTR/Ty1_copia/Bianca
+Class_I/LTR/Ty1_copia/Bryana
+Class_I/LTR/Ty1_copia/Bryco
+Class_I/LTR/Ty1_copia/Ferco
+Class_I/LTR/Ty1_copia/Gymco-I
+Class_I/LTR/Ty1_copia/Gymco-II
+Class_I/LTR/Ty1_copia/Gymco-III
+Class_I/LTR/Ty1_copia/Gymco-IV
 Class_I/LTR/Ty1_copia/Ikeros
 Class_I/LTR/Ty1_copia/Ivana
+Class_I/LTR/Ty1_copia/Lyco
+Class_I/LTR/Ty1_copia/Osser
 Class_I/LTR/Ty1_copia/SIRE
 Class_I/LTR/Ty1_copia/TAR
 Class_I/LTR/Ty1_copia/Tork
-Class_I/LTR/Ty1_copia/Alexandra
-Class_I/LTR/Ty1_copia/Bryana
-Class_I/LTR/Ty1_copia/Ferco
-Class_I/LTR/Ty3_gypsy
+Class_I/LTR/Ty1_copia/Ty1-outgroup
 Class_I/LTR/Ty3_gypsy/chromovirus
-Class_I/LTR/Ty3_gypsy/chromovirus/Ferney
+Class_I/LTR/Ty3_gypsy/chromovirus/Chlamyvir
+Class_I/LTR/Ty3_gypsy/chromovirus/chromo-outgroup
+Class_I/LTR/Ty3_gypsy/chromovirus/chromo-unclass
 Class_I/LTR/Ty3_gypsy/chromovirus/CRM
+Class_I/LTR/Ty3_gypsy/chromovirus/Ferney
+Class_I/LTR/Ty3_gypsy/chromovirus/Galadriel
 Class_I/LTR/Ty3_gypsy/chromovirus/Reina
+Class_I/LTR/Ty3_gypsy/chromovirus/Tcn1
 Class_I/LTR/Ty3_gypsy/chromovirus/Tekay
-Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA
-Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tatius
+Class_I/LTR/Ty3_gypsy/non-chromovirus/non-chromo-outgroup
 Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Athila
-Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat
 Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Ogre
 Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Retand
+Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatI
+Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatII
+Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatIII
+Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tatius
+Class_I/LTR/Ty3_gypsy/non-chromovirus/Phygy
+Class_I/LTR/Ty3_gypsy/non-chromovirus/Selgy
 Class_I/pararetrovirus
+Class_I/Penelope
+Class_I/SINE
 Class_II/Subclass_1/TIR/EnSpm_CACTA
 Class_II/Subclass_1/TIR/hAT
+Class_II/Subclass_1/TIR/Kolobok
+Class_II/Subclass_1/TIR/Merlin
 Class_II/Subclass_1/TIR/MITE
 Class_II/Subclass_1/TIR/MITE/Stowaway
 Class_II/Subclass_1/TIR/MuDR_Mutator
+Class_II/Subclass_1/TIR/Novosib
+Class_II/Subclass_1/TIR/P
 Class_II/Subclass_1/TIR/PIF_Harbinger
+Class_II/Subclass_1/TIR/PiggyBac
+Class_II/Subclass_1/TIR/Sola1
+Class_II/Subclass_1/TIR/Sola2
 Class_II/Subclass_1/TIR/Tc1_Mariner
 Class_II/Subclass_2/Helitron
 rDNA_45S/18S
