@@ -164,6 +164,13 @@ load_tier1_tir <- function(path) {
   raw <- safe_import(path)
   if (length(raw) == 0) return(GRanges())
 
+  # DANTE_TIR_combined.gff3 bundles the primary elements plus fallback
+  # elements and their protein_domain children. We only want the top-level
+  # TIR annotations (sequence_feature rows); protein_domain children carry
+  # Final_Classification, not Classification, and would yield NAs otherwise.
+  raw <- raw[raw$type == "sequence_feature"]
+  if (length(raw) == 0) return(GRanges())
+
   raw$type <- "transposable_element"
   cls <- canonicalise(raw$Classification, source = "DANTE_TIR")
   raw <- set_meta(raw, cls, cls, 1L, "DANTE_TIR")
