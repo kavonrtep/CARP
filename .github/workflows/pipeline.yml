@@ -56,7 +56,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .snakemake/conda
-          key: snakemake-conda-${{ hashFiles('envs/*.yaml') }}
+          # Include post-deploy scripts in the key so edits to them also
+          # invalidate the cache (otherwise primed artefacts like the
+          # RepeatMasker BLAST indices wouldn't refresh).
+          key: snakemake-conda-${{ hashFiles('envs/*.yaml', 'envs/*.post-deploy.sh') }}
 
       - name: Build all pipeline conda envs (on cache miss)
         if: steps.cache.outputs.cache-hit != 'true'
@@ -72,6 +75,19 @@ jobs:
             --conda-prefix "$PWD/.snakemake/conda" \
             --conda-frontend conda \
             --conda-create-envs-only
+
+      - name: Prime RepeatMasker BLAST indices (belt-and-braces)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          # snakemake should run envs/tidecluster.post-deploy.sh after
+          # env creation, but the behaviour varies with conda vs
+          # micromamba front-ends. Re-run the priming script here so
+          # the cached env is guaranteed RepeatMasker-ready.
+          for env in "$PWD"/.snakemake/conda/*/; do
+            [[ -d "${env}share/RepeatMasker/Libraries" ]] || continue
+            echo "Priming $env"
+            CONDA_PREFIX="${env%/}" bash envs/tidecluster.post-deploy.sh || true
+          done
 
   # ─────────────────────────────────────────────────────────────────────
   # 2. Run each fixture using the pre-built envs.
@@ -119,7 +135,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .snakemake/conda
-          key: snakemake-conda-${{ hashFiles('envs/*.yaml') }}
+          # Include post-deploy scripts in the key so edits to them also
+          # invalidate the cache (otherwise primed artefacts like the
+          # RepeatMasker BLAST indices wouldn't refresh).
+          key: snakemake-conda-${{ hashFiles('envs/*.yaml', 'envs/*.post-deploy.sh') }}
           fail-on-cache-miss: true
 
       - name: Run pipeline on ${{ matrix.fixture }} fixture
