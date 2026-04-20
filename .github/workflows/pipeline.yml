@@ -14,10 +14,6 @@ concurrency:
   group: pipeline-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Shared cache key: flips only when an env spec actually changes.
-  ENVS_CACHE_KEY: snakemake-conda-${{ hashFiles('envs/*.yaml') }}
-
 jobs:
   # ─────────────────────────────────────────────────────────────────────
   # 1. Build all per-rule conda envs ONCE and populate the cache. Later
@@ -60,7 +56,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .snakemake/conda
-          key: ${{ env.ENVS_CACHE_KEY }}
+          key: snakemake-conda-${{ hashFiles('envs/*.yaml') }}
 
       - name: Build all pipeline conda envs (on cache miss)
         if: steps.cache.outputs.cache-hit != 'true'
@@ -118,7 +114,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .snakemake/conda
-          key: ${{ env.ENVS_CACHE_KEY }}
+          key: snakemake-conda-${{ hashFiles('envs/*.yaml') }}
           fail-on-cache-miss: true
 
       - name: Run pipeline on ${{ matrix.fixture }} fixture
