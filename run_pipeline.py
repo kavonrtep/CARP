@@ -25,9 +25,19 @@ def show_singularity_settings(config_object):
 def main():
     # get arguments
 
-    config_template="/opt/pipeline/config.yaml"
-    # read config file, keep end of lines
-    config_string = open(config_template, 'r').read()
+    # The config.yaml template is baked into the container at
+    # /opt/pipeline/config.yaml; when running outside the container (CI,
+    # local snakemake invocation) fall back to a repo-local copy, and
+    # finally to a stub so --help still works.
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    config_string = ""
+    for candidate in ("/opt/pipeline/config.yaml",
+                      os.path.join(script_dir, "config.yaml")):
+        if os.path.exists(candidate):
+            config_string = open(candidate, "r").read()
+            break
+    if not config_string:
+        config_string = "# (example config not found; see tests/fixtures/ for templates)"
     parser = argparse.ArgumentParser(
             description=
 """Repeat Annotation Pipeline using DANTE, DANTE_LTR, TideCluster adn RepeatMasker.""",
@@ -76,15 +86,17 @@ rDNA_45S/ITS1
 
     args = parser.parse_args()
 
-    script_dir = os.path.dirname(os.path.realpath(__file__))
     snakefile="/opt/pipeline/snakefile"
     # create output directory if it does not exist
 
     # get conda prefix
-    CONDA_ENVS_PATH = os.environ.get('CONDA_ENVS_PATH')
-    # NOTE - snake make is using --conda-prefix as path to conda envs while conda
-    # CONDA_PREFIX variable points to conda installation directory!
-    # run snakemake
+    # Inside the singularity container CONDA_ENVS_PATH is set to the
+    # baked-in envs dir. When running outside (CI, local snakemake), fall
+    # back to the repo's .snakemake/conda so cached envs are reused.
+    # NOTE - snakemake uses --conda-prefix as path to conda envs, while
+    # conda's CONDA_PREFIX variable points to the conda installation dir.
+    CONDA_ENVS_PATH = os.environ.get('CONDA_ENVS_PATH') or \
+                      os.path.join(script_dir, ".snakemake", "conda")
 
     # for subprocess we need to set XDG_CACHE_HOME otherwise snakemake will use
     # non-writable directory
