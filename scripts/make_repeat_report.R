@@ -63,12 +63,26 @@ load_composition <- function(outdir) {
 }
 
 # ── B3. DANTE_LTR stats from GFF3 ─────────────────────────────────────────
+# Count only *complete* LTR-RTs for the "Complete TEs" column of the
+# classification table. DANTE_LTR labels the element's completeness via
+# its Rank attribute:
+#   DL, DLT, DLP, DLTP  → complete (domains + LTRs + optional PBS / TSD)
+#   D                   → partial (TPase-only protein-domain call, no
+#                         reconstructed LTR boundaries)
+# Including Rank=D over-counts by ~3x on a typical plant genome (most of
+# the D-rank calls do not represent intact elements).
+DANTE_LTR_COMPLETE_RANKS <- c("DL", "DLT", "DLP", "DLTP")
+
 load_dante_ltr_stats <- function(outdir) {
   gff <- file.path(outdir, "DANTE_LTR", "DANTE_LTR.gff3")
   if (!file.exists(gff) || file.size(gff) == 0) return(NULL)
   gr <- tryCatch(import(gff), error = function(e) NULL)
   if (is.null(gr) || length(gr) == 0) return(NULL)
   te <- gr[gr$type == "transposable_element"]
+  if (length(te) == 0) return(NULL)
+  if (!is.null(te$Rank)) {
+    te <- te[as.character(te$Rank) %in% DANTE_LTR_COMPLETE_RANKS]
+  }
   if (length(te) == 0) return(NULL)
   cls <- te$Final_Classification
   if (is.null(cls)) cls <- te$Name
