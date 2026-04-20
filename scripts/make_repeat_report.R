@@ -67,10 +67,13 @@ load_composition <- function(outdir) {
 # classification table. DANTE_LTR labels the element's completeness via
 # its Rank attribute:
 #   DL, DLT, DLP, DLTP  → complete (domains + LTRs + optional PBS / TSD)
-#   D                   → partial (TPase-only protein-domain call, no
-#                         reconstructed LTR boundaries)
-# Including Rank=D over-counts by ~3x on a typical plant genome (most of
-# the D-rank calls do not represent intact elements).
+#   D                   → partial — an LTR-RT region with protein
+#                         domains identified but no reconstructed LTR
+#                         sequences; the element boundaries are therefore
+#                         unknown.
+# Including Rank=D over-counts by ~3x on a typical plant genome (most
+# of the D-rank calls are fragmented / solo-LTR-less copies without
+# reliable coordinates).
 DANTE_LTR_COMPLETE_RANKS <- c("DL", "DLT", "DLP", "DLTP")
 
 load_dante_ltr_stats <- function(outdir) {
