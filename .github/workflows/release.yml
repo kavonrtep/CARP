@@ -49,6 +49,10 @@ jobs:
             pyyaml
             r-base
             r-yaml
+          condarc: |
+            channels:
+              - conda-forge
+            channel_priority: flexible
           cache-environment: true
       - run: python tests/test_classification.py
       - run: Rscript tests/test_classification.R
