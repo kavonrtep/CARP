@@ -14,14 +14,21 @@ concurrency:
   group: pipeline-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Shared cache key: flips only when an env spec actually changes.
+  ENVS_CACHE_KEY: snakemake-conda-${{ hashFiles('envs/*.yaml') }}
+
 jobs:
-  fixture:
+  # ─────────────────────────────────────────────────────────────────────
+  # 1. Build all per-rule conda envs ONCE and populate the cache. Later
+  # matrix runs restore this cache (read-only). Without this split, every
+  # matrix cell solves all envs in parallel and exhausts the 60-min
+  # timeout on a cold cache (observed ~45 min env solve + ~30 min
+  # pipeline on 2 vCPU = timeout).
+  # ─────────────────────────────────────────────────────────────────────
+  envs:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        fixture: [small, medium]
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash -el {0}
@@ -30,8 +37,6 @@ jobs:
 
       - name: Free disk for conda envs
         run: |
-          # Snakemake env tree is ~10 GB; ubuntu-latest has ~14 GB free by
-          # default. Drop toolchains we don't use.
           sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
           df -h
 
@@ -42,10 +47,6 @@ jobs:
             python=3.11
             snakemake>=9
             pyyaml
-          # Explicit channels — the default setup-micromamba condarc doesn't
-          # include bioconda, and snakemake's recent builds transitively
-          # need it (pulp, coincbc). Without this the solve fails and the
-          # post-cleanup step errors with an ENOENT on the micromamba-shell.
           condarc: |
             channels:
               - conda-forge
@@ -55,14 +56,70 @@ jobs:
           cache-downloads: true
 
       - name: Restore .snakemake/conda cache
+        id: cache
         uses: actions/cache@v4
         with:
           path: .snakemake/conda
-          key: snakemake-conda-${{ hashFiles('envs/*.yaml') }}
-          # Fall back to any previous cache; missing envs are rebuilt, the
-          # rest survive. Full rebuild takes 30 min, partial rebuild seconds.
-          restore-keys: |
-            snakemake-conda-
+          key: ${{ env.ENVS_CACHE_KEY }}
+
+      - name: Build all pipeline conda envs (on cache miss)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          # --conda-create-envs-only resolves the DAG and creates every
+          # rule's conda env, then exits. Any valid config file works; we
+          # use the smallest (micro) because the content doesn't matter.
+          snakemake \
+            --snakefile Snakefile \
+            --configfile tests/fixtures/config_micro.yaml \
+            --cores 4 \
+            --use-conda \
+            --conda-prefix "$PWD/.snakemake/conda" \
+            --conda-frontend conda \
+            --conda-create-envs-only
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 2. Run each fixture using the pre-built envs.
+  # ─────────────────────────────────────────────────────────────────────
+  fixture:
+    needs: envs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [small, medium]
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: carp-snakemake
+          create-args: >-
+            python=3.11
+            snakemake>=9
+            pyyaml
+          condarc: |
+            channels:
+              - conda-forge
+              - bioconda
+            channel_priority: flexible
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Restore .snakemake/conda cache (expected hit from envs job)
+        uses: actions/cache/restore@v4
+        with:
+          path: .snakemake/conda
+          key: ${{ env.ENVS_CACHE_KEY }}
+          fail-on-cache-miss: true
 
       - name: Run pipeline on ${{ matrix.fixture }} fixture
         run: |
