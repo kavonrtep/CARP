@@ -1,0 +1,72 @@
+name: pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Sunday 03:00 UTC — regression signal even when no PRs land.
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [small, medium]
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk for conda envs
+        run: |
+          # Snakemake env tree is ~10 GB; ubuntu-latest has ~14 GB free by
+          # default. Drop toolchains we don't use.
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: carp-snakemake
+          create-args: >-
+            python=3.11
+            snakemake=9.19.0
+            pyyaml
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Restore .snakemake/conda cache
+        uses: actions/cache@v4
+        with:
+          path: .snakemake/conda
+          key: snakemake-conda-${{ hashFiles('envs/*.yaml') }}
+          # Fall back to any previous cache; missing envs are rebuilt, the
+          # rest survive. Full rebuild takes 30 min, partial rebuild seconds.
+          restore-keys: |
+            snakemake-conda-
+
+      - name: Run pipeline on ${{ matrix.fixture }} fixture
+        run: |
+          python run_pipeline.py -c tests/fixtures/config_${{ matrix.fixture }}.yaml -t 4
+
+      - name: Assert fixture outputs
+        run: bash scripts/assert_fixture_outputs.sh ${{ matrix.fixture }}
+
+      - name: Upload output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: output_${{ matrix.fixture }}_${{ github.run_id }}
+          path: tests/fixtures/output_${{ matrix.fixture }}
+          retention-days: 7
+          if-no-files-found: ignore
