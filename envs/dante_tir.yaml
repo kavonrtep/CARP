@@ -3,5 +3,9 @@ channels:
   - conda-forge
   - bioconda
   - petrnovak
+  - r            # dante_tir=0.2.4 pulls r-rbeast, which lives only on Anaconda's
+                 # pkgs/r channel. continuumio/miniconda3 includes this implicitly
+                 # via "defaults", so container builds worked; standalone conda
+                 # setups without that fallback need it listed explicitly.
 dependencies:
   - dante_tir=0.2.4

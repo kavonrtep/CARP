@@ -211,8 +211,11 @@ rule dante_tir:
             echo "DANTE_TIR failed with non-zero exit status"
         fi
 
-        # Ensure all expected output files exist (create empty ones if needed)
-        touch {output.gff} {output.fasta} {output.summary}
+        # Ensure all expected output files exist (create empty ones if needed).
+        # All five declared outputs must be touched — when DANTE_TIR finds no
+        # elements, it skips producing the representative library, and omitting
+        # it here trips snakemake's MissingOutputException on small inputs.
+        touch {output.gff} {output.fasta} {output.summary} {output.dante_tir_lib}
 
         # Create checkpoint file to indicate completion
         touch {output.checkpoint}
