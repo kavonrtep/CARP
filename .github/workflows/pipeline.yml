@@ -79,7 +79,12 @@ jobs:
   fixture:
     needs: envs
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # GHA runners have 2 vCPU; fixture runs with -t 2 to match. The
+    # timeout is generous because many snakemake rules claim
+    # `threads: workflow.cores` — with 2 vCPU the per-rule wall time
+    # roughly doubles vs the 4-core local benchmark (~500 s → ~15–20
+    # min per fixture, plus overhead).
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -118,8 +123,11 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Run pipeline on ${{ matrix.fixture }} fixture
+        # -t 2: match the runner's vCPU count. Oversubscribing (-t 4)
+        # with rules declaring threads: workflow.cores trashes cache
+        # locality on 2 vCPU and slows the whole pipeline.
         run: |
-          python run_pipeline.py -c tests/fixtures/config_${{ matrix.fixture }}.yaml -t 4
+          python run_pipeline.py -c tests/fixtures/config_${{ matrix.fixture }}.yaml -t 2
 
       - name: Assert fixture outputs
         run: bash scripts/assert_fixture_outputs.sh ${{ matrix.fixture }}
