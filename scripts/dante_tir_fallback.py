@@ -551,7 +551,12 @@ def annotate_extended_fasta_headers(fasta_path: str, classification_with_slashes
     """
     if not os.path.exists(fasta_path) or os.path.getsize(fasta_path) == 0:
         return
-    tmp = tempfile.mktemp(suffix=".fasta")
+    # Place the tempfile next to the target so os.replace() stays within one
+    # filesystem (rename(2) raises EXDEV across devices — /tmp is frequently
+    # tmpfs and not the same FS as the output dir).
+    target_dir = os.path.dirname(fasta_path) or "."
+    fd, tmp = tempfile.mkstemp(suffix=".fasta", dir=target_dir)
+    os.close(fd)
     with open(fasta_path, "r") as fin, open(tmp, "w") as fout:
         for line in fin:
             if line.startswith(">"):
