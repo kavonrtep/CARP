@@ -10,7 +10,7 @@ budget.
 | **micro** | `genome_micro.fasta` | 200 kb | 2 | densest hAT TPase block (CM055026.1) + Ale-rich LTR block — smoke test, not all pipeline stages produce output |
 | **tiny** | `genome_tiny.fasta` | 500 kb | 5 | adds EnSpm-dense tile, Ivana LTR tile and TRC_2 satellite tile |
 | **small** | `genome_small.fasta` | 1 Mb | 10 | full REXdb coverage: 4 LTR lineages with ≥3 copies each + 4 TIR families + satellites + LINE; exercises library reduction and multi-scaffold batching. **~5 min wall time with 4 cores** |
-| **medium** | `genome_medium.fasta` | 2.4 Mb | 11 | 200-kb windows around 10 real primary-DANTE_TIR hits (5 hAT + 5 EnSpm/CACTA). Triggers substantive DANTE_TIR **fallback** detection (≥18 combined TIR features). Primary DANTE_TIR detection still returns 0 — the algorithm needs hundreds of TPase copies for statistical TIR-consensus convergence, which is unreachable at CI scale. |
+| **medium** | `genome_medium.fasta` | 744 kb | ~35 | Full set of 17 primary-DANTE_TIR hAT + 14 EnSpm/CACTA detections from the reference run, each extracted with a 3 kb flank on both sides (merged where overlapping). Plus a 5-member LINE cluster at CM055025.1:6.22–6.28 Mb and a second at CM055029.1:7.43–7.47 Mb — enough same-family copies for `dante_line.py` domain-pattern alignment to pass its `min_num_alignments=3` threshold and produce representative LINE sequences. Plus Ale-LTR and satellite windows. **Actual primary-pipeline positives**: ≥7 primary DANTE_TIR hAT elements and ≥9 DANTE_LINE elements; final annotation contains ~195 kb of TIR and ~58 kb of LINE content. ~4 min wall time with 4 cores. |
 
 Matching `config_*.yaml` files are sibling to each FASTA. Invoke from the
 repo root:
