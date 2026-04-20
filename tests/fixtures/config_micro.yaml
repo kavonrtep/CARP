@@ -1,0 +1,9 @@
+# Micro test dataset — single 200 kb window from chromosome CM055036.1
+# of the Pisum JI2822 assembly (4.3–4.5 Mb). Contains ≥4 complete LTR-RT
+# lineages (Bianca, Ikeros, Reina, CRM), 2 TIR elements (hAT), 2 satellite
+# clusters (TRC_25, TRC_41) and 2 LINE elements — every pipeline stage is
+# exercised on the smallest viable input.
+genome_fasta: tests/fixtures/genome_micro.fasta
+output_dir: tests/fixtures/output_micro
+repeatmasker_sensitivity: quick
+reduce_library: False

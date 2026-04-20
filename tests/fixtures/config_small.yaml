@@ -1,0 +1,11 @@
+# Small test dataset — 9 windows × 100 kb = 1 Mb total across 9
+# scaffolds. Covers most REXdb lineages observed in the reference run
+# (Ale, Ivana, Bianca, Ikeros, SIRE, CRM, Reina, Athila, Tat/Ogre),
+# all six observed TIR subfamilies, three satellite clusters (TRC_1,
+# TRC_2, TRC_25, TRC_41, TRC_4) and multiple LINE elements. Sufficient
+# duplicate family membership to exercise library reduction and
+# RepeatMasker clustering.
+genome_fasta: tests/fixtures/genome_small.fasta
+output_dir: tests/fixtures/output_small
+repeatmasker_sensitivity: default
+reduce_library: True
