@@ -1,0 +1,8 @@
+# Tiny test dataset — 4 windows × 100 kb = 500 kb total across 4
+# scaffolds. Adds a TideCluster-heavy window (TRC_2, 217 kb of satellite)
+# and a LINE-dense window to the micro coverage, so every Tier-1/2 loader
+# in make_unified_annotation sees non-empty input.
+genome_fasta: tests/fixtures/genome_tiny.fasta
+output_dir: tests/fixtures/output_tiny
+repeatmasker_sensitivity: quick
+reduce_library: True
