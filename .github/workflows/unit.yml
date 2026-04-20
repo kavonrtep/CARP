@@ -1,0 +1,51 @@
+name: unit
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: unit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: carp-unit
+          create-args: >-
+            python=3.11
+            pyyaml
+            r-base
+            r-yaml
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Python classification vector
+        run: python tests/test_classification.py
+
+      - name: R classification vector
+        run: Rscript tests/test_classification.R
+
+      - name: Pre-commit hook self-test
+        run: |
+          git config user.email ci@example.com
+          git config user.name "ci"
+          # Stage a new uncovered runtime-looking file; hook must reject it.
+          touch .ci_hook_sentinel.yaml
+          git add .ci_hook_sentinel.yaml
+          if .githooks/pre-commit; then
+            echo "FAIL: pre-commit hook should have rejected an uncovered file" >&2
+            exit 1
+          fi
+          echo "OK: pre-commit hook correctly rejected uncovered file"
+          git reset --quiet HEAD .ci_hook_sentinel.yaml
+          rm -f .ci_hook_sentinel.yaml

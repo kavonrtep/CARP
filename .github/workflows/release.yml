@@ -1,0 +1,230 @@
+name: release
+
+# Fires only on annotated or lightweight tag pushes matching v*.
+# The downstream jobs form a pipeline: failure at ANY stage means no
+# GitHub Release is created → Zenodo does not snapshot the tag →
+# only tested, published artefacts are archived.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.8.16). Must already exist on the repo.'
+        required: true
+
+permissions:
+  contents: write   # create GitHub Release
+  packages: write   # push SIF to GHCR
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # GHCR namespace. Note GHCR normalises to lowercase — CARP → carp.
+  # Consumers: `apptainer pull oras://ghcr.io/kavonrtep/carp/sif:<TAG>`
+  GHCR_IMAGE: ghcr.io/kavonrtep/carp/sif
+  APPTAINER_VERSION: 1.3.5
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # 1. Unit gate — cheap, fails fast before we burn 40 min on a SIF build.
+  # Deliberately a duplicate of .github/workflows/unit.yml so the release
+  # pipeline is self-contained (doesn't depend on an earlier push result).
+  # ─────────────────────────────────────────────────────────────────────
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: carp-unit
+          create-args: >-
+            python=3.11
+            pyyaml
+            r-base
+            r-yaml
+          cache-environment: true
+      - run: python tests/test_classification.py
+      - run: Rscript tests/test_classification.R
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 2. Build the Singularity image from the canonical Singularity def.
+  # ─────────────────────────────────────────────────────────────────────
+  build-sif:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sif: ${{ steps.build.outputs.sif }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get autoremove -y
+          df -h
+
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Build SIF
+        id: build
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          SIF="images/carp_${TAG}.sif"
+          mkdir -p images
+          sudo apptainer build --force "$SIF" Singularity
+          sudo chown "$(id -u):$(id -g)" "$SIF"
+          ls -lh "$SIF"
+          echo "sif=$SIF" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SIF for downstream jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sif
+          path: ${{ steps.build.outputs.sif }}
+          retention-days: 1
+          compression-level: 0  # SIF is already compressed; saves CI time
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 3. Run the medium fixture INSIDE the built SIF. This is the release
+  # gate: the artefact that will ship must pass the test, not a proxy.
+  # ─────────────────────────────────────────────────────────────────────
+  test-in-container:
+    needs: build-sif
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Download SIF
+        uses: actions/download-artifact@v4
+        with:
+          name: sif
+          path: images/
+
+      - name: Run medium fixture through the container
+        run: |
+          SIF=$(ls images/carp_*.sif | head -n1)
+          apptainer run -B "$PWD" "$SIF" \
+            -c tests/fixtures/config_medium.yaml -t 4
+
+      - name: Assert expected outputs
+        run: bash scripts/assert_fixture_outputs.sh medium
+
+      - name: Upload output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: output_medium_${{ github.run_id }}
+          path: tests/fixtures/output_medium
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 4. Push the SIF to GHCR as an ORAS/OCI artefact. Only reached if the
+  # in-container test passed.
+  # ─────────────────────────────────────────────────────────────────────
+  push-ghcr:
+    needs: [build-sif, test-in-container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Download SIF
+        uses: actions/download-artifact@v4
+        with:
+          name: sif
+          path: images/
+
+      - name: Login to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | apptainer registry login \
+            --username "${GITHUB_ACTOR}" --password-stdin \
+            oras://ghcr.io
+
+      - name: Push SIF to GHCR
+        run: |
+          TAG="${{ needs.build-sif.outputs.tag }}"
+          SIF=$(ls images/carp_*.sif | head -n1)
+          apptainer push "$SIF" "oras://${GHCR_IMAGE}:${TAG}"
+          # Also update :latest so users can pull without knowing the tag.
+          apptainer push "$SIF" "oras://${GHCR_IMAGE}:latest"
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 5. Create the GitHub Release. This is the step that triggers Zenodo's
+  # "sync on release" hook, so it MUST be the last step — only successful
+  # runs get archived.
+  # ─────────────────────────────────────────────────────────────────────
+  create-release:
+    needs: [build-sif, push-ghcr]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.build-sif.outputs.tag }}"
+          AUTO=$(gh api \
+            repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="$TAG" -q .body)
+          {
+            echo "## Container image"
+            echo
+            echo "The Singularity / Apptainer image for this release is published to GHCR as an OCI artefact:"
+            echo
+            echo '```bash'
+            echo "apptainer pull oras://${GHCR_IMAGE}:${TAG}"
+            echo "# or:  apptainer pull oras://${GHCR_IMAGE}:latest"
+            echo '```'
+            echo
+            echo "Run the pipeline:"
+            echo
+            echo '```bash'
+            echo "apptainer run -B /path/to/data -B \$PWD carp_${TAG}.sif -c config.yaml -t 20"
+            echo '```'
+            echo
+            echo "---"
+            echo
+            echo "$AUTO"
+          } > release-notes.md
+
+      - name: Create Release (triggers Zenodo snapshot)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.build-sif.outputs.tag }}"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            --verify-tag
