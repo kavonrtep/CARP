@@ -40,8 +40,17 @@ jobs:
           environment-name: carp-snakemake
           create-args: >-
             python=3.11
-            snakemake=9.19.0
+            snakemake>=9
             pyyaml
+          # Explicit channels — the default setup-micromamba condarc doesn't
+          # include bioconda, and snakemake's recent builds transitively
+          # need it (pulp, coincbc). Without this the solve fails and the
+          # post-cleanup step errors with an ENOENT on the micromamba-shell.
+          condarc: |
+            channels:
+              - conda-forge
+              - bioconda
+            channel_priority: flexible
           cache-environment: true
           cache-downloads: true
 
