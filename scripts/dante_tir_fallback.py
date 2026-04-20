@@ -69,6 +69,16 @@ except ImportError:
 SOURCE_NAME = "DANTE_TIR_FALLBACK"
 GFF_PARENT_TYPE = "sequence_feature"
 
+# DANTE_TIR per-protein-domain quality thresholds (dt_utils.gff3_quality_ok).
+# Applied to every DANTE feature used as either (a) a TPase TIR anchor or
+# (b) a neighbouring-feature boundary for flank clipping. Keeps the fallback
+# consistent with the primary DANTE_TIR filter and prevents low-quality /
+# ambiguous hits from polluting the library or over-truncating flanks.
+QUALITY_MIN_IDENTITY = 0.35
+QUALITY_MIN_SIMILARITY = 0.45
+QUALITY_MAX_RELAT_INTERRUPTIONS = 3.0
+QUALITY_RELAT_LENGTH_RANGE = (0.8, 1.2)
+
 
 @dataclass
 class TIRAnchor:
@@ -96,16 +106,58 @@ def sanitize_label(label: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", label).strip("_")
 
 
+def _parse_float(feature: GFF3Feature, key: str) -> Optional[float]:
+    raw = feature.get_attribute(key)
+    if raw is None or raw == "":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def gff3_quality_ok(feature: GFF3Feature) -> bool:
+    """Mirror of DANTE_TIR's ``dt_utils.gff3_quality_ok`` — accept a DANTE
+    protein-domain hit only if its per-domain statistics clear the four
+    standard thresholds. Missing attributes are treated as failures so that
+    malformed / upstream-untyped rows do not pass through.
+    """
+    identity = _parse_float(feature, "Identity")
+    similarity = _parse_float(feature, "Similarity")
+    relat_interruptions = _parse_float(feature, "Relat_Interruptions")
+    relat_length = _parse_float(feature, "Relat_Length")
+    if identity is None or similarity is None \
+            or relat_interruptions is None or relat_length is None:
+        return False
+    if identity < QUALITY_MIN_IDENTITY:
+        return False
+    if similarity < QUALITY_MIN_SIMILARITY:
+        return False
+    if relat_interruptions > QUALITY_MAX_RELAT_INTERRUPTIONS:
+        return False
+    lo, hi = QUALITY_RELAT_LENGTH_RANGE
+    if not (lo <= relat_length <= hi):
+        return False
+    return True
+
+
 def get_tir_subtype(feature: GFF3Feature) -> Optional[str]:
-    """Return the TIR subtype from Final_Classification if present."""
-    name = feature.get_name()
-    if name != "TPase":
-        return None
+    """Return the TIR subtype (final Final_Classification component) for
+    quality-passing TPase hits. Classification gate matches DANTE_TIR:
+    ``'Subclass_1' in Final_Classification``. A parseable leaf is still
+    required so anchors can be grouped per subfamily.
 
-    classification = feature.get_attribute("Final_Classification")
-    if not classification or not classification.startswith("Class_II|Subclass_1|TIR|"):
+    Callers should only pass features that have already been checked by
+    ``gff3_quality_ok``; the guard here is defensive in case the helper is
+    reused elsewhere.
+    """
+    if feature.get_name() != "TPase":
         return None
-
+    classification = feature.get_attribute("Final_Classification") or ""
+    if "Subclass_1" not in classification:
+        return None
+    if not gff3_quality_ok(feature):
+        return None
     parts = classification.split("|")
     if len(parts) < 4:
         return None
@@ -729,8 +781,21 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
             sys.exit(1)
 
     print(f"Parsing GFF3 file: {args.annotations}")
-    all_features = parse_gff3_features(args.annotations)
-    print(f"Found {len(all_features)} total features")
+    raw_features = parse_gff3_features(args.annotations)
+    print(f"Found {len(raw_features)} total features")
+
+    # Apply DANTE_TIR-style quality filter once. The resulting set is used
+    # both as the source of TPase anchors (via get_tir_subtype) AND as the
+    # neighbouring-feature set passed into create_prime_bed_files for flank
+    # clipping — so low-confidence hits neither become anchors nor act as
+    # artificial flank boundaries.
+    all_features = [f for f in raw_features if gff3_quality_ok(f)]
+    print(
+        f"After DANTE_TIR quality filter "
+        f"(Identity≥{QUALITY_MIN_IDENTITY}, Similarity≥{QUALITY_MIN_SIMILARITY}, "
+        f"Relat_Interruptions≤{QUALITY_MAX_RELAT_INTERRUPTIONS}, "
+        f"Relat_Length∈{QUALITY_RELAT_LENGTH_RANGE}): {len(all_features)} features"
+    )
 
     mask_features = None
     if args.mask_gff3:

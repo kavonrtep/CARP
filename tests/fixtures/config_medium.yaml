@@ -1,0 +1,13 @@
+# Medium test dataset — 1 Mb across 6 scaffolds, designed to trigger
+# primary DANTE_TIR detection (not just the fallback path). The first
+# scaffold (CM055034.1:29.4-29.75 Mb) carries three EnSpm/CACTA TPase
+# hits at REXdb identity 0.84-0.85 — well above the DANTE_TIR quality
+# thresholds AND clustered closely enough that mmseqs will group their
+# amino-acid sequences and invoke TIR boundary assembly.
+#
+# Additional scaffolds provide partial coverage of hAT, PIF/Harbinger,
+# MuDR/Mutator (fallback path), Ale+CRM LTRs, satellites and LINE.
+genome_fasta: tests/fixtures/genome_medium.fasta
+output_dir: tests/fixtures/output_medium
+repeatmasker_sensitivity: default
+reduce_library: True
