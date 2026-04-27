@@ -134,10 +134,11 @@ rule all:
 rule clean_genome_fasta:
     """
     Clean FASTA headers by removing everything after the first whitespace character.
-    Accepts either plain FASTA (.fa / .fasta / .fna) or gzip-compressed input
-    (.fa.gz / .fasta.gz / .fna.gz / any *.gz). Output is always plain
-    `genome_cleaned.fasta` because every downstream tool (DANTE, RepeatMasker,
-    TideCluster, ...) wants an unzipped reference.
+    Accepts either plain FASTA or gzip-compressed input. Detection is by the
+    file's leading bytes (gzip magic 1f 8b), not by filename extension — so a
+    gzipped file named `.fa` or `.fasta` is still handled correctly. Output is
+    always plain `genome_cleaned.fasta` because every downstream tool (DANTE,
+    RepeatMasker, TideCluster, …) wants an unzipped reference.
     Cleaning headers ensures consistent sequence IDs across all downstream
     analyses and prevents issues with tools that handle whitespace differently
     in FASTA headers.
@@ -156,19 +157,36 @@ rule clean_genome_fasta:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
-        # Read either plain or gzipped input; gzip -t fails fast on a
-        # corrupted .gz so we don't silently produce truncated output.
-        case "{input}" in
-            *.gz|*.GZ)
-                gzip -t {input}
-                READER="gzip -dc {input}"
-                ;;
-            *)
-                READER="cat {input}"
-                ;;
-        esac
+        # Sniff the first two bytes — gzip files start with 0x1f 0x8b
+        # regardless of extension. `gzip -t` then fails fast on corruption
+        # so we don't silently produce truncated output.
+        magic=$(head -c2 {input} | od -An -t x1 | tr -d ' \n')
+        if [ "$magic" = "1f8b" ]; then
+            gzip -t {input}
+            READER="gzip -dc {input}"
+        else
+            READER="cat {input}"
+        fi
         # Clean FASTA headers - keep only ID before first whitespace
         eval "$READER" | awk '/^>/ {{split($1, a, " "); print a[1]; next}} {{print}}' > {output}
+
+        # Sanity check: output must start with the FASTA header byte '>' and
+        # MUST NOT carry the gzip magic 1f 8b. Catches the case where a
+        # pre-fix container or a stale leftover slipped a binary stream
+        # through awk into a file named .fasta — DANTE / RepeatMasker /
+        # everything downstream then fails far away from the cause.
+        first_byte=$(head -c1 {output} | od -An -t x1 | tr -d ' \n')
+        gz_magic=$(head -c2 {output} | od -An -t x1 | tr -d ' \n')
+        if [ "$gz_magic" = "1f8b" ]; then
+            echo "ERROR: {output} is gzipped (magic 1f 8b). The clean_genome_fasta rule should always emit plain FASTA." >&2
+            rm -f {output}
+            exit 1
+        fi
+        if [ "$first_byte" != "3e" ]; then
+            echo "ERROR: {output} does not start with a FASTA header ('>'); first byte is 0x$first_byte." >&2
+            rm -f {output}
+            exit 1
+        fi
         """
 
 rule index_genome_fasta:
