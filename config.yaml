@@ -15,9 +15,12 @@ reduce_library: False
 #   multiplicity requirement for library entries).
 dante_tir_fallback_min_alignments: 3
 dante_tir_fallback_min_cluster_size: 3
-# DANTE_TIR primary-element library filter. Default 1 keeps every primary
-# element regardless of its mmseqs cluster size (Multiplicity attribute on
-# the GFF parent). Raise to drop low-multiplicity primaries from the
-# library only — they remain visible in DANTE_TIR_combined.gff3 and the
-# unified annotation.
-dante_tir_min_multiplicity: 1
+# DANTE_TIR primary-element library filter. Default 3 matches the
+# historical behaviour from before the DANTE_TIR_FALLBACK refactor (when
+# the library was sourced from `all_representative_elements_min3.fasta`,
+# which `dante_tir_summary.R` builds with `--min_cluster_size 3`). The
+# value gates the `Multiplicity` attribute on each primary GFF parent:
+# elements with `Multiplicity < threshold` are dropped from the library
+# only — they remain visible in DANTE_TIR_combined.gff3 and the unified
+# annotation. Lower to 1 to disable the filter.
+dante_tir_min_multiplicity: 3

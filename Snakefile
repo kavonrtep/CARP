@@ -80,12 +80,14 @@ for _key in ("dante_tir_fallback_min_alignments", "dante_tir_fallback_min_cluste
     if not isinstance(config[_key], int) or config[_key] < 1:
         raise ValueError(f"Invalid value for {_key}: must be a positive integer.")
 
-# DANTE_TIR primary-element library filter (Multiplicity floor). Default 1
-# means no filter; raise to drop low-multiplicity primaries from the library
-# only. Affects make_tir_combined_library; partials and singletons remain in
-# DANTE_TIR_combined.gff3 regardless of this value.
+# DANTE_TIR primary-element library filter (Multiplicity floor). Default 3
+# matches the pre-fallback behaviour where the library was sourced from
+# `all_representative_elements_min3.fasta` produced by `dante_tir_summary.R`
+# with `--min_cluster_size 3`. Set to 1 to disable. Affects
+# make_tir_combined_library; partials and low-Multiplicity primaries remain
+# in DANTE_TIR_combined.gff3 regardless of this value.
 if "dante_tir_min_multiplicity" not in config:
-    config["dante_tir_min_multiplicity"] = 1
+    config["dante_tir_min_multiplicity"] = 3
 if not isinstance(config["dante_tir_min_multiplicity"], int) or config["dante_tir_min_multiplicity"] < 1:
     raise ValueError("Invalid value for dante_tir_min_multiplicity: must be a positive integer.")
 
