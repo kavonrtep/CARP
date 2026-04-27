@@ -7,3 +7,17 @@ tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
 repeatmasker_sensitivity: default
 # possible values are: True, False, if missing, True is used
 reduce_library: False
+# DANTE_TIR_FALLBACK tuning (both default to 3 if omitted).
+# dante_tir_fallback_min_alignments: how many other anchors must support an
+#   extension length before it is applied (larger = more conservative extensions).
+# dante_tir_fallback_min_cluster_size: minimum mmseqs cluster size whose
+#   representative is kept in the fallback repeat library (larger = higher
+#   multiplicity requirement for library entries).
+dante_tir_fallback_min_alignments: 3
+dante_tir_fallback_min_cluster_size: 3
+# DANTE_TIR primary-element library filter. Default 1 keeps every primary
+# element regardless of its mmseqs cluster size (Multiplicity attribute on
+# the GFF parent). Raise to drop low-multiplicity primaries from the
+# library only — they remain visible in DANTE_TIR_combined.gff3 and the
+# unified annotation.
+dante_tir_min_multiplicity: 1

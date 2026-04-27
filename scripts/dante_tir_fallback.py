@@ -99,6 +99,10 @@ class TIRFallbackElement:
     end: int
     extension_5prime: int = 0
     extension_3prime: int = 0
+    # Composite quality score from the TPase anchor (Similarity × Relat_Length).
+    # Used as the tie-breaker when resolving overlaps across subtypes — higher
+    # wins. Set when the element is created from its anchor.
+    score: float = 0.0
 
 
 def sanitize_label(label: str) -> str:
@@ -215,7 +219,16 @@ def create_prime_bed_files(
     mask_features: List[GFF3Feature] = None,
     seq_lengths: Dict[str, int] = None,
 ) -> None:
-    """Create strand-aware BED files for 5' and 3' flanking regions."""
+    """Create strand-aware BED files for 5' and 3' flanking regions.
+
+    Flank-clipping design (matches DANTE_LTR convention): ``all_features`` is
+    the *quality-filtered* set of every DANTE domain — TPase of any subtype,
+    and also RT, PROT, INT, RH, aRH, CHD, CHDCR, TPase-of-other-subtype, etc.
+    Any passing DANTE domain terminates the flank, regardless of classification:
+    a single TIR element has exactly one TPase and no other domain, so hitting
+    *any* domain marks the boundary of a different element that we must not
+    extend into. Do not narrow this to just TPase.
+    """
     with open(bed_5prime, "w") as f5, open(bed_3prime, "w") as f3:
         for anchor in anchors:
             feature = anchor.feature
@@ -450,6 +463,17 @@ def load_prime_alignment_lengths(subtype_dir: Path) -> Dict[str, Dict[str, int]]
     return dict(alignment_lengths)
 
 
+def _anchor_score(feature: GFF3Feature) -> float:
+    """Composite DANTE-quality score used to break ties between overlapping
+    fallback elements: ``Similarity × Relat_Length``. Both attributes have
+    already been validated by ``gff3_quality_ok``, so parsing shouldn't fail;
+    any anomaly falls back to 0.0 so the element loses every overlap contest.
+    """
+    similarity = _parse_float(feature, "Similarity") or 0.0
+    relat_length = _parse_float(feature, "Relat_Length") or 0.0
+    return similarity * relat_length
+
+
 def create_tir_elements(
     anchors: List[TIRAnchor],
     alignment_lengths: Dict[str, Dict[str, int]],
@@ -485,6 +509,7 @@ def create_tir_elements(
                 end=element_end,
                 extension_5prime=ext_5prime,
                 extension_3prime=ext_3prime,
+                score=_anchor_score(anchor.feature),
             )
         )
 
@@ -572,23 +597,129 @@ def write_tir_gff(
             )
 
 
-def append_gff_body(source_gff: Path, destination_gff_handle) -> None:
-    """Append a GFF file body without its header lines."""
+def _gff_row_group_id(attributes: str) -> Optional[str]:
+    """Return the ``ID`` (for parent rows) or ``Parent`` / ``Group_ID`` (for
+    child rows) value from a GFF3 attributes column, or None if unresolvable.
+    Used to filter rows by cross-subtype overlap-resolution survivors.
+    """
+    parsed: Dict[str, str] = {}
+    for kv in attributes.split(";"):
+        if "=" in kv:
+            key, value = kv.split("=", 1)
+            parsed[key] = value
+    return parsed.get("ID") or parsed.get("Parent") or parsed.get("Group_ID")
+
+
+def append_gff_body(
+    source_gff: Path,
+    destination_gff_handle,
+    keep_ids: Optional[set] = None,
+) -> int:
+    """Append a GFF file body without its header lines, optionally filtered
+    by a set of kept ``group_id`` values. Returns number of rows written.
+    """
+    n = 0
     with open(source_gff, "r") as handle:
         for line in handle:
             if line.startswith("#") or not line.strip():
                 continue
+            if keep_ids is not None:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) >= 9:
+                    group_id = _gff_row_group_id(fields[8])
+                    if group_id is not None and group_id not in keep_ids:
+                        continue
             destination_gff_handle.write(line)
+            n += 1
+    return n
 
 
-def append_rep_library(rep_fasta: Path, output_handle, classification_suffix: str) -> None:
-    """Append cluster representatives to the combined repeat library."""
+def append_fasta_filtered(
+    source_fasta: Path,
+    destination_handle,
+    keep_ids: Optional[set] = None,
+) -> int:
+    """Append a FASTA file, optionally keeping only records whose header's
+    first token (with any ``#classification`` tail and ``_revcomp`` suffix
+    stripped) is in ``keep_ids``. Returns number of records written.
+    """
+    n = 0
+    writing = False
+    with open(source_fasta, "r") as handle:
+        for line in handle:
+            if line.startswith(">"):
+                base_id = _normalise_sequence_id(line[1:])
+                if keep_ids is None or base_id in keep_ids:
+                    writing = True
+                    destination_handle.write(line)
+                    n += 1
+                else:
+                    writing = False
+            elif writing:
+                destination_handle.write(line)
+    return n
+
+
+def _normalise_sequence_id(token: str) -> str:
+    """Reduce a FASTA header / mmseqs-tsv token to the pipeline's canonical
+    element ID: strip any ``#classification`` tail and the ``_revcomp``
+    orientation suffix. Keep this in one place so the rep_lib filter, the
+    combined-FASTA filter, and the cluster.tsv parser all agree on keys.
+    """
+    return token.split("#", 1)[0].split()[0].replace("_revcomp", "")
+
+
+def parse_cluster_tsv(cluster_tsv: Path) -> Dict[str, int]:
+    """Return ``rep_id -> member count`` from an mmseqs2 ``cluster.tsv``.
+
+    The file format is two columns — representative ID, member ID — with one
+    row per cluster-member pair. IDs carry the same ``#classification`` and
+    ``_revcomp`` decorations as the input FASTA; ``_normalise_sequence_id``
+    strips both so the keys match the stripped IDs that the rep_lib filter
+    and overlap resolver use. A singleton cluster contributes exactly one
+    row where ``rep == member``.
+    """
+    counts: Dict[str, int] = defaultdict(int)
+    with open(cluster_tsv) as handle:
+        for line in handle:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            rep_id = _normalise_sequence_id(parts[0])
+            counts[rep_id] += 1
+    return dict(counts)
+
+
+def append_rep_library(
+    rep_fasta: Path,
+    output_handle,
+    classification_suffix: str,
+    keep_ids: Optional[set] = None,
+) -> int:
+    """Append cluster representatives to the combined repeat library.
+
+    If ``keep_ids`` is provided, only representatives whose ID (the first
+    whitespace-delimited token of the header, without any ``#classification``
+    suffix) is in the set are written. Returns the number of records written.
+    """
+    n_written = 0
+    writing = False
     with open(rep_fasta, "r") as handle:
         for line in handle:
             if line.startswith(">"):
-                output_handle.write(f"{line.strip()}#{classification_suffix}\n")
-            else:
+                rep_id = _normalise_sequence_id(line[1:])
+                if keep_ids is None or rep_id in keep_ids:
+                    writing = True
+                    output_handle.write(f">{rep_id}#{classification_suffix}\n")
+                    n_written += 1
+                else:
+                    writing = False
+            elif writing:
                 output_handle.write(line)
+    return n_written
 
 
 def annotate_extended_fasta_headers(fasta_path: str, classification_with_slashes: str) -> None:
@@ -620,6 +751,47 @@ def annotate_extended_fasta_headers(fasta_path: str, classification_with_slashes
     os.replace(tmp, fasta_path)
 
 
+def resolve_cross_subtype_overlaps(
+    elements: List[TIRFallbackElement],
+) -> Tuple[set, List[Tuple[TIRFallbackElement, TIRFallbackElement]]]:
+    """Resolve any coordinate overlap between fallback elements, including
+    across different TIR subtypes. Tie-break by the anchor composite score
+    (``Similarity × Relat_Length``); the higher-scored element wins and the
+    other is dropped. Identical scores fall back to the longer element span,
+    then to ``group_id`` for deterministic ordering.
+
+    Returns ``(keep_ids, dropped_pairs)`` — ``keep_ids`` is the set of
+    ``group_id`` values to retain; ``dropped_pairs`` pairs each dropped
+    element with its winner, for auditing.
+    """
+    # Sort once by priority: higher score first, then longer span, then ID.
+    ordered = sorted(
+        elements,
+        key=lambda e: (-e.score, -(e.end - e.start), e.group_id),
+    )
+
+    kept_by_seq: Dict[str, List[TIRFallbackElement]] = defaultdict(list)
+    keep_ids: set = set()
+    dropped_pairs: List[Tuple[TIRFallbackElement, TIRFallbackElement]] = []
+
+    for element in ordered:
+        winner = None
+        for kept in kept_by_seq[element.seqname]:
+            # Overlap test: shared base if neither interval ends before the
+            # other begins. Inclusive-end convention matches the GFF3 rows
+            # we emit elsewhere.
+            if element.start <= kept.end and kept.start <= element.end:
+                winner = kept
+                break
+        if winner is None:
+            kept_by_seq[element.seqname].append(element)
+            keep_ids.add(element.group_id)
+        else:
+            dropped_pairs.append((element, winner))
+
+    return keep_ids, dropped_pairs
+
+
 def process_subtype(
     subtype: str,
     anchors: List[TIRAnchor],
@@ -629,11 +801,18 @@ def process_subtype(
     flank_size: int,
     threads: int,
     min_num_alignments: int,
+    min_cluster_size: int,
     mask_features: List[GFF3Feature] = None,
     seq_lengths: Dict[str, int] = None,
     verbose: bool = False,
-) -> Tuple[Optional[Path], Optional[Path], int]:
-    """Run the fallback workflow for one TIR subtype."""
+) -> Tuple[Optional[Path], Optional[Path], List[TIRFallbackElement], str]:
+    """Run the fallback workflow for one TIR subtype.
+
+    Returns ``(gff_path, rep_lib_path, elements, classification_with_slashes)``.
+    ``rep_lib_path`` is None if clustering didn't yield any cluster of size
+    ``>= min_cluster_size``. ``elements`` is always returned so the caller can
+    run cross-subtype overlap resolution even when clustering is skipped.
+    """
     subtype_slug = sanitize_label(subtype)
     subtype_dir = output_dir / subtype_slug
     subtype_dir.mkdir(parents=True, exist_ok=True)
@@ -650,6 +829,13 @@ def process_subtype(
         "rep_lib": subtype_dir / "TIR_fallback_rep_lib.fasta",
     }
 
+    # Canonical slash-form classification used for FASTA headers in the
+    # extended FASTA and the subtype rep library. Computed up front so that
+    # even early-exit paths can return it to the caller for later use.
+    classification_with_slashes = classification.canonicalise(
+        f"Class_II_Subclass_1_TIR_{subtype_slug}", source="DANTE_TIR"
+    )
+
     core_bed = subtype_dir / "TPase_regions.bed"
     make_core_bed(anchors, str(core_bed))
 
@@ -662,7 +848,7 @@ def process_subtype(
         )
         if not success:
             print(f"  Warning: failed to extract TPase regions for {subtype}", file=sys.stderr)
-            return None, None, 0
+            return None, None, [], classification_with_slashes
 
         prime_success = extract_prime_sequences(
             genome_fasta,
@@ -695,15 +881,12 @@ def process_subtype(
         )
         if not extended_success:
             print(f"  Warning: failed to extract extended regions for {subtype}", file=sys.stderr)
-            return output_files["gff_out"], None, len(tir_elements)
+            return output_files["gff_out"], None, tir_elements, classification_with_slashes
 
         # Append #classification suffix to extended-FASTA headers in canonical
-        # slash form. Delegating to classification.canonicalise() validates
+        # slash form. Delegating to classification.canonicalise() above validates
         # that the subtype is a known leaf — a future DANTE release introducing
         # a new subtype slug fails here instead of polluting downstream output.
-        classification_with_slashes = classification.canonicalise(
-            f"Class_II_Subclass_1_TIR_{subtype_slug}", source="DANTE_TIR"
-        )
         annotate_extended_fasta_headers(
             str(output_files["extended_fasta"]),
             classification_with_slashes,
@@ -716,17 +899,43 @@ def process_subtype(
         )
         if not clustering_success:
             print(f"  Warning: mmseqs clustering failed for {subtype}", file=sys.stderr)
-            return output_files["gff_out"], None, len(tir_elements)
+            return output_files["gff_out"], None, tir_elements, classification_with_slashes
 
-        mmseqs_rep_fasta = subtype_dir / "mmseqs" / "cluster_rep_seq.fasta"
-        if not mmseqs_rep_fasta.exists():
-            print(f"  Warning: cluster representatives missing for {subtype}", file=sys.stderr)
-            return output_files["gff_out"], None, len(tir_elements)
+        mmseqs_dir = subtype_dir / "mmseqs"
+        mmseqs_rep_fasta = mmseqs_dir / "cluster_rep_seq.fasta"
+        # mmseqs easy-cluster emits <prefix>_cluster.tsv; the prefix here is
+        # 'cluster', so the on-disk name is 'cluster_cluster.tsv'. Don't
+        # rename this blindly — dante_line.py holds a stale (unused) path.
+        mmseqs_cluster_tsv = mmseqs_dir / "cluster_cluster.tsv"
+        if not mmseqs_rep_fasta.exists() or not mmseqs_cluster_tsv.exists():
+            print(f"  Warning: cluster outputs missing for {subtype}", file=sys.stderr)
+            return output_files["gff_out"], None, tir_elements, classification_with_slashes
+
+        # Enforce minimum cluster size on the library only. The extended FASTA
+        # passes through unchanged — make_tir_combined_library re-clusters
+        # everything together with primary DANTE_TIR calls, and we don't want
+        # to pre-gate that pool.
+        cluster_counts = parse_cluster_tsv(mmseqs_cluster_tsv)
+        keep_rep_ids = {
+            rep_id for rep_id, n in cluster_counts.items() if n >= min_cluster_size
+        }
+        total_clusters = len(cluster_counts)
+        kept_clusters = len(keep_rep_ids)
+        print(
+            f"  mmseqs clusters: {total_clusters} total, "
+            f"{kept_clusters} with ≥{min_cluster_size} members kept for library"
+        )
 
         with open(output_files["rep_lib"], "w") as rep_out:
-            append_rep_library(mmseqs_rep_fasta, rep_out, classification_with_slashes)
+            n_written = append_rep_library(
+                mmseqs_rep_fasta,
+                rep_out,
+                classification_with_slashes,
+                keep_ids=keep_rep_ids,
+            )
+        print(f"  -> {output_files['rep_lib'].name} ({n_written} sequences)")
 
-        return output_files["gff_out"], output_files["rep_lib"], len(tir_elements)
+        return output_files["gff_out"], output_files["rep_lib"], tir_elements, classification_with_slashes
     finally:
         if os.path.exists(core_bed):
             os.remove(core_bed)
@@ -765,6 +974,18 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
         default=3,
         help="Minimum number of alignments for length threshold calculation (default: 3)",
     )
+    parser.add_argument(
+        "--min-cluster-size",
+        type=int,
+        default=3,
+        help=(
+            "Minimum mmseqs cluster size whose representative is kept in the "
+            "fallback repeat library (default: 3). Clusters below this size "
+            "are still written to the per-subtype extended FASTA (for "
+            "downstream re-clustering with primary DANTE_TIR) but not to the "
+            "library. Must be >= 1."
+        ),
+    )
     parser.add_argument("--mask-gff3", help="Optional GFF3 file with features that can limit flanking regions")
     parser.add_argument(
         "-v",
@@ -774,6 +995,11 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
     )
 
     args = parser.parse_args()
+
+    if args.min_cluster_size < 1:
+        parser.error("--min-cluster-size must be >= 1")
+    if args.min_num_alignments < 1:
+        parser.error("--min-num-alignments must be >= 1")
 
     for file_path, name in [(args.genome, "Genome"), (args.annotations, "Annotations")]:
         if not Path(file_path).exists():
@@ -825,25 +1051,20 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
     combined_rep_lib = output_dir / "TIR_fallback_rep_lib.fasta"
     combined_extended = output_dir / "TIR_fallback_extended.fasta"
 
-    with open(combined_gff, "w") as gff_handle:
-        gff_handle.write("##gff-version 3\n")
-        gff_handle.write(f"##{SOURCE_NAME.lower()} version 0.1\n")
-
-    with open(combined_rep_lib, "w"):
-        pass
-    with open(combined_extended, "w"):
-        pass
-
     print("Loading sequence lengths from genome index...")
     seq_lengths = load_sequence_lengths(args.genome)
     print(f"  Loaded lengths for {len(seq_lengths)} sequences")
 
-    total_elements = 0
-    processed_subtypes = []
+    # Step 1 — run every subtype independently. Each subtype writes its own
+    # GFF3 / extended FASTA / rep_lib under DANTE_TIR_FALLBACK/<subtype>/ as
+    # an audit trail of the un-resolved per-subtype pass; the combined
+    # files written below are what downstream rules consume.
+    per_subtype_results: List[Tuple[str, Optional[Path], Optional[Path]]] = []
+    all_elements: List[TIRFallbackElement] = []
 
     for subtype in sorted(tir_anchors_by_subtype.keys()):
         anchors = tir_anchors_by_subtype[subtype]
-        gff_path, rep_path, n_elements = process_subtype(
+        gff_path, rep_path, elements, _ = process_subtype(
             subtype=subtype,
             anchors=anchors,
             genome_fasta=args.genome,
@@ -852,34 +1073,69 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
             flank_size=args.flank,
             threads=args.threads,
             min_num_alignments=args.min_num_alignments,
+            min_cluster_size=args.min_cluster_size,
             mask_features=mask_features,
             seq_lengths=seq_lengths,
             verbose=args.verbose,
         )
+        per_subtype_results.append((subtype, gff_path, rep_path))
+        all_elements.extend(elements)
 
+    # Step 2 — resolve cross-subtype overlaps. A single real TE can produce
+    # anchors in multiple subtypes (when DANTE alternative-hit assignment
+    # ties) and one big extension can swallow a neighbouring anchor from a
+    # different subtype. Keep the anchor with the higher composite quality
+    # score; drop the loser from the combined outputs. Per-subtype dirs are
+    # intentionally untouched so the full un-resolved set remains auditable.
+    keep_ids, dropped_pairs = resolve_cross_subtype_overlaps(all_elements)
+    n_total = len(all_elements)
+    n_kept = len(keep_ids)
+    print(
+        f"\nCross-subtype overlap resolution: {n_kept}/{n_total} elements kept, "
+        f"{n_total - n_kept} dropped"
+    )
+    if dropped_pairs:
+        preview = dropped_pairs[:10]
+        for loser, winner in preview:
+            print(
+                f"  drop {loser.group_id} (score={loser.score:.3f}) "
+                f"-> overlaps {winner.group_id} (score={winner.score:.3f})"
+            )
+        if len(dropped_pairs) > len(preview):
+            print(f"  ... and {len(dropped_pairs) - len(preview)} more")
+
+    # Step 3 — assemble combined files from the surviving IDs only.
+    with open(combined_gff, "w") as gff_handle:
+        gff_handle.write("##gff-version 3\n")
+        gff_handle.write(f"##{SOURCE_NAME.lower()} version 0.1\n")
+    with open(combined_rep_lib, "w"):
+        pass
+    with open(combined_extended, "w"):
+        pass
+
+    processed_subtypes: List[str] = []
+    for subtype, gff_path, rep_path in per_subtype_results:
         if gff_path and Path(gff_path).exists():
             with open(combined_gff, "a") as gff_handle:
-                append_gff_body(Path(gff_path), gff_handle)
+                append_gff_body(Path(gff_path), gff_handle, keep_ids=keep_ids)
 
         if rep_path and Path(rep_path).exists():
             with open(combined_rep_lib, "a") as rep_handle:
-                with open(rep_path, "r") as rep_in:
-                    rep_handle.write(rep_in.read())
+                append_fasta_filtered(Path(rep_path), rep_handle, keep_ids=keep_ids)
 
         subtype_slug = sanitize_label(subtype)
         extended_fasta = output_dir / subtype_slug / "TPase_regions_extended.fasta"
         if extended_fasta.exists() and extended_fasta.stat().st_size > 0:
             with open(combined_extended, "a") as ext_handle:
-                with open(extended_fasta, "r") as ext_in:
-                    ext_handle.write(ext_in.read())
+                append_fasta_filtered(extended_fasta, ext_handle, keep_ids=keep_ids)
 
         if gff_path:
             processed_subtypes.append(subtype)
-            total_elements += n_elements
 
     print("\nAll processing completed successfully!")
     print(f"  Subtypes processed: {len(processed_subtypes)}")
-    print(f"  Total fallback elements: {total_elements}")
+    print(f"  Total fallback elements: {n_total}")
+    print(f"  Elements after overlap resolution: {n_kept}")
     print(f"  Combined GFF: {combined_gff}")
     print(f"  Combined repeat library: {combined_rep_lib}")
     print(f"  Combined extended FASTA: {combined_extended}")

@@ -72,6 +72,23 @@ else:
     if config["reduce_library"] not in [True, False]:
         raise ValueError("Invalid value for reduce_library_size. Must be either True or False.")
 
+# DANTE_TIR_FALLBACK stringency knobs. Both default to 3; both must be
+# positive integers. See dante_tir_fallback.py for semantics.
+for _key in ("dante_tir_fallback_min_alignments", "dante_tir_fallback_min_cluster_size"):
+    if _key not in config:
+        config[_key] = 3
+    if not isinstance(config[_key], int) or config[_key] < 1:
+        raise ValueError(f"Invalid value for {_key}: must be a positive integer.")
+
+# DANTE_TIR primary-element library filter (Multiplicity floor). Default 1
+# means no filter; raise to drop low-multiplicity primaries from the library
+# only. Affects make_tir_combined_library; partials and singletons remain in
+# DANTE_TIR_combined.gff3 regardless of this value.
+if "dante_tir_min_multiplicity" not in config:
+    config["dante_tir_min_multiplicity"] = 1
+if not isinstance(config["dante_tir_min_multiplicity"], int) or config["dante_tir_min_multiplicity"] < 1:
+    raise ValueError("Invalid value for dante_tir_min_multiplicity: must be a positive integer.")
+
 
 # Define path to cleaned genome (will be created by clean_genome_fasta rule)
 genome_fasta_cleaned = F"{config['output_dir']}/genome_cleaned.fasta"
@@ -217,6 +234,15 @@ rule dante_tir:
         # it here trips snakemake's MissingOutputException on small inputs.
         touch {output.gff} {output.fasta} {output.summary} {output.dante_tir_lib}
 
+        # Inject the DANTE TPase protein_domain row as a child of each
+        # DANTE_TIR sequence_feature parent. Idempotent: a future dante_tir
+        # release that emits TPase children already will leave them in
+        # place; this step then becomes a no-op and can be retired.
+        scripts_dir=$(realpath scripts)
+        python3 "$scripts_dir/enrich_dante_tir_with_tpase.py" \
+            --dante-gff {input.gff} \
+            --dante-tir-gff {output.gff}
+
         # Create checkpoint file to indicate completion
         touch {output.checkpoint}
         """
@@ -237,7 +263,9 @@ rule dante_tir_fallback:
         rep_lib=F"{config['output_dir']}/DANTE_TIR_FALLBACK/TIR_fallback_rep_lib.fasta",
         extended_fasta=F"{config['output_dir']}/DANTE_TIR_FALLBACK/TIR_fallback_extended.fasta"
     params:
-        output_dir=F"{config['output_dir']}/DANTE_TIR_FALLBACK"
+        output_dir=F"{config['output_dir']}/DANTE_TIR_FALLBACK",
+        min_alignments=config["dante_tir_fallback_min_alignments"],
+        min_cluster_size=config["dante_tir_fallback_min_cluster_size"]
     log:
         stdout=F"{config['output_dir']}/DANTE_TIR_FALLBACK/dante_tir_fallback.log",
         stderr=F"{config['output_dir']}/DANTE_TIR_FALLBACK/dante_tir_fallback.err"
@@ -260,6 +288,8 @@ rule dante_tir_fallback:
             -a {input.gff} \
             -o {params.output_dir} \
             -t {threads} \
+            --min-num-alignments {params.min_alignments} \
+            --min-cluster-size {params.min_cluster_size} \
             --mask-gff3 {input.mask_gff}
 
         # Ensure outputs exist even if no TIR elements were found
@@ -305,16 +335,23 @@ rule merge_dante_tir_with_fallback:
 
 rule make_tir_combined_library:
     """
-    Build a combined TIR repeat library by clustering all primary DANTE_TIR
-    elements together with non-overlapping fallback elements using mmseqs2.
+    Build the TIR repeat library from primary DANTE_TIR elements only.
+
+    DANTE_TIR_FALLBACK partial elements are intentionally excluded — they
+    remain visible in DANTE_TIR_combined.gff3 (and the unified annotation)
+    as low-confidence partials, but are not trusted enough to seed
+    RepeatMasker. The library is built by mmseqs2-clustering the primary
+    DANTE_TIR_final.fasta after canonicalising headers and (optionally)
+    dropping primaries below the configured Multiplicity floor.
     """
     input:
         primary_fasta=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.fasta",
-        fallback_fasta=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_fallback_filtered.fasta"
+        primary_gff=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3"
     output:
         combined_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_combined.fasta"
     params:
-        mmseqs_dir=F"{config['output_dir']}/DANTE_TIR/mmseqs_combined"
+        mmseqs_dir=F"{config['output_dir']}/DANTE_TIR/mmseqs_combined",
+        min_multiplicity=config["dante_tir_min_multiplicity"]
     log:
         stdout=F"{config['output_dir']}/DANTE_TIR/make_tir_combined_library.log",
         stderr=F"{config['output_dir']}/DANTE_TIR/make_tir_combined_library.err"
@@ -331,32 +368,44 @@ rule make_tir_combined_library:
 
         mkdir -p {params.mmseqs_dir}
 
-        # Normalise primary DANTE_TIR FASTA headers into canonical slash form
-        # (#Class_II/Subclass_1/TIR/hAT) via classification_vocabulary.yaml, then
-        # append fallback sequences (already canonical). Previously done by sed;
-        # now vocabulary-aware so any unknown leaf fails loudly here.
-        COMBINED_INPUT={params.mmseqs_dir}/combined_input.fasta
+        # Canonicalise primary DANTE_TIR FASTA headers into canonical slash
+        # form (#Class_II/Subclass_1/TIR/hAT) via classification_vocabulary.yaml
+        # so any unknown leaf fails loudly here. Fallback sequences are
+        # deliberately not included — see rule docstring.
+        CANON_INPUT={params.mmseqs_dir}/primary_canonical.fasta
         scripts_dir=$(realpath {workflow.basedir}/scripts)
         python3 "$scripts_dir/classification.py" canonicalise-fasta-headers \
-            --source DANTE_TIR {input.primary_fasta} "$COMBINED_INPUT"
-        if [ -s {input.fallback_fasta} ]; then
-            cat {input.fallback_fasta} >> "$COMBINED_INPUT"
+            --source DANTE_TIR {input.primary_fasta} "$CANON_INPUT"
+
+        # Optional Multiplicity floor: drop primary elements whose parent
+        # row in DANTE_TIR_final.gff3 has Multiplicity < threshold. Default
+        # threshold is 1 (no filter). This affects only the library; the
+        # GFF still carries every primary element.
+        FILTERED_INPUT={params.mmseqs_dir}/primary_filtered.fasta
+        if [ "{params.min_multiplicity}" -gt 1 ] && [ -s "$CANON_INPUT" ] && [ -s {input.primary_gff} ]; then
+            python3 "$scripts_dir/filter_dante_tir_by_multiplicity.py" \
+                --gff {input.primary_gff} \
+                --fasta-in "$CANON_INPUT" \
+                --fasta-out "$FILTERED_INPUT" \
+                --min-multiplicity {params.min_multiplicity}
+        else
+            cp "$CANON_INPUT" "$FILTERED_INPUT"
         fi
 
-        # If input is empty, create empty output
-        if [ ! -s "$COMBINED_INPUT" ]; then
+        # If filtered input is empty, create empty output
+        if [ ! -s "$FILTERED_INPUT" ]; then
             touch {output.combined_lib}
             exit 0
         fi
 
-        # Run mmseqs2 clustering on all TIR elements
+        # Run mmseqs2 clustering on the primary-only set
         mmseqs easy-cluster \
-            "$COMBINED_INPUT" \
+            "$FILTERED_INPUT" \
             {params.mmseqs_dir}/cluster \
             {params.mmseqs_dir}/tmp \
             --threads {threads}
 
-        # Use cluster representatives as the combined library
+        # Use cluster representatives as the library
         if [ -s {params.mmseqs_dir}/cluster_rep_seq.fasta ]; then
             cp {params.mmseqs_dir}/cluster_rep_seq.fasta {output.combined_lib}
         else
