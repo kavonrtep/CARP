@@ -134,8 +134,13 @@ rule all:
 rule clean_genome_fasta:
     """
     Clean FASTA headers by removing everything after the first whitespace character.
-    This ensures consistent sequence IDs across all downstream analyses and prevents
-    issues with tools that handle whitespace differently in FASTA headers.
+    Accepts either plain FASTA (.fa / .fasta / .fna) or gzip-compressed input
+    (.fa.gz / .fasta.gz / .fna.gz / any *.gz). Output is always plain
+    `genome_cleaned.fasta` because every downstream tool (DANTE, RepeatMasker,
+    TideCluster, ...) wants an unzipped reference.
+    Cleaning headers ensures consistent sequence IDs across all downstream
+    analyses and prevents issues with tools that handle whitespace differently
+    in FASTA headers.
     """
     input:
         config["genome_fasta"]
@@ -151,8 +156,19 @@ rule clean_genome_fasta:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
+        # Read either plain or gzipped input; gzip -t fails fast on a
+        # corrupted .gz so we don't silently produce truncated output.
+        case "{input}" in
+            *.gz|*.GZ)
+                gzip -t {input}
+                READER="gzip -dc {input}"
+                ;;
+            *)
+                READER="cat {input}"
+                ;;
+        esac
         # Clean FASTA headers - keep only ID before first whitespace
-        awk '/^>/ {{split($1, a, " "); print a[1]; next}} {{print}}' {input} > {output}
+        eval "$READER" | awk '/^>/ {{split($1, a, " "); print a[1]; next}} {{print}}' > {output}
         """
 
 rule index_genome_fasta:
