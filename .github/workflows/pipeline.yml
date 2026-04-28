@@ -77,16 +77,17 @@ jobs:
             --conda-create-envs-only
 
       - name: Prime RepeatMasker BLAST indices (belt-and-braces)
-        if: steps.cache.outputs.cache-hit != 'true'
+        # Run on cache hit AND cache miss. The script is idempotent
+        # (already-indexed libs are skipped via the .nsq/.psq existence
+        # check) so re-running on a fresh cache costs only a few
+        # seconds, but unconditional execution heals a cache that was
+        # saved with a partially-primed env — that's how the April 2026
+        # scheduled-run regression slipped past the original guard.
         run: |
-          # snakemake should run envs/tidecluster.post-deploy.sh after
-          # env creation, but the behaviour varies with conda vs
-          # micromamba front-ends. Re-run the priming script here so
-          # the cached env is guaranteed RepeatMasker-ready.
           for env in "$PWD"/.snakemake/conda/*/; do
             [[ -d "${env}share/RepeatMasker/Libraries" ]] || continue
             echo "Priming $env"
-            CONDA_PREFIX="${env%/}" bash envs/tidecluster.post-deploy.sh || true
+            CONDA_PREFIX="${env%/}" bash envs/tidecluster.post-deploy.sh
           done
 
   # ─────────────────────────────────────────────────────────────────────
@@ -140,6 +141,19 @@ jobs:
           # RepeatMasker BLAST indices wouldn't refresh).
           key: snakemake-conda-${{ hashFiles('envs/*.yaml', 'envs/*.post-deploy.sh') }}
           fail-on-cache-miss: true
+
+      - name: Prime RepeatMasker BLAST indices (belt-and-braces)
+        # The envs job runs the same priming step, but a stale cache
+        # restored here can still arrive un-primed (or primed for a
+        # different env hash) — re-running on every fixture invocation
+        # is cheap (idempotent: already-indexed libs are skipped) and
+        # closes the gap that produced the April 2026 regression.
+        run: |
+          for env in "$PWD"/.snakemake/conda/*/; do
+            [[ -d "${env}share/RepeatMasker/Libraries" ]] || continue
+            echo "Priming $env"
+            CONDA_PREFIX="${env%/}" bash envs/tidecluster.post-deploy.sh
+          done
 
       - name: Run pipeline on ${{ matrix.fixture }} fixture
         # -t 2: match the runner's vCPU count. Oversubscribing (-t 4)
