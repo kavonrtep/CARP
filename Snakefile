@@ -274,8 +274,11 @@ rule dante_tir:
         # DANTE_TIR sequence_feature parent. Idempotent: a future dante_tir
         # release that emits TPase children already will leave them in
         # place; this step then becomes a no-op and can be retired.
+        # Bare-name invocation via PATH — see CLAUDE.md "Calling helper
+        # scripts from rules" for the dual-context contract.
         scripts_dir=$(realpath scripts)
-        python3 "$scripts_dir/enrich_dante_tir_with_tpase.py" \
+        export PATH="$scripts_dir:$PATH"
+        enrich_dante_tir_with_tpase.py \
             --dante-gff {input.gff} \
             --dante-tir-gff {output.gff}
 
@@ -404,13 +407,17 @@ rule make_tir_combined_library:
 
         mkdir -p {params.mmseqs_dir}
 
+        # Bare-name invocation via PATH — see CLAUDE.md "Calling helper
+        # scripts from rules" for the dual-context contract.
+        scripts_dir=$(realpath scripts)
+        export PATH="$scripts_dir:$PATH"
+
         # Canonicalise primary DANTE_TIR FASTA headers into canonical slash
         # form (#Class_II/Subclass_1/TIR/hAT) via classification_vocabulary.yaml
         # so any unknown leaf fails loudly here. Fallback sequences are
         # deliberately not included — see rule docstring.
         CANON_INPUT={params.mmseqs_dir}/primary_canonical.fasta
-        scripts_dir=$(realpath {workflow.basedir}/scripts)
-        python3 "$scripts_dir/classification.py" canonicalise-fasta-headers \
+        classification.py canonicalise-fasta-headers \
             --source DANTE_TIR {input.primary_fasta} "$CANON_INPUT"
 
         # Optional Multiplicity floor: drop primary elements whose parent
@@ -419,7 +426,7 @@ rule make_tir_combined_library:
         # GFF still carries every primary element.
         FILTERED_INPUT={params.mmseqs_dir}/primary_filtered.fasta
         if [ "{params.min_multiplicity}" -gt 1 ] && [ -s "$CANON_INPUT" ] && [ -s {input.primary_gff} ]; then
-            python3 "$scripts_dir/filter_dante_tir_by_multiplicity.py" \
+            filter_dante_tir_by_multiplicity.py \
                 --gff {input.primary_gff} \
                 --fasta-in "$CANON_INPUT" \
                 --fasta-out "$FILTERED_INPUT" \
@@ -498,8 +505,11 @@ rule validate_classifications:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
-        scripts_dir=$(realpath {workflow.basedir}/scripts)
-        CLS="python3 $scripts_dir/classification.py validate --mode gff3"
+        # Bare-name invocation via PATH — see CLAUDE.md "Calling helper
+        # scripts from rules" for the dual-context contract.
+        scripts_dir=$(realpath scripts)
+        export PATH="$scripts_dir:$PATH"
+        CLS="classification.py validate --mode gff3"
         $CLS --source DANTE       --attribute Final_Classification {input.dante_filtered}
         $CLS --source DANTE_LTR   --attribute Final_Classification {input.dante_ltr}
         $CLS --source DANTE_TIR   --attribute Classification       {input.dante_tir_final}
@@ -889,8 +899,11 @@ rule filter_ltr_rt_library:
         # → #Class_I/LTR/Ty1_copia/Ale) via classification_vocabulary.yaml.
         # Replaces the previous two-step sed that relied on the accident that
         # legitimate leaf underscores never sit next to a pipe.
-        scripts_dir=$(realpath {workflow.basedir}/scripts)
-        python3 "$scripts_dir/classification.py" canonicalise-fasta-headers \
+        # Bare-name invocation via PATH — see CLAUDE.md "Calling helper
+        # scripts from rules" for the dual-context contract.
+        scripts_dir=$(realpath scripts)
+        export PATH="$scripts_dir:$PATH"
+        classification.py canonicalise-fasta-headers \
             --source DANTE_LTR {input.dante_library} {input.dante_library}.reformatted
         # if the input.subclass_2_library is empty, just copy the reformatted library
         if [ ! -s {input.subclass_2_library} ]; then
