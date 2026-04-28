@@ -56,11 +56,27 @@ index_prot() {
 
 echo "tidecluster.post-deploy.sh: priming RepeatMasker library BLAST indices..."
 
-# is.lib (insertion sequences) — required even when the RepeatMasker
-# run passes -no_is; RepeatMasker::createLib still validates it.
-[[ -f "$libs_dir/general/is.lib" ]] && index_nucl "$libs_dir/general/is.lib"
+# is.lib (insertion sequences) is required by RepeatMasker::createLib
+# even when -no_is is passed, so we treat its priming as load-bearing:
+# any failure aborts the script with a non-zero exit code so the CI
+# cache is NOT saved with an unprimed env. This is what allowed the
+# April 2026 scheduled-run regression to persist — the original script
+# downgraded every makeblastdb error to a warning, so a transient
+# failure on first run got cached and re-served on every subsequent
+# run.
+if [[ -f "$libs_dir/general/is.lib" ]]; then
+  if [[ ! -e "$libs_dir/general/is.lib.nsq" && ! -e "$libs_dir/general/is.lib.nal" ]]; then
+    if ! "$makeblastdb" -in "$libs_dir/general/is.lib" -dbtype nucl -hash_index; then
+      echo "ERROR: failed to BLAST-index $libs_dir/general/is.lib — aborting." >&2
+      exit 1
+    fi
+    echo "  indexed $libs_dir/general/is.lib (nucl)"
+  fi
+fi
 
-# Any other nucleotide libs under general/
+# Any other nucleotide libs under general/ — best effort; the failure
+# of an optional library shouldn't poison the env, but we still log
+# loudly so a regression is visible in CI output.
 while IFS= read -r -d '' lib; do
   [[ "$(basename "$lib")" == "is.lib" ]] && continue
   index_nucl "$lib"
