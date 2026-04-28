@@ -6,6 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an Assembly Repeat Annotation Pipeline that uses multiple bioinformatics tools to comprehensively identify and classify repetitive elements in genomic sequences. The pipeline is implemented as a Snakemake workflow and is designed to run in a Singularity container environment.
 
+## Upstream tools reference
+
+The pipeline wraps five upstream tools built around the REXdb protein-domain
+classification: **DANTE** (domain annotation), **DANTE_LTR** (intact LTR-RTs
+from DANTE output), **DANTE_TIR** (TIR DNA transposons from DANTE TPase
+domains), **TideCluster** (tandem repeats), and **REXdb** (the reference
+database that backs all DANTE-family tools). A consolidated reference
+covering each tool's algorithm, CLI, GFF3 attributes, classification
+dialect, and the relevant results from the two foundational papers
+(Novák et al. 2024, Neumann et al. 2019) lives in
+[`context/tools_summary.md`](context/tools_summary.md). Read it before
+changing any rule that produces or consumes these tools' outputs.
+
 ## Core Pipeline Architecture
 
 The pipeline follows a multi-stage workflow:
@@ -102,12 +115,62 @@ With the hook active, `git commit` fails if a new file under a runtime-relevant 
 
 Current `%files` coverage: `envs/`, `Snakefile`, `config.yaml`, `classification_vocabulary.yaml`, `data/rdna_library.fasta`, `run_pipeline.py`, `scripts/`.
 
+### Calling helper scripts from rules
+
+Rules in the Snakefile must invoke pipeline helper scripts using the
+**dual-context PATH-prepend pattern**, so the same rule works whether
+snakemake runs from the container (PBS / HPC deployments) or directly
+from a repo checkout (CI, local development).
+
+```
+shell:
+    """
+    exec > {log.stdout} 2> {log.stderr}
+    set -euo pipefail
+    set -x
+    scripts_dir=$(realpath scripts)
+    export PATH="$scripts_dir:$PATH"
+    my_helper.py --foo {input.x}
+    """
+```
+
+Why this works in both contexts:
+
+- **Local / CI:** `realpath scripts` resolves to `<repo>/scripts/` (cwd is
+  the repo root); the prepend puts the local checkout's scripts on PATH;
+  bare-name lookup hits them.
+- **Container (`singularity run`):** the launcher cd's to `$SCRATCHDIR`,
+  which has no `scripts/` directory. `realpath scripts` returns a
+  non-existent path. The prepend is harmless — `bash` walks past the
+  missing dir and falls through to `/opt/pipeline/scripts`, already on
+  PATH from `Singularity` `%environment`. Bare-name lookup finds the
+  script there.
+
+Two anti-patterns. Both broke production runs in April 2026:
+
+- ❌ `python3 "$scripts_dir/foo.py"` — explicit path. When `scripts_dir`
+  resolves to a non-existent scratch dir (Metacentrum case), the open
+  fails. Use bare name and let PATH resolve.
+- ❌ `scripts_dir=$(realpath {workflow.basedir}/scripts)` — works today
+  because `workflow.basedir` substitutes to the Snakefile's directory in
+  both contexts, but it's a different convention from every other rule
+  in the file. A future contributor copying that idiom into a new rule
+  may pair it with the explicit-path anti-pattern and reproduce the
+  Metacentrum failure. Stay on the canonical `realpath scripts` form.
+
+For a helper script to be reachable by bare name it must (a) live under
+`scripts/`, (b) carry a `#!/usr/bin/env python3` (or `Rscript`) shebang,
+and (c) have the executable bit set. The `Singularity` `%files` copy
+preserves permissions, so `chmod +x` in the repo flows through to the
+container. New helper scripts must be `chmod +x`'d before the first
+commit.
+
 ### Classification handling
 
 - Canonical classification form is slash-separated (e.g. `Class_I/LTR/Ty1_copia/Ale`). Underscores inside a path component are always part of the name, never separators (`Ty1_copia`, `Tc1_Mariner`, `EnSpm_CACTA`, `Class_II`, `Subclass_1`).
 - `classification_vocabulary.yaml` is the single source of truth. Every valid classification is listed there, together with tool-native aliases (e.g. REXdb `Ty1/copia` → `Ty1_copia`) and the DANTE_TIR underscore-prefix → slash-prefix mapping.
 - Normalisation is centralised in `scripts/classification.py` and the R mirror `scripts/classification.R`. Both modules read the same YAML and pass the same shared test vector `tests/classification_cases.tsv`.
-- **Never sed / awk / regex-convert classifications in Snakefile or scripts.** Call `canonicalise(x, source="DANTE_TIR" | "DANTE_LTR" | "DANTE" | "RepeatMasker" | ...)` instead. Shell rules invoke the module via `python3 scripts/classification.py canonicalise-fasta-headers --source <TOOL>` (or the `canonicalise-gff3-attribute` / `validate` subcommands).
+- **Never sed / awk / regex-convert classifications in Snakefile or scripts.** Call `canonicalise(x, source="DANTE_TIR" | "DANTE_LTR" | "DANTE" | "RepeatMasker" | ...)` instead. Shell rules invoke the module via `classification.py canonicalise-fasta-headers --source <TOOL>` (or the `canonicalise-gff3-attribute` / `validate` subcommands), using the bare-name + PATH-prepend pattern from "Calling helper scripts from rules" above.
 - The `validate_classifications` Snakemake rule runs after every upstream tool produces its GFF3; it fails the pipeline before RepeatMasker / unified annotation start if any classification is not in the vocabulary. A new tool release emitting an unknown leaf fails loudly here — the fix is a one-line edit to `classification_vocabulary.yaml`.
 - Test both parsers: `python3 tests/test_classification.py && Rscript tests/test_classification.R`.
 
