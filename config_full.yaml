@@ -2,3 +2,33 @@ genome_fasta: data/CEN6_ver_220406_part.fasta
 output_dir: output
 custom_library: data/pisum_custom_library.fasta
 tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
+
+# RepeatMasker sensitivity. One of: rush, default, quick. Defaults to default.
+repeatmasker_sensitivity: default
+
+# Library size reduction (mmseqs/cap3 dedup). True or False; default True.
+reduce_library: True
+
+# DANTE_TIR_FALLBACK extension stringency (defaults: 3 / 3).
+dante_tir_fallback_min_alignments: 3
+dante_tir_fallback_min_cluster_size: 3
+
+# DANTE_TIR primary-library Multiplicity floor (default 3).
+# Drop primary elements with Multiplicity < threshold from the library.
+# They stay in DANTE_TIR_combined.gff3 and the unified annotation.
+dante_tir_min_multiplicity: 3
+
+# Optional: promote DANTE_TIR_FALLBACK reps into the RepeatMasker library
+# (default false — preserves historical behaviour). When true:
+#   * fallback survivors are re-clustered with mmseqs;
+#   * cluster reps with size >= dante_tir_fallback_library_min_multiplicity
+#     are kept (null inherits dante_tir_min_multiplicity);
+#   * a strict class-aware blastn filter (e-value 1e-19) drops any rep
+#     whose hits include a default-library subject of incompatible
+#     classification — siblings (CACTA vs hAT) count as incompatible,
+#     only same-path or ancestor/descendant pairs survive.
+# Audit log: DANTE_TIR/fallback_library_dropped.tsv.
+# The fallback library is intentionally NOT used to filter the LTR
+# library — see CLAUDE.md "DANTE_TIR Fallback Workflow" for rationale.
+include_dante_tir_fallback_in_library: false
+dante_tir_fallback_library_min_multiplicity: null

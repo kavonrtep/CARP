@@ -97,9 +97,11 @@ singularity shell -B $PWD assembly_repeat_annotation_pipeline.sif
 ### DANTE_TIR Fallback Workflow
 - `dante_tir_fallback` (`scripts/dante_tir_fallback.py`): Identifies partial TIR elements from TPase domain flanking-region analysis that the primary `dante_tir` tool may have missed
 - `merge_dante_tir_with_fallback` (`scripts/merge_tir_fallback.py`): Removes fallback elements that overlap any primary DANTE_TIR element (any coordinate overlap = discard), labels surviving elements with `source=DANTE_TIR_fallback`, `Status=partial`, and `_partial` ID suffix
-- `make_tir_combined_library`: Concatenates primary DANTE_TIR element sequences with non-overlapping fallback sequences and re-clusters everything with mmseqs2 to produce a unified representative library
-- The combined GFF3 (`DANTE_TIR_combined.gff3`) and library (`all_representative_elements_combined.fasta`) replace the original DANTE_TIR outputs in all downstream rules (unified annotation, library construction, RepeatMasker)
-- Conda environment: `dante_line.yaml` (seqkit, mmseqs2, parasail-python)
+- `make_tir_combined_library`: Builds the per-genome TIR library from **primary DANTE_TIR elements only**. Fallback elements remain visible in `DANTE_TIR_combined.gff3` (and the unified annotation) as low-confidence partials but are not trusted enough to seed RepeatMasker by default
+- `build_fallback_tir_library` (`scripts/build_fallback_tir_library.py`, **optional**, default OFF): When `include_dante_tir_fallback_in_library: true` is set in the config, re-clusters the post-overlap fallback survivors, applies a Multiplicity floor (`dante_tir_fallback_library_min_multiplicity`, defaults to inheriting `dante_tir_min_multiplicity` = 3), and runs a strict class-aware blastn filter against the union of LTR / DANTE_TIR primary / LINE / custom libraries. A fallback rep is dropped if any blast hit (e-value 1e-19) lands on a subject whose canonical classification is not on the rep's lineage chain — siblings such as CACTA-vs-hAT count as incompatible. The kept reps are appended to `combined_library.fasta`. The fallback library is intentionally NOT routed through `make_subclass_2_library` (so it does not contribute to filtering the LTR library); the policy is that the fallback layer is treated as less reliable than the primary library and a misclassified entry must not damage the LTR side of the annotation
+- The combined GFF3 (`DANTE_TIR_combined.gff3`) and library (`all_representative_elements_combined.fasta`, plus the optional `fallback_library.fasta`) feed downstream rules (unified annotation, library construction, RepeatMasker)
+- Audit log of fallback-library decisions: `DANTE_TIR/fallback_library_dropped.tsv` (rep_id, rep_class, status, conflicting_subject_id, conflicting_subject_class). Read this when chasing an annotation shift introduced by the fallback library
+- Conda environment: `dante_line.yaml` (seqkit, mmseqs2, parasail-python, blast)
 
 ### Singularity container sync
 
