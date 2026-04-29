@@ -8,4 +8,4 @@ channels:
                  # via "defaults", so container builds worked; standalone conda
                  # setups without that fallback need it listed explicitly.
 dependencies:
-  - dante_tir=0.2.4
+  - dante_tir=0.2.5
