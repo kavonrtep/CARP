@@ -85,4 +85,44 @@ done < <(find "$libs_dir/general" -maxdepth 1 -name '*.lib' -print0 2>/dev/null)
 # Protein libs: RepeatPeps.lib and any *.phr-less *.lib at the top level
 [[ -f "$libs_dir/RepeatPeps.lib" ]] && index_prot "$libs_dir/RepeatPeps.lib"
 
+# ── RepeatMasker createLib pre-warm ────────────────────────────────────
+# Indexing the bundled libraries above is necessary but NOT sufficient.
+# RepeatMasker::createLib() at runtime re-invokes makeblastdb to
+# assemble a working library from is.lib + RepeatPeps.lib + the user
+# library, with arguments different from our priming calls. That second
+# invocation is what reproducibly fails in CI with
+#   RepeatMasker::createLib(): Error invoking makeblastdb on file ...is.lib
+# even when is.lib.nsq exists.
+#
+# We exercise the exact same code path here, on a tiny dummy
+# genome+library, while we are still in post-deploy. If createLib
+# fails it fails *here*, exit 1 aborts the script, and the broken env
+# never gets cached — instead of the failure surfacing on every
+# subsequent matrix run with a swallowed makeblastdb stderr.
+rm_bin="$conda_prefix/bin/RepeatMasker"
+if [[ -x "$rm_bin" ]]; then
+  echo "tidecluster.post-deploy.sh: pre-warming RepeatMasker createLib..."
+  warmup="$(mktemp -d)"
+  cat > "$warmup/genome.fa" <<'WARMUP_GENOME'
+>warmup
+ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
+ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
+ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
+ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
+ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
+WARMUP_GENOME
+  cat > "$warmup/lib.fa" <<'WARMUP_LIB'
+>warmup_family#Unknown
+ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT
+WARMUP_LIB
+  if ! ( cd "$warmup" && "$rm_bin" -lib lib.fa -dir . -nolow genome.fa ) > "$warmup/rm.log" 2>&1; then
+    echo "ERROR: RepeatMasker createLib pre-warm failed. Tail of log:" >&2
+    tail -50 "$warmup/rm.log" >&2
+    rm -rf "$warmup"
+    exit 1
+  fi
+  rm -rf "$warmup"
+  echo "  pre-warmed RepeatMasker createLib"
+fi
+
 echo "tidecluster.post-deploy.sh: done"
