@@ -19,7 +19,8 @@ BENCHMARKED_RULES = [
     "merge_dante_tir_with_fallback", "make_tir_combined_library", "filter_dante",
     "dante_line", "dante_ltr", "make_library_of_ltrs",
     "tidecluster_long", "tidecluster_short", "tidecluster_reannotate",
-    "merge_tidecluster_default_and_short", "make_subclass_2_library",
+    "merge_tidecluster_default_and_short", "build_fallback_tir_library",
+    "make_subclass_2_library",
     "filter_ltr_rt_library", "concatenate_libraries", "reduce_library",
     "repeatmasker", "subtract_satellites_from_rm", "merge_rm_and_dante",
     "make_track_for_masking", "make_track_for_Ns",
@@ -90,6 +91,35 @@ if "dante_tir_min_multiplicity" not in config:
     config["dante_tir_min_multiplicity"] = 3
 if not isinstance(config["dante_tir_min_multiplicity"], int) or config["dante_tir_min_multiplicity"] < 1:
     raise ValueError("Invalid value for dante_tir_min_multiplicity: must be a positive integer.")
+
+# Optional inclusion of DANTE_TIR_FALLBACK reps in the RepeatMasker
+# library. Default OFF to preserve previous behaviour byte-for-byte.
+# When ON, build_fallback_tir_library re-clusters fallback survivors,
+# applies a Multiplicity floor, and drops any rep whose blast hits
+# include a default-library entry of an incompatible classification
+# (strict path-prefix: same path or one ancestor of the other; siblings
+# like CACTA-vs-hAT count as incompatible). The fallback library is
+# *not* used to filter the LTR library — it is treated as less
+# reliable than the primary library on purpose.
+if "include_dante_tir_fallback_in_library" not in config:
+    config["include_dante_tir_fallback_in_library"] = False
+if not isinstance(config["include_dante_tir_fallback_in_library"], bool):
+    raise ValueError(
+        "Invalid value for include_dante_tir_fallback_in_library: "
+        "must be a boolean."
+    )
+
+# Multiplicity floor for fallback reps. None inherits
+# dante_tir_min_multiplicity so the user-facing default matches the
+# primary library exactly (3 unless overridden).
+if "dante_tir_fallback_library_min_multiplicity" not in config:
+    config["dante_tir_fallback_library_min_multiplicity"] = None
+_v = config["dante_tir_fallback_library_min_multiplicity"]
+if _v is not None and (not isinstance(_v, int) or _v < 1):
+    raise ValueError(
+        "Invalid value for dante_tir_fallback_library_min_multiplicity: "
+        "must be null or a positive integer."
+    )
 
 
 # Define path to cleaned genome (will be created by clean_genome_fasta rule)
@@ -843,6 +873,101 @@ rule merge_tidecluster_default_and_short:
         """
 
 
+rule build_fallback_tir_library:
+    """
+    Build the optional DANTE_TIR_FALLBACK-derived library.
+
+    Default OFF (include_dante_tir_fallback_in_library=false): emits an
+    empty FASTA so concatenate_libraries can append unconditionally and
+    behaviour is byte-identical to a pre-flag run.
+
+    When ON, the helper script:
+
+      1. Re-clusters the post-overlap fallback survivors with mmseqs2.
+         Re-clustering is essential because the cluster sizes recorded
+         earlier in dante_tir_fallback.py predate the primary-overlap
+         filter (some members have since been dropped).
+      2. Keeps cluster reps with size >= the configured Multiplicity
+         floor (dante_tir_fallback_library_min_multiplicity, default
+         inherits from dante_tir_min_multiplicity = 3).
+      3. Canonicalises the default-library headers (LTR / DANTE_TIR
+         primary / LINE / optional custom) and concatenates them into a
+         BLAST DB.
+      4. blastn the surviving reps against that DB
+         (-evalue 1e-19, -max_target_seqs 10 — same stringency as
+         filter_ltr_rt_library).
+      5. Strict class-aware filter: drop any rep whose hits include a
+         subject of incompatible classification (siblings like CACTA
+         vs hAT count as incompatible — only same-path or
+         ancestor/descendant pairs are kept).
+
+    Audit log (fallback_library_dropped.tsv) records one row per kept
+    rep and one row per (dropped rep × conflicting subject) pair.
+
+    The fallback library is intentionally NOT fed into
+    make_subclass_2_library. The DANTE_TIR_FALLBACK layer is treated
+    as less reliable than the primary library, so it must not be used
+    to filter the LTR library — a misclassified fallback would
+    disproportionately damage the LTR side of the annotation.
+    """
+    input:
+        fallback_fasta=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_fallback_filtered.fasta",
+        ltr_lib=F"{config['output_dir']}/DANTE_LTR/LTR_RTs_library.fasta",
+        tir_primary_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_combined.fasta",
+        line_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta"
+    output:
+        library=F"{config['output_dir']}/DANTE_TIR/fallback_library.fasta",
+        dropped_tsv=F"{config['output_dir']}/DANTE_TIR/fallback_library_dropped.tsv"
+    params:
+        enabled=config["include_dante_tir_fallback_in_library"],
+        min_multiplicity=(
+            config["dante_tir_fallback_library_min_multiplicity"]
+            if config["dante_tir_fallback_library_min_multiplicity"] is not None
+            else config["dante_tir_min_multiplicity"]
+        ),
+        custom_library=config.get("custom_library", ""),
+        workdir=F"{config['output_dir']}/DANTE_TIR/fallback_library_workdir"
+    log:
+        stdout=F"{config['output_dir']}/DANTE_TIR/build_fallback_tir_library.log",
+        stderr=F"{config['output_dir']}/DANTE_TIR/build_fallback_tir_library.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/build_fallback_tir_library.tsv"
+    conda:
+        "envs/dante_line.yaml"
+    threads: workflow.cores
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+
+        scripts_dir=$(realpath scripts)
+        export PATH="$scripts_dir:$PATH"
+
+        ENABLED_FLAG=""
+        if [ "{params.enabled}" = "True" ]; then
+            ENABLED_FLAG="--enabled"
+        fi
+
+        CUSTOM_FLAG=""
+        if [ -n "{params.custom_library}" ] && [ -s "{params.custom_library}" ]; then
+            CUSTOM_FLAG="--custom-library {params.custom_library}"
+        fi
+
+        build_fallback_tir_library.py \
+            $ENABLED_FLAG \
+            --fallback-fasta {input.fallback_fasta} \
+            --ltr-library {input.ltr_lib} \
+            --tir-primary-library {input.tir_primary_lib} \
+            --line-library {input.line_lib} \
+            $CUSTOM_FLAG \
+            --workdir {params.workdir} \
+            --min-multiplicity {params.min_multiplicity} \
+            --threads {threads} \
+            --output-fasta {output.library} \
+            --output-dropped-tsv {output.dropped_tsv}
+        """
+
 
 rule make_subclass_2_library:
     params:
@@ -925,6 +1050,10 @@ rule concatenate_libraries:
         ltr_rt_library=F"{config['output_dir']}/Libraries/LTR_RTs_library_clean.fasta",
         dante_tir_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_combined.fasta",
         line_rep_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta",
+        # Optional DANTE_TIR_FALLBACK library. Empty when the
+        # include_dante_tir_fallback_in_library flag is off, in which
+        # case the append below is a no-op.
+        fallback_tir_lib=F"{config['output_dir']}/DANTE_TIR/fallback_library.fasta",
         # Barrier: don't build the combined library (or run the expensive
         # RepeatMasker that depends on it) until every upstream tool's
         # classifications are known to resolve against the vocabulary.
@@ -954,6 +1083,11 @@ rule concatenate_libraries:
         # Append DANTE_TIR library if not empty
         if [ -s {input.dante_tir_lib} ]; then
             cat {input.dante_tir_lib} >> {output.full_names}
+        fi
+        # Append DANTE_TIR_FALLBACK-derived library if not empty.
+        # Empty when include_dante_tir_fallback_in_library is off.
+        if [ -s {input.fallback_tir_lib} ]; then
+            cat {input.fallback_tir_lib} >> {output.full_names}
         fi
         # Append LINE library if not empty
         if [ -s {input.line_rep_lib} ]; then

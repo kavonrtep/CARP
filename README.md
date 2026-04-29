@@ -45,7 +45,17 @@ tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
 # if missing, default is used
 repeatmasker_sensitivity: default
 # perform library size reduction, possible values are True, False, if missinf True is used
-reduce_library: True  
+reduce_library: True
+# Optional: include DANTE_TIR_FALLBACK reps in the RepeatMasker library
+# (default: false). When true, fallback survivors are re-clustered, a
+# Multiplicity floor is applied (inherits dante_tir_min_multiplicity by
+# default), and a strict class-aware blastn filter against the LTR /
+# DANTE_TIR primary / LINE / custom libraries drops any rep whose hits
+# include a subject of incompatible classification (siblings such as
+# CACTA-vs-hAT count as incompatible). Audit log is written to
+# DANTE_TIR/fallback_library_dropped.tsv. See config_full.yaml for the
+# full set of knobs.
+include_dante_tir_fallback_in_library: false
 ```
 
 The pipeline allows providing the custom repeat library by specifying
@@ -209,10 +219,14 @@ HTML reports:
 - `library/` - Detailed clustering and library construction results
 
 **DANTE_TIR/** - DNA transposon with TIR detection
-- `DANTE_TIR_final.gff3` - Final TIR transposon annotations
-- `DANTE_TIR_final.fasta` - TIR transposon sequences
+- `DANTE_TIR_final.gff3` - Final TIR transposon annotations (primary only)
+- `DANTE_TIR_final.fasta` - Primary TIR transposon sequences
+- `DANTE_TIR_combined.gff3` - Primary + non-overlapping fallback (top-level `DANTE_TIR.gff3` symlinks here)
+- `DANTE_TIR_fallback_filtered.fasta` - Non-overlapping fallback element sequences
 - `TIR_classification_summary.txt` - Classification statistics
-- `all_representative_elements_min3.fasta` - Representative TIR elements library
+- `all_representative_elements_combined.fasta` - Primary-only library used by RepeatMasker (post-clustering, post-Multiplicity-filter)
+- `fallback_library.fasta` - Optional fallback-derived library (empty unless `include_dante_tir_fallback_in_library: true`); kept reps appended to `Libraries/combined_library.fasta`
+- `fallback_library_dropped.tsv` - Audit log: every fallback cluster rep with status (`kept`/`dropped`) and the conflicting subject(s) when class-aware blastn filter rejected it
 
 **DANTE_LINE/** - LINE element detection - this is experimental and may not work well for all genomes
 - `DANTE_LINE.gff3` - LINE element annotations
@@ -236,11 +250,11 @@ HTML reports:
 - `TideCluster_clustering_default_and_short_merged.gff3` - Merged results from both runs
 
 **Libraries/** - Custom repeat libraries
-- `combined_library.fasta` - Full library with complete names
+- `combined_library.fasta` - Full library with complete names. Composition: `LTR_RTs_library_clean.fasta` + (custom library if any) + `all_representative_elements_combined.fasta` (primary TIR) + `fallback_library.fasta` (only when `include_dante_tir_fallback_in_library: true`) + `LINE_rep_lib.fasta` + rDNA library
 - `combined_library_short_names.fasta` - Library with shortened IDs
 - `combined_library_reduced.fasta` - Size-reduced library (if `reduce_library: True`)
-- `LTR_RTs_library_clean.fasta` - LTR library filtered for Class_II contamination
-- `class_ii_library.fasta` - Class_II/Subclass_1 elements for filtering
+- `LTR_RTs_library_clean.fasta` - LTR library filtered for Class_II contamination. The fallback library is intentionally NOT used as a filter input — see CLAUDE.md "DANTE_TIR Fallback Workflow" for rationale
+- `class_ii_library.fasta` - Class_II/Subclass_1 elements for filtering (primary TIR + custom Class_II only; fallback excluded by design)
 
 **RepeatMasker/** - Similarity-based annotation
 - `RM_on_combined_library.out` - RepeatMasker standard output

@@ -24,3 +24,23 @@ dante_tir_fallback_min_cluster_size: 3
 # only — they remain visible in DANTE_TIR_combined.gff3 and the unified
 # annotation. Lower to 1 to disable the filter.
 dante_tir_min_multiplicity: 3
+
+# Optional inclusion of DANTE_TIR_FALLBACK reps in the RepeatMasker
+# library. Default false to preserve historical behaviour byte-for-byte.
+# When true, build_fallback_tir_library re-clusters the post-overlap
+# fallback survivors, applies a Multiplicity floor, and runs a strict
+# class-aware blastn filter against the LTR / DANTE_TIR primary / LINE
+# / custom libraries. A fallback rep is dropped if any blast hit lands
+# on a subject of incompatible classification — a CACTA fallback hit
+# on an LTR-Copia or even a sibling hAT primary is dropped, only
+# same-path / ancestor / descendant matches are kept. The kept reps
+# are appended to combined_library.fasta. Audit log of all decisions
+# is written to DANTE_TIR/fallback_library_dropped.tsv.
+# The fallback library is intentionally NOT used to filter the LTR
+# library (the fallback layer is treated as less reliable than the
+# primary layer; a misclassified fallback must not damage the LTR
+# annotation).
+include_dante_tir_fallback_in_library: false
+# Multiplicity floor applied to fallback cluster sizes when the flag
+# above is true. Leave null to inherit dante_tir_min_multiplicity (3).
+dante_tir_fallback_library_min_multiplicity: null

@@ -6,4 +6,5 @@ dependencies:
   - seqkit
   - parasail-python
   - mmseqs2
+  - blast
   - pyyaml
