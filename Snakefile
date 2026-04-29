@@ -1323,9 +1323,33 @@ rule make_track_for_Ns:
         """
 
 rule make_summary_statistics_and_split_by_class:
+    """
+    Compute summary_statistics.csv and the per-class split GFFs from
+    Repeat_Annotation_Unified.gff3.
+
+    Switched from Repeat_Annotation_NoSat.gff3 (RepeatMasker-only) to
+    the Unified annotation so DANTE-direct calls — DANTE_LTR /
+    DANTE_TIR (incl. fallback partials) / DANTE_LINE structural hits
+    that have no matching RepeatMasker call — count toward genome-wide
+    totals. Unified is non-overlapping by construction (tier-priority
+    resolves multi-source overlaps to one label per bp), so the bp
+    totals do not need additional dedup here.
+
+    No separate satellite subtraction: TideCluster wins tier-priority
+    in Unified wherever it has a structural call, so the LTR-RT-library
+    misannotation that originally motivated subtract_satellites_from_rm
+    cannot bleed into Unified. The R splitter collapses TC TRC_*,
+    RM Satellite/*, and TideHunter-named records into a single
+    `Tandem_repeats` aggregation row.
+
+    The output directory keeps its historical name
+    `Repeat_Annotation_NoSat_split_by_class_gff3/` so downstream
+    consumers and existing user scripts that hard-code the path
+    continue to work — the contained GFFs are now sourced from
+    Unified, but the directory layout is unchanged.
+    """
     input:
-        rm=F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
-        sat_tc=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
+        unified=F"{config['output_dir']}/Repeat_Annotation_Unified.gff3",
         genome_fasta=genome_fasta_cleaned
     output:
         csv=F"{config['output_dir']}/summary_statistics.csv",
@@ -1350,7 +1374,7 @@ rule make_summary_statistics_and_split_by_class:
         set -x
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        calculate_statistics_and_make_groups.R -r {input.rm} -s {input.sat_tc} -o {output.csv} -g {input.genome_fasta} -d {output.dir} \
+        calculate_statistics_and_make_groups.R -r {input.unified} -o {output.csv} -g {input.genome_fasta} -d {output.dir} \
         -M {output.mobile_elements} -S {output.simple_repeats} -L {output.low_complexity} -R {output.rdna} -C {output.all_copia} -G {output.all_gypsy}
         """
 
