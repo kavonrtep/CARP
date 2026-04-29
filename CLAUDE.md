@@ -185,7 +185,9 @@ commit.
 - Main outputs organized in subdirectories: `DANTE/`, `DANTE_TIR/`, `DANTE_TIR_FALLBACK/`, `DANTE_LTR/`, `TideCluster/`, `Libraries/`, `RepeatMasker/`
 - Top-level symlinks created for easy access to key results (including `DANTE_TIR.gff3` → `DANTE_TIR_combined.gff3`)
 - BigWig density tracks generated at 10kb and 100kb windows
-- Classification splits: Mobile_elements, Simple_repeats, Low_complexity, rDNA, etc.
+- Classification splits: Mobile_elements, Simple_repeats, Tandem_repeats, Low_complexity, rDNA, etc.
+- `summary_statistics.csv` and the per-class split GFFs in `Repeat_Annotation_NoSat_split_by_class_gff3/` are computed from `Repeat_Annotation_Unified.gff3` (not `Repeat_Annotation_NoSat.gff3`). Unified is non-overlapping by tier-priority, so DANTE-direct calls outside any RepeatMasker hit count toward the user-visible totals. The directory name keeps the historical `_NoSat_` prefix for backward compat
+- The `Tandem_repeats` aggregation row replaces the older `Satellites` row; it spans TideCluster default + short clusters, TideHunter short tandems, and any RepeatMasker `Satellite/*` calls. Defined in `classification_vocabulary.yaml::aggregation_buckets`
 
 ### Parallel Processing Strategy
 - TideCluster runs with default and short monomer parameters separately then merges

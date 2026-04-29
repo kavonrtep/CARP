@@ -4,8 +4,8 @@ library(optparse)
 # get input arguments
 
 option_list <- list(
-  make_option(c("-r", "--rm"), type="character", default=NULL, help="repeats_NoSat GFF3"),
-  make_option(c("-s", "--sat"), type="character", default=NULL, help="repeats_Sat GFF3"),
+  make_option(c("-r", "--rm"), type="character", default=NULL,
+              help="Repeat_Annotation_Unified GFF3 (non-overlapping by tier-priority)"),
   make_option(c("-g", "--genome"), type="character", default=NULL, help="Genome FASTA"),
   make_option(c("-o", "--output"), type="character", default=NULL, help="Output csv table"),
   make_option(c("-d", "--dir"), type="character", default="repeats", help="Output directory"),
@@ -27,17 +27,34 @@ suppressPackageStartupMessages({
 
 g <- readDNAStringSet(opt$genome)
 rm <- import(opt$rm)
-sat <- import(opt$sat)
 
 
 genome_size <- sum(width(g))
-# calculate size of intervals, split by Name attribute
+
+# Collapse all tandem-repeat / satellite Names into a single
+# `Tandem_repeats` aggregation bucket. The Unified annotation carries
+# them under three Name patterns:
+#   * TRC_<n>          — TideCluster default / short clusters
+#   * Satellite/...    — RepeatMasker Satellite hits (from TideCluster
+#                        library + any RM-bundled satellite class)
+#   * Satellite        — RepeatMasker Satellite/Unknown fallback
+# We merge them here so summary_statistics.csv shows a single row
+# `Tandem_repeats` instead of one row per TRC_*. The split dir then
+# emits a single Tandem_repeats.gff3 file containing the union.
+TR <- grepl("^TRC_", rm$Name) | grepl("^Satellite", rm$Name)
+if (any(TR)){
+  rm$Name[TR] <- "Tandem_repeats"
+}
+
+# Collapse the per-monomer RepeatMasker Simple_repeat(NNN)n leaves
+# into one Simple_repeat row. Pre-dates the Unified switch; left in
+# place because Simple_repeat is its own biology (short SSRs) and
+# stays a separate row from Tandem_repeats per the v0.x design.
 SR <- grepl("Simple_repeat", rm$Name)
 if (any(SR)){
   rm$Name[SR] <- "Simple_repeat"
 }
 group_size <- sapply(split(rm, ~Name), function(x)sum(width(x)))
-group_size <- c(group_size, Satellites=sum(width(sat)))
 
 
 group_perc <- group_size/genome_size*100

@@ -165,7 +165,7 @@ build_sunburst_data <- function(comp) {
   pal <- c(
     "Class_I"       = "#4575b4",
     "Class_II"      = "#d73027",
-    "Satellites"    = "#1a9850",
+    "Tandem_repeats" = "#1a9850",
     "Simple_repeat" = "#878787",
     "Low_complexity"= "#bdbdbd",
     "rDNA"          = "#762a83",
@@ -552,7 +552,7 @@ build_satellite_coverage <- function(tc_cluster_files, seqnames, seq_lengths_vec
 J <- function(x) toJSON(x, auto_unbox = TRUE, null = "null")
 
 TRACK_COLORS <- c(
-  "Satellites"      = "#1a9850",
+  "Tandem_repeats"  = "#1a9850",
   "Ty1/copia"       = "#4575b4",
   "Ty3/gypsy"       = "#313695",
   "LINE"            = "#74add1",
@@ -1147,7 +1147,7 @@ h3{color:#34495e;font-size:0.95em;margin:14px 0 8px}
     <a href="#s2">Composition</a>
     <a href="#s3">Structure-based</a>
     <a href="#s4">Genomic distribution</a>
-    <a href="#s5">Satellites</a>
+    <a href="#s5">Tandem repeats</a>
     <a href="#s6">Reports</a>
   </nav>
 </div>
@@ -1213,7 +1213,7 @@ are concentrated on specific chromosomes.</p>
 
 <!-- SECTION 5: SATELLITES -->
 <section id="s5">
-<h2>Tandem Repeats / Satellites (TideCluster)</h2>
+<h2>Tandem repeats (TideCluster)</h2>
 <div class="two-col">
   <div>
     <h3>Top satellite clusters</h3>
@@ -1302,7 +1302,7 @@ main <- function() {
   tir_files <- tir_files[file.exists(tir_files)]
 
   bar_bw_map <- list(
-    "Satellites"      = bw_files$tc_agg,
+    "Tandem_repeats"  = bw_files$tc_agg,
     "Ty1/copia"       = find_bw("All_Ty1_Copia"),
     "Ty3/gypsy"       = find_bw("All_Ty3_Gypsy"),
     "LINE"            = find_bw("Class_I.LINE"),
@@ -1349,7 +1349,7 @@ main <- function() {
     "rDNA"            = find_100k("rDNA"),
     "Ty1/copia"       = find_100k("All_Ty1_Copia"),
     "Ty3/gypsy"       = find_100k("All_Ty3_Gypsy"),
-    "Satellites"      = if (file.exists(tc_agg_100k)) tc_agg_100k else NULL
+    "Tandem_repeats"  = if (file.exists(tc_agg_100k)) tc_agg_100k else NULL
   ))
 
   # Panel 2 — LTR lineages (matches page 2)

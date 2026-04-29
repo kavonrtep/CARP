@@ -260,16 +260,20 @@ HTML reports:
 - `RM_on_combined_library.out` - RepeatMasker standard output
 - `RM_on_combined_library.gff3` - RepeatMasker annotations in GFF3
 - `RM_on_combined_library_plus_DANTE.gff3` - Merged RepeatMasker and DANTE annotations
-- `Repeat_Annotation_NoSat.gff3` - Final annotation excluding tandem repeats
+- `Repeat_Annotation_NoSat.gff3` - RepeatMasker annotation excluding tandem repeats. Used for the masking BED and the visualisation tracks below; **not** the source of `summary_statistics.csv` (see next paragraph)
 - `Repeat_Annotation_NoSat_10k.bw` and `Repeat_Annotation_NoSat_100k.bw` - Density tracks
 
 **Repeat_Annotation_NoSat_split_by_class_gff3/** - Classification-specific annotations
 - Individual GFF3 files for each major repeat class
 - Used for generating class-specific density tracks
+- Despite the directory name (kept for backward compatibility with consumers that hard-coded the path), the contained GFFs are now derived from `Repeat_Annotation_Unified.gff3`, so DANTE-direct calls participate in the per-class totals
+- A `Tandem_repeats.gff3` here aggregates TideCluster default + short clusters, TideHunter short tandems, and any RepeatMasker `Satellite/*` calls
 
 **Repeat_Annotation_NoSat_split_by_class_bigwig/** - Density visualizations
 - BigWig files for each repeat class at 10kb and 100kb windows
 - Suitable for genome browsers (IGV, UCSC, JBrowse)
+
+`summary_statistics.csv` is computed from `Repeat_Annotation_Unified.gff3`. Beginning with this release, the historical `Satellites` row is replaced by `Tandem_repeats` (covers TideCluster + TideHunter + RepeatMasker `Satellite/*` calls); per-class numbers also rise to reflect DANTE-direct annotations that previously went unreported.
 
 ## Build the container
 

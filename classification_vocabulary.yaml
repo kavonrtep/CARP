@@ -185,8 +185,9 @@ special_classes:
 # These labels appear in summary_statistics.csv, split-by-class GFF3
 # filenames, and density-track outputs. They are NOT feature classifications;
 # they are groupings computed by pipeline scripts. Kept here so reporting
-# code has a canonical reference (and so Satellites/Satellite cannot be
-# confused — note the plural form).
+# code has a canonical reference (and so Tandem_repeats/Satellite cannot
+# be confused — Tandem_repeats is the bucket; Satellite is a RepeatMasker
+# leaf class).
 # ---------------------------------------------------------------------------
 aggregation_buckets:
   Mobile_elements:
@@ -195,8 +196,14 @@ aggregation_buckets:
   Simple_repeats:
     description: Plural form used in top-level symlink; same features as Simple_repeat leaf
     produced_by: Snakefile symlinking rule
-  Satellites:
-    description: Union of TideCluster tandem-repeat calls (final annotated set)
+  Tandem_repeats:
+    description: >-
+      Union of every tandem-repeat / satellite call surviving the
+      Repeat_Annotation_Unified tier resolution — TideCluster default
+      clusters (TRC_*), TideCluster short-monomer clusters,
+      TideHunter short tandems, and any RepeatMasker Satellite/* leaf.
+      Replaces the historical "Satellites" bucket (which counted only
+      TideCluster default).
     produced_by: calculate_statistics_and_make_groups.R
     distinct_from: Satellite   # RepeatMasker leaf class, much smaller
   All_Ty1_Copia:
