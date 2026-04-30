@@ -26,9 +26,13 @@ This Python rewrite:
 * Uses ``multiprocessing`` with ``spawn`` start method — each worker
   is a fresh ~30 MB Python process with no inherited heap. No COW
   over-counting in benchmark output.
-* Adds two-pass scheduling: large LTR classes go through CAP3
-  sequentially in Phase 1 (caps peak at 1× CAP3 working set); small
-  classes (CAP3 or mmseqs2) run in parallel in Phase 2.
+* Two-pass scheduling sized for mmseqs2's memory floor. mmseqs2 has
+  a hard ~8 GB nucleotide RSS floor regardless of input size (auto-k
+  ≥ 17 in linclust, ``alphabet^k * sizeof(size_t)`` prefilter index);
+  running four in parallel was the documented OOM cause on 16 GB GHA
+  runners. Phase 1 therefore runs **all mmseqs2 jobs sequentially**
+  with the full CPU budget passed via ``--threads``, plus any big LTR
+  CAP3 jobs. Phase 2 runs only the small CAP3 jobs in parallel.
 * Keeps the CAP3 / mmseqs2 / blastn invocations character-for-character
   identical to the R script — same args, same input bytes, same
   output bytes. The only difference between the two implementations is
@@ -62,7 +66,6 @@ from typing import Iterable, Iterator
 # ──────────────────────────────────────────────────────────────────────────
 FASTA_LINE_WIDTH = 80                     # Biostrings writeXStringSet default
 CAP3_ARGS = ("-p", "80", "-o", "50")      # identical to R: cap3 input -p 80 -o 50
-MMSEQS_THREADS = "1"                       # R passes --threads 1 to easy-cluster
 BLASTN_ARGS = (
     "-task", "blastn",
     "-outfmt",
@@ -171,6 +174,10 @@ class ClassJob:
     aln_file: str = ""          # CAP3 only
     mmseqs_rep_file: str = ""   # mmseqs only
     singlets_final_file: str = ""   # set by Phase 3 BLAST filter (or = singlet_file)
+    # Scheduling:
+    mmseqs_threads: int = 1     # --threads passed to easy-cluster; raised when
+                                # mmseqs2 jobs run sequentially (then each job
+                                # gets the full CPU budget)
 
 
 def stream_split_by_class(input_path: Path, workdir: Path) -> list[ClassJob]:
@@ -259,7 +266,17 @@ def _run_cap3(job: ClassJob) -> ClassJob:
 
 
 def _run_mmseqs(job: ClassJob) -> ClassJob:
-    """Execute ``mmseqs easy-cluster --threads 1`` for one class."""
+    """Execute ``mmseqs easy-cluster --threads N`` for one class.
+
+    Memory note: mmseqs2 has a hard ~8 GB physical-memory floor on
+    nucleotide inputs of any size — driven by the linclust kmer-table
+    auto-k floor of 17 (``src/linclust/kmermatcher.cpp:1971``) and the
+    prefilter index allocation of ``alphabet^k * sizeof(size_t)``. We
+    cannot reduce this per-call. Instead we sequentialise mmseqs2 calls
+    (Phase 1) and give each one the full thread budget — peak memory
+    stays at one mmseqs2 working set rather than ``threads`` of them in
+    parallel, which is what was OOM-ing the 16 GB GHA runner.
+    """
     mmseqs_prefix = os.path.join(job.workdir, "mmseqs_cluster")
     mmseqs_tmp = os.path.join(job.workdir, "mmseqs_tmp")
     mmseqs_log = os.path.join(job.workdir, "mmseqs.log")
@@ -278,7 +295,7 @@ def _run_mmseqs(job: ClassJob) -> ClassJob:
     cmd = [
         "mmseqs", "easy-cluster",
         job.fasta_path, mmseqs_prefix, mmseqs_tmp,
-        "--threads", MMSEQS_THREADS,
+        "--threads", str(max(1, job.mmseqs_threads)),
     ]
     with open(mmseqs_log, "w") as log:
         rc = subprocess.run(cmd, stdout=log, stderr=log).returncode
@@ -504,8 +521,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("-o", "--output", required=True, type=Path,
                     help="Output reduced library FASTA.")
     ap.add_argument("-t", "--threads", type=int, default=4,
-                    help="Worker count for the small-class phase (default 4). "
-                         "Phase 1 (big CAP3 classes) always uses 1 worker.")
+                    help="Total CPU budget. Phase 1 (mmseqs2 + big CAP3) "
+                         "runs sequentially and passes this many threads "
+                         "to each mmseqs2 invocation. Phase 2 (small CAP3) "
+                         "runs this many CAP3 workers in parallel "
+                         "(default 4).")
     ap.add_argument("-d", "--directory", type=Path, default=None,
                     help="Working directory for per-class staging "
                          "(default: tempfile.mkdtemp()).")
@@ -524,15 +544,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _phase_partition(jobs: list[ClassJob], max_parallel_bp: int
                      ) -> tuple[list[ClassJob], list[ClassJob]]:
-    """Split jobs into (big CAP3, everything else).
+    """Split jobs into (memory-heavy, parallel-safe).
 
-    A job is "big" iff it triggers the CAP3 branch AND its input
-    library exceeds the threshold. Such jobs go through Phase 1 one
-    at a time. Everything else (small CAP3 + all mmseqs2) runs in
-    parallel in Phase 2.
+    Phase 1 (sequential) holds the memory-heavy jobs:
+      * all mmseqs2 jobs — mmseqs2 has a ~8 GB nucleotide memory
+        floor regardless of input size; running four in parallel was
+        the documented OOM cause on 16 GB GHA runners,
+      * big CAP3 jobs — input library at least ``max_parallel_bp``.
+
+    Phase 2 (parallel) gets only the small CAP3 jobs. CAP3's working
+    set on a small class is a few megabytes, so 4× parallelism is
+    free. mmseqs2 is never run in parallel.
     """
     big = [j for j in jobs
-           if _should_use_cap3(j.class_name) and j.size_bp >= max_parallel_bp]
+           if (not _should_use_cap3(j.class_name))
+           or (_should_use_cap3(j.class_name) and j.size_bp >= max_parallel_bp)]
     small = [j for j in jobs if j not in big]
     return big, small
 
@@ -589,17 +615,25 @@ def main(argv: list[str] | None = None) -> int:
             f"({j.size_bp} bp, {'CAP3' if _should_use_cap3(j.class_name) else 'mmseqs2'})\n"
         )
 
-    # Phase split: big CAP3 vs everything else
+    # Hand the full CPU budget to each mmseqs2 invocation. Because
+    # mmseqs2 jobs are sequentialised in Phase 1, this never produces
+    # over-subscription; total mmseqs2 RSS stays at one process worth
+    # (~8 GB on small inputs) instead of threads× that.
+    for j in jobs:
+        if not _should_use_cap3(j.class_name):
+            j.mmseqs_threads = args.threads
+
+    # Phase split: memory-heavy (mmseqs2 + big CAP3) vs small CAP3
     big_jobs, small_jobs = _phase_partition(jobs, args.max_parallel_bp)
 
-    # Phase 1: big CAP3 classes, sequential
+    # Phase 1: memory-heavy classes, sequential
     big_done = _run_phase(big_jobs, threads=1,
                           start_method=args.start_method,
-                          label="phase 1 (big CAP3, sequential)")
-    # Phase 2: small remainder, parallel
+                          label="phase 1 (mmseqs2 + big CAP3, sequential)")
+    # Phase 2: small CAP3 remainder, parallel
     small_done = _run_phase(small_jobs, threads=args.threads,
                             start_method=args.start_method,
-                            label="phase 2 (small classes, parallel)")
+                            label="phase 2 (small CAP3, parallel)")
 
     # Reassemble in original (alphabetical, 1-based) class order so
     # downstream BLAST + assembly see the same ordering as R's

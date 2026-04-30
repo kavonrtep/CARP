@@ -27,8 +27,8 @@ Keep the module minimal — no heavy imports at module level — so reading
 the version stays cheap.
 """
 
-__version__ = "0.9.0rc2"
-__version_info__ = (0, 9, 0, "rc2")
+__version__ = "0.9.0rc3"
+__version_info__ = (0, 9, 0, "rc3")
 
 
 def parse_version(s):
