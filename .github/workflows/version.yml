@@ -21,7 +21,10 @@ name: version
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    # Project convention: unprefixed PEP 440 tags (0.9.0rc1, 1.0.0, …)
+    # — matches release.yml. Don't accept a leading 'v' to keep the
+    # convention enforced.
+    tags: ['[0-9]*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -68,17 +71,17 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       # ── 2. Tag-match ───────────────────────────────────────────────
-      # Runs only on tag pushes (refs/tags/v*). Tag must equal "v" + the
-      # value in version.py exactly. Examples:
-      #   tag v0.9.0rc1  ↔  __version__ = "0.9.0rc1"   ✓
-      #   tag v0.9.0     ↔  __version__ = "0.9.0rc1"   ✗  (mismatch)
+      # Runs only on tag pushes. Tag must equal version.py exactly
+      # (project uses unprefixed PEP 440 tags — no leading 'v'):
+      #   tag 0.9.0rc1   ↔  __version__ = "0.9.0rc1"   ✓
+      #   tag 0.9.0      ↔  __version__ = "0.9.0rc1"   ✗  (mismatch)
       - name: Tag-match check
         if: startsWith(github.ref, 'refs/tags/')
         env:
           PY_VERSION: ${{ steps.parse.outputs.version }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          expected="v${PY_VERSION}"
+          expected="${PY_VERSION}"
           if [ "$tag" != "$expected" ]; then
             echo "::error::tag '$tag' does not match version.py (expected '$expected')"
             echo ""
