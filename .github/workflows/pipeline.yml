@@ -16,6 +16,33 @@ concurrency:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────
+  # 0. Cheap version-gate. Duplicates .github/workflows/version.yml's
+  # parse step so this workflow is self-contained — same pattern release.yml
+  # uses for unit tests. A broken version.py blocks the expensive matrix
+  # runs in front of the conda-env build.
+  # ─────────────────────────────────────────────────────────────────────
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Parse version.py
+        run: |
+          v=$(python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from version import __version__, parse_version
+          parse_version(__version__)
+          print(__version__)
+          ")
+          echo "Pipeline version: $v"
+
+  # ─────────────────────────────────────────────────────────────────────
   # 1. Build all per-rule conda envs ONCE and populate the cache. Later
   # matrix runs restore this cache (read-only). Without this split, every
   # matrix cell solves all envs in parallel and exhausts the 60-min
@@ -23,6 +50,7 @@ jobs:
   # pipeline on 2 vCPU = timeout).
   # ─────────────────────────────────────────────────────────────────────
   envs:
+    needs: version
     runs-on: ubuntu-latest
     timeout-minutes: 90
     defaults:
