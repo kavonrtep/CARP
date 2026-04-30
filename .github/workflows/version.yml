@@ -1,0 +1,131 @@
+name: version
+
+# Cheap gate — runs on every push and PR to main, plus on tag pushes.
+# Three checks, all cheap (no conda envs, no fixture runs):
+#
+#   1. parse:     version.py imports cleanly and the string matches the
+#                 project's PEP 440 lite shape (MAJOR.MINOR.PATCH with
+#                 optional aN/bN/rcN modifier).
+#   2. tag-match: when a vX.Y.Z[modifier] tag is pushed, the tag matches
+#                 version.py exactly. Catches "tagged v0.9.0rc1 but
+#                 forgot to bump version.py" before downstream consumers
+#                 (Zenodo snapshot, GHCR push) see a half-released image.
+#   3. monotonic: on push to main, the new version is >= the version on
+#                 the previous main commit. Catches accidental version
+#                 backwards-steps. Skipped on the initial commit that
+#                 introduces version.py (no prior version to compare).
+#
+# pipeline.yml's fixture-run jobs declare `needs: version` so a broken
+# version.py blocks the expensive matrix runs.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: version-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need fetch-depth: 2 to compare the new version.py against
+          # the parent commit's value in the monotonic check.
+          # Tag pushes need the full history so we can resolve the
+          # tag's commit and the previous main version.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packaging  # for robust PEP 440 comparison
+        run: pip install --quiet "packaging>=23"
+
+      # ── 1. Parse ───────────────────────────────────────────────────
+      - name: Parse version.py
+        id: parse
+        run: |
+          v=$(python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from version import __version__, parse_version
+          parsed = parse_version(__version__)
+          print(__version__)
+          ")
+          echo "Pipeline version: $v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      # ── 2. Tag-match ───────────────────────────────────────────────
+      # Runs only on tag pushes (refs/tags/v*). Tag must equal "v" + the
+      # value in version.py exactly. Examples:
+      #   tag v0.9.0rc1  ↔  __version__ = "0.9.0rc1"   ✓
+      #   tag v0.9.0     ↔  __version__ = "0.9.0rc1"   ✗  (mismatch)
+      - name: Tag-match check
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          PY_VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          expected="v${PY_VERSION}"
+          if [ "$tag" != "$expected" ]; then
+            echo "::error::tag '$tag' does not match version.py (expected '$expected')"
+            echo ""
+            echo "Either:"
+            echo "  - bump version.py to match the tag, or"
+            echo "  - delete the tag and recreate it as '$expected'."
+            exit 1
+          fi
+          echo "Tag '$tag' matches version.py."
+
+      # ── 3. Monotonic ───────────────────────────────────────────────
+      # Compares against origin/main^ on a regular push to main, ensuring
+      # the version never decreases. Skipped on PR builds (the merge
+      # check is what matters) and on tag pushes (no parent main commit
+      # makes sense for an annotated tag at an arbitrary SHA).
+      - name: Monotonic check vs previous main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          PY_VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          # The push event has github.event.before pointing at the previous
+          # commit on main. Fetch that commit's version.py.
+          prev_sha="${{ github.event.before }}"
+          if [ -z "$prev_sha" ] || [ "$prev_sha" = "0000000000000000000000000000000000000000" ]; then
+            echo "No previous commit on main (initial push?); skipping monotonic check."
+            exit 0
+          fi
+          # version.py may not exist on the previous commit (e.g. the
+          # commit that introduced it). Treat that as "0.0.0" so the
+          # check passes by default.
+          if ! git show "${prev_sha}:version.py" > /tmp/prev_version.py 2>/dev/null; then
+            echo "version.py absent on previous main commit; skipping monotonic check."
+            exit 0
+          fi
+          prev=$(python -c "
+          import sys
+          sys.path.insert(0, '/tmp')
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('prev_version', '/tmp/prev_version.py')
+          m = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          print(m.__version__)
+          ")
+          echo "previous: $prev   new: $PY_VERSION"
+          python -c "
+          from packaging.version import Version
+          prev, curr = Version('$prev'), Version('$PY_VERSION')
+          assert curr >= prev, f'version went backwards: {prev} -> {curr}'
+          print(f'OK: {prev} <= {curr}')
+          "
