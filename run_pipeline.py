@@ -4,7 +4,14 @@
 import argparse
 import os
 import subprocess
+import sys
 import yaml
+
+# Single source of truth for the pipeline version. Importing requires
+# version.py to be next to this script, which is true in both contexts
+# (repo checkout: both at repo root; container: both at /opt/pipeline/).
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from version import __version__
 
 def show_singularity_settings(config_object):
     # get absolute paths and show singularity --bind options
@@ -71,6 +78,9 @@ rDNA_45S/ITS1
             """,
             formatter_class=argparse.RawDescriptionHelpFormatter
         )
+    parser.add_argument('--version', action='version',
+                        version=F'CARP {__version__}',
+                        help='Show pipeline version and exit.')
     parser.add_argument('-c', '--config', required=True, help='config file')
     parser.add_argument('-t', '--threads', required=False, default=2, type=int,
                         help='Number of threads to use')
@@ -85,6 +95,11 @@ rDNA_45S/ITS1
         )
 
     args = parser.parse_args()
+
+    # Startup banner — first line of every run, so logs are
+    # self-identifying even without the provenance JSON (which the
+    # later commits in the versioning rollout add).
+    print(F"CARP pipeline {__version__} starting", file=sys.stderr)
 
     snakefile="/opt/pipeline/snakefile"
     # create output directory if it does not exist
