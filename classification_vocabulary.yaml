@@ -39,6 +39,16 @@ canonical_separator: "/"
 # accepted by the pipeline without warning.
 # ---------------------------------------------------------------------------
 classifications:
+  # ── Mobile_element — synthetic root above Class_I and Class_II ─────────
+  # Used when overlap-resolution at a single locus produces a mixed
+  # Class_I/Class_II label set whose only common ancestor is "TE of some
+  # kind". Emitted by data/benchmark/resolve_overlaps.py for the resolved
+  # reference and (optionally, with --resolve-pred) for the prediction
+  # side. Not produced by any upstream tool (DANTE/RepeatMasker/etc.) on
+  # its own — they always commit to Class_I or Class_II — so seeing
+  # `Mobile_element` outside the resolve_overlaps step is a bug.
+  - Mobile_element
+
   # ── Class I — retroelements (REXdb Viridiplantae v4.0 tree) ─────────────
   # Reference: https://github.com/repeatexplorer/rexdb README and
   # Viridiplantae_v4.0.classification. Every leaf below corresponds to an
