@@ -133,6 +133,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Free ~10-15 GB on the GHA hosted runner before pulling the SIF
+      # and running the medium fixture. Without this the combined disk
+      # footprint (SIF artefact ~5 GB + fixture working dir several GB
+      # of intermediate FASTAs / BLAST DBs / bigwigs) overruns the
+      # runner's ~14 GB default free space partway through the run.
+      # The agent loses contact and GHA reports "Operation was canceled"
+      # with no further detail in the step log — same pattern
+      # pipeline.yml has been working around with this exact step.
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h
+
       - uses: eWaterCycle/setup-apptainer@v2
         with:
           apptainer-version: ${{ env.APPTAINER_VERSION }}
