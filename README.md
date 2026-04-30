@@ -23,13 +23,29 @@ density visualizations as bigWig files, and summary statistics and plots.
 
 **Limitations:** - The pipeline was developed for annotation of *plant* genomes. Don't use it for animal genomes.
 
-## Requirements 
-Singularity is required to use the container. Singularity can be installed using conda environment. 
+## Requirements
+
+**Container runtime.** Either [Apptainer](https://apptainer.org/) (≥ 1.0,
+recommended) or [Singularity](https://sylabs.io/singularity/) (≥ 3.7,
+needed for `oras://` pulls from GHCR). The CI release workflow builds
+and tests with Apptainer 1.3.5; both runtimes share the same CLI, so
+either works at run time.
+
+If neither is installed system-wide, conda is the easiest route:
 
 ```bash
-conda create -n singularity3 -c conda-forge "singularity>=3.6"
+# Apptainer (preferred):
+conda create -n apptainer -c conda-forge "apptainer>=1.0"
+conda activate apptainer
+
+# Singularity (alternative):
+conda create -n singularity3 -c conda-forge "singularity>=3.7"
 conda activate singularity3
 ```
+
+**Host OS.** Linux x86_64. The container ships GNU/Linux binaries
+(BLAST+, RepeatMasker, mmseqs2, …); macOS and Windows hosts can run
+the image only through a Linux VM.
 
 ## Quick Start
 Each tagged release publishes a Singularity / Apptainer image to GHCR as
