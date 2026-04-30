@@ -50,6 +50,22 @@ From: continuumio/miniconda3
 
     # make root accessible for everyone
     chmod -R 777 /root
+
+    # Stamp container labels from version.py (single source of truth)
+    # so 'singularity inspect --labels <sif>' returns the version that
+    # matched the source tree at build time. The %labels block above
+    # only provides "unknown" fallbacks; this %post step overwrites
+    # them in /.singularity.d/labels.json before image is finalised.
+    PIPELINE_VERSION=$(python3 /opt/pipeline/version.py)
+    BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    mkdir -p /.singularity.d
+    cat > /.singularity.d/labels.json <<EOF
+{
+    "Version": "${PIPELINE_VERSION}",
+    "Build-Date": "${BUILD_DATE}"
+}
+EOF
+    echo "Stamped container labels: Version=${PIPELINE_VERSION} Build-Date=${BUILD_DATE}"
     # remove all temp files
 
 %files
@@ -59,7 +75,17 @@ From: continuumio/miniconda3
     classification_vocabulary.yaml /opt/pipeline/classification_vocabulary.yaml
     data/rdna_library.fasta /opt/pipeline/data/rdna_library.fasta
     run_pipeline.py /opt/pipeline/run_pipeline.py
+    version.py /opt/pipeline/version.py
     scripts /opt/pipeline/scripts
+
+
+%labels
+    # Stamped from version.py + build environment in %post below.
+    # Read at run time with: singularity inspect --labels <image.sif>
+    # Hardcoded fallbacks here are only used if the %post block fails;
+    # they should never appear in a successful build.
+    Version unknown
+    Build-Date unknown
 
 
 %environment
