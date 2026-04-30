@@ -176,14 +176,46 @@ rDNA_45S/ITS1
     is_dry_run = ("--dry-run" in args.snakemake_args
                   or "-n" in args.snakemake_args.split())
     finalise_fn = None
+    extend_fn = None
     if not is_dry_run:
         try:
             sys.path.insert(0, os.path.join(script_dir, "scripts"))
-            from record_provenance import init_provenance, finalise_provenance
+            from record_provenance import (init_provenance,
+                                            finalise_provenance,
+                                            extend_with_envs)
             init_provenance(args.config, output_dir)
             finalise_fn = finalise_provenance
+            extend_fn = extend_with_envs
         except Exception as e:
             print(F"WARNING: failed to write phase-1 provenance: {e}",
+                  file=sys.stderr)
+
+    # Phase-2 provenance prep: ensure conda envs are created, then
+    # amend run_provenance.json with per-env primary-package versions.
+    # Splitting --conda-create-envs-only into a pre-step (rather than
+    # waiting for the heavy pipeline rules) means provenance includes
+    # env data even if a later rule fails. On a warm conda cache this
+    # adds ~5 s of snakemake startup; on cold, it's no slower than the
+    # main run would have been creating the envs lazily anyway.
+    if extend_fn is not None:
+        prep_cmd = (
+            F"snakemake --snakefile {script_dir}/Snakefile --configfile {args.config} "
+            F"--cores {args.threads} --use-conda --conda-prefix {CONDA_ENVS_PATH} "
+            F"--conda-frontend conda --conda-create-envs-only --quiet")
+        prep_rc = subprocess.call(prep_cmd, shell=True, env=env)
+        if prep_rc == 0:
+            try:
+                from pathlib import Path as _Path
+                extend_fn(
+                    _Path(output_dir) / "run_provenance.json",
+                    _Path(script_dir) / "envs",
+                    _Path(CONDA_ENVS_PATH))
+            except Exception as e:
+                print(F"WARNING: failed to write phase-2 provenance: {e}",
+                      file=sys.stderr)
+        else:
+            print(F"WARNING: conda env creation failed (exit {prep_rc}); "
+                  F"phase-2 provenance skipped, phase-3 will record failure",
                   file=sys.stderr)
 
     # Run snakemake. Use subprocess.call (not check_call) so we can
