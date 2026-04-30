@@ -168,7 +168,40 @@ rDNA_45S/ITS1
     # append cache dir to other environment variables
     env = os.environ.copy()
     env['XDG_CACHE_HOME'] = cache_dir
-    subprocess.check_call(cmd, shell=True, env=env)
+
+    # Phase-1 provenance: write run_provenance.json *before* snakemake
+    # is invoked. If conda env solve dies, the user still has a record
+    # of what was attempted. Skip on dry-runs (no real run, no need to
+    # spam the user's output dir with stale provenance).
+    is_dry_run = ("--dry-run" in args.snakemake_args
+                  or "-n" in args.snakemake_args.split())
+    finalise_fn = None
+    if not is_dry_run:
+        try:
+            sys.path.insert(0, os.path.join(script_dir, "scripts"))
+            from record_provenance import init_provenance, finalise_provenance
+            init_provenance(args.config, output_dir)
+            finalise_fn = finalise_provenance
+        except Exception as e:
+            print(F"WARNING: failed to write phase-1 provenance: {e}",
+                  file=sys.stderr)
+
+    # Run snakemake. Use subprocess.call (not check_call) so we can
+    # finalise provenance with the exit status before propagating the
+    # failure to our own exit code.
+    rc = subprocess.call(cmd, shell=True, env=env)
+
+    if finalise_fn is not None:
+        try:
+            finalise_fn(
+                output_dir,
+                exit_status=("completed" if rc == 0 else "failed"))
+        except Exception as e:
+            print(F"WARNING: failed to finalise provenance: {e}",
+                  file=sys.stderr)
+
+    if rc != 0:
+        sys.exit(rc)
 
 if __name__ == "__main__":
     main()
