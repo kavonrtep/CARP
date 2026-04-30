@@ -120,7 +120,16 @@ jobs:
   test-in-container:
     needs: build-sif
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Match pipeline.yml's medium-fixture budget (75 min). The 30-min
+    # value here was inherited from when the medium fixture failed
+    # early at RepeatMasker::createLib (the BLAST-prime regression
+    # fixed in tidecluster.post-deploy.sh). With that fix in place,
+    # the fixture actually completes — and needs the same wall-clock
+    # budget the pipeline.yml job has been running with. On a 2-vCPU
+    # GHA runner, the medium fixture is ~50–60 min end-to-end inside
+    # the container; 75 min leaves room for variance without false
+    # cancellations.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
