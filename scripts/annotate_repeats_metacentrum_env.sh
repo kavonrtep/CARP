@@ -79,6 +79,14 @@ if [ -n "$REDUCE_LIBRARY" ]; then
     echo "reduce_library: $REDUCE_LIBRARY" >> "${SCRATCHDIR}/config.yaml"
 fi
 
+# Read pipeline version from the Singularity image's labels (stamped
+# at build time by the %post block in the Singularity recipe). Falls
+# back to "unknown" if the image is too old or `singularity inspect`
+# fails. Cheap — runs in <1 s.
+PIPELINE_VERSION=$(singularity inspect --labels "$SINGULARITY_IMAGE" 2>/dev/null \
+    | awk -F': ' '/^Version:/ {print $2; exit}')
+PIPELINE_VERSION="${PIPELINE_VERSION:-unknown}"
+
 # --- Write 0INFO.txt ---
 INFO_FILE="${SCRATCHDIR}/0INFO.txt"
 {
@@ -86,6 +94,7 @@ INFO_FILE="${SCRATCHDIR}/0INFO.txt"
     echo "Date/time          : $(date --iso-8601=seconds)"
     echo "PBS job ID         : ${PBS_JOBID}"
     echo "Hostname           : $(hostname)"
+    echo "PIPELINE_VERSION   : ${PIPELINE_VERSION}"
     echo ""
     echo "--- Required parameters ---"
     echo "SINGULARITY_IMAGE  : ${SINGULARITY_IMAGE}"

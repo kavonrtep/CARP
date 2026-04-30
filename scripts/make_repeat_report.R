@@ -62,6 +62,18 @@ load_composition <- function(outdir) {
   df
 }
 
+# ── B2b. Run provenance from JSON ─────────────────────────────────────────
+# Read run_provenance.json (written by run_pipeline.py + commits 3+4 of
+# the versioning rollout). Returns NULL if absent — the footer will
+# render an "unknown version" placeholder instead.
+load_provenance <- function(outdir) {
+  f <- file.path(outdir, "run_provenance.json")
+  if (!file.exists(f)) return(NULL)
+  if (!requireNamespace("jsonlite", quietly = TRUE)) return(NULL)
+  tryCatch(jsonlite::fromJSON(f, simplifyVector = TRUE),
+           error = function(e) NULL)
+}
+
 # ── B3. DANTE_LTR stats from GFF3 ─────────────────────────────────────────
 # Count only *complete* LTR-RTs for the "Complete TEs" column of the
 # classification table. DANTE_LTR labels the element's completeness via
@@ -1003,6 +1015,59 @@ html_comp_table <- function(tree_df) {
     paste(rows_html, collapse = "\n"))
 }
 
+# ── E4b. Reproducibility footer from run_provenance.json ─────────────────
+html_provenance_footer <- function(prov) {
+  if (is.null(prov)) {
+    return(paste0(
+      '<footer style="margin-top:32px;padding:12px 16px;',
+      'border-top:1px solid #ddd;font-size:11px;color:#888">',
+      '<em>Pipeline version unknown ',
+      '(run_provenance.json not found in output_dir).</em>',
+      '</footer>'))
+  }
+  ver  <- if (!is.null(prov$pipeline_version)) prov$pipeline_version else "unknown"
+  sha  <- if (!is.null(prov$git_sha))           prov$git_sha           else "unknown"
+  dirty <- isTRUE(prov$git_dirty)
+  start <- if (!is.null(prov$run_started))      prov$run_started       else "unknown"
+  fin   <- if (!is.null(prov$run_finished))     prov$run_finished      else "(in progress)"
+  status <- if (!is.null(prov$exit_status))     prov$exit_status       else "unknown"
+  host  <- if (!is.null(prov$host))             prov$host              else "unknown"
+  # Tool-version one-liner: package=version pairs from primary deps,
+  # taking each env's first 4 packages so the line stays readable.
+  envs_brief <- ""
+  if (!is.null(prov$envs) && length(prov$envs) > 0) {
+    parts <- c()
+    for (env_name in names(prov$envs)) {
+      env <- prov$envs[[env_name]]
+      pkgs <- env$primary_packages
+      if (length(pkgs) == 0) next
+      pkg_strs <- mapply(function(name, info) {
+        v <- info$resolved
+        if (is.null(v) || identical(v, "<query failed>")) return(NULL)
+        sprintf("%s %s", name, v)
+      }, names(pkgs), pkgs, USE.NAMES = FALSE)
+      pkg_strs <- Filter(Negate(is.null), pkg_strs)
+      pkg_strs <- pkg_strs[seq_len(min(4, length(pkg_strs)))]
+      if (length(pkg_strs) > 0) parts <- c(parts, paste(pkg_strs, collapse = " · "))
+    }
+    if (length(parts) > 0) envs_brief <- paste(parts, collapse = " | ")
+  }
+  sprintf(paste0(
+    '<footer style="margin-top:32px;padding:12px 16px;',
+    'border-top:1px solid #ddd;font-size:11px;color:#666">',
+    '<div><strong>CARP pipeline %s</strong> ',
+    '(commit <code>%s</code>%s)</div>',
+    '<div>Run started: %s · finished: %s · status: <strong>%s</strong> · host: %s</div>',
+    '<div style="margin-top:4px">Tool versions: %s</div>',
+    '<div style="margin-top:4px">Full provenance: ',
+    '<a href="run_provenance.json"><code>run_provenance.json</code></a></div>',
+    '</footer>'),
+    ver, sha,
+    if (dirty) " <span style='color:#c33'>(dirty)</span>" else "",
+    start, fin, status, host,
+    if (nchar(envs_brief) > 0) envs_brief else "<em>not recorded</em>")
+}
+
 # ── E5. DANTE structure-based summary table ───────────────────────────────
 html_dante_summary <- function(ltr_stats, tir_stats, line_stats, outdir) {
   ltr_count <- if (!is.null(ltr_stats) && nrow(ltr_stats) > 0) sum(ltr_stats$count) else 0
@@ -1062,7 +1127,8 @@ assemble_html <- function(plotly_js, cards_html, sunburst_div, comp_table_html,
                            dante_summary_html, comp_bar_div,
                            density_top_div, density_lineage_div, density_trc_div,
                            sat_table_html, sat_bar_div,
-                           outdir, bin_width, genome_avg_pct) {
+                           outdir, bin_width, genome_avg_pct,
+                           provenance_footer_html = "") {
 
   # Sub-report links — use real paths, not symlinks, so relative resources work
   sub_links <- ""
@@ -1233,6 +1299,7 @@ are concentrated on specific chromosomes.</p>
 <div style="margin-top:12px">%s</div>
 </section>
 
+%s
 </div><!-- /container -->
 </body>
 </html>',
@@ -1250,7 +1317,8 @@ are concentrated on specific chromosomes.</p>
     density_trc_div     %||% "<p>No TRC density data available.</p>",
     sat_table_html,
     sat_bar_div %||% "<p>No satellite density data available.</p>",
-    sub_links
+    sub_links,
+    provenance_footer_html
   )
 }
 
@@ -1410,13 +1478,17 @@ main <- function() {
   sat_bar_div       <- if (!is.null(sat_bar_chart))
     plotly_div("sat-bar-plot", sat_bar_chart) else NULL
 
+  prov            <- load_provenance(outdir)
+  prov_footer_html <- html_provenance_footer(prov)
+
   html_out <- assemble_html(
     plotly_js, cards_html, sunburst_div, comp_table_html,
     dante_summ_html,
     comp_bar_div,
     density_top_div, density_lineage_div, density_trc_div,
     sat_table_html, sat_bar_div,
-    outdir, d_bin, genome_avg_frac * 100
+    outdir, d_bin, genome_avg_frac * 100,
+    provenance_footer_html = prov_footer_html
   )
 
   out_file <- file.path(outdir, "repeat_annotation_report.html")

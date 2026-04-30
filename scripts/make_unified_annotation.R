@@ -690,6 +690,29 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
   timed(sprintf("export GFF3 to %s", output_path),
         export(all_feats, output_path, format = "gff3"))
 
+  # Prepend provenance header lines so a consumer reading just the
+  # GFF3 (not the whole output_dir) still knows which pipeline
+  # version + run produced these calls. Falls back silently if
+  # run_provenance.json is missing — the rule keeps its existing
+  # behaviour without it.
+  prov_path <- file.path(dirname(output_path), "run_provenance.json")
+  if (file.exists(prov_path) &&
+      requireNamespace("jsonlite", quietly = TRUE)) {
+    prov <- tryCatch(jsonlite::fromJSON(prov_path, simplifyVector = TRUE),
+                      error = function(e) NULL)
+    if (!is.null(prov)) {
+      .or_unknown <- function(x) if (is.null(x) || length(x) == 0) "unknown" else as.character(x)
+      header <- c(
+        sprintf("##pipeline-version %s", .or_unknown(prov$pipeline_version)),
+        sprintf("##git-sha %s", .or_unknown(prov$git_sha)),
+        sprintf("##run-started %s", .or_unknown(prov$run_started))
+      )
+      gff_lines <- readLines(output_path)
+      # Insert after the existing ##gff-version line (always first).
+      writeLines(c(gff_lines[1], header, gff_lines[-1]), output_path)
+    }
+  }
+
   toc(t_fin, sprintf("%d total features written", length(all_feats)))
   invisible(all_feats)
 }
