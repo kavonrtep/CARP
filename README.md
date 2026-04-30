@@ -32,7 +32,25 @@ conda activate singularity3
 ```
 
 ## Quick Start
-Singularity image (.sif file) can be downloaded from https://github.com/kavonrtep/assembly_repeat_annotation_pipeline/releases
+Each tagged release publishes a Singularity / Apptainer image to GHCR as
+an ORAS/OCI artefact and attaches the same `.sif` to a GitHub Release.
+Pull the image with whichever route is convenient:
+
+```bash
+# From GHCR (recommended; works for both apptainer and singularity 3.7+):
+apptainer pull oras://ghcr.io/kavonrtep/carp/sif:0.9.0rc3
+# or always-latest:
+apptainer pull oras://ghcr.io/kavonrtep/carp/sif:latest
+
+# Alternative: download the .sif attached to a GitHub Release
+# https://github.com/kavonrtep/assembly_repeat_annotation_pipeline/releases
+```
+
+Tags follow PEP 440 unprefixed (`0.9.0rc3`, `1.0.0`). The `latest` tag
+on GHCR tracks the most recent successful release. Both paths receive
+the *same* image — release publication is gated by an in-container
+fixture run, so a tag that exists on either source has passed the
+medium fixture end-to-end.
 
 Format of `config.yaml` file is as follows:
 
@@ -162,12 +180,19 @@ File `tandem_repeat_library` (optional) is used by TideCluster to annotate disco
 on the similarity. Format is the same as the above repeat database. E.g. 
 `>sequence_id/Satellite/PisTR-B`
 
-To run an annotation pipeline, execute the following command:
+To run an annotation pipeline, execute the following command (replace
+`<TAG>` with the version you pulled, e.g. `0.9.0rc3`):
 
 ```bash
-singularity run -B /path/to/ -B $PWD assembly_repeat_annotation_pipeline.sif -c config.yaml -t 20
+apptainer run -B /path/to/data -B $PWD carp_<TAG>.sif -c config.yaml -t 20
+# or, equivalently with singularity:
+singularity run -B /path/to/data -B $PWD carp_<TAG>.sif -c config.yaml -t 20
 ```
-Parameter `-t` specifies the number of threads to use. Singularity parameter `-B` is used to bind the input and output directories to the container. Without this parameter, the container will not be able to access the input and output files. File `config.yaml` must be also in directory which is accessible to the container. In the example above this is the current directory `$PWD`. 
+Parameter `-t` specifies the number of threads to use. The `-B` flag
+binds host directories into the container so it can see your input and
+output files; without it the run will fail at the first read. The
+`config.yaml` file must live under one of the bound paths — in the
+example above the current directory `$PWD` covers it.
 
 
 ## Running pipeline on metacentrum
@@ -277,18 +302,27 @@ HTML reports:
 
 ## Build the container
 
-To build the container, run the following command:
+Release builds are produced by GitHub Actions
+([`.github/workflows/release.yml`](.github/workflows/release.yml))
+on every tag push that matches the unprefixed PEP 440 pattern
+(`0.9.0rc3`, `1.0.0`, …). The workflow runs unit tests, builds the
+SIF from the `Singularity` recipe, exercises the medium fixture
+**inside** the freshly-built container, then — only on a green
+test-in-container — pushes the image to GHCR and creates a GitHub
+Release that triggers the Zenodo snapshot. There is no manual step;
+to ship a release, bump `version.py` and push a matching tag.
+
+For local development you can rebuild the same image with:
 
 ```bash
-SINGULARITY=`which singularity`
-sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.7.4.sif Singularity
-sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.7.5.sif Singularity
-sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.0.sif Singularity
-sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.1.sif Singularity
-sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.2.sif Singularity
-sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.3.sif Singularity
-sudo ionice -c3 $SINGULARITY build images/assembly_repeat_annotation_pipeline_0.8.4.sif Singularity
+TAG=$(python version.py)                          # e.g. 0.9.0rc3
+sudo apptainer build images/carp_${TAG}.sif Singularity
 ```
+
+The version that gets stamped into the image is read from
+`version.py`; CI's `version.yml` workflow enforces that pushed tags
+match `version.py` exactly, so the build above produces a SIF
+identical to what the release workflow would publish.
 
 
 
