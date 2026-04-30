@@ -121,6 +121,23 @@ if _v is not None and (not isinstance(_v, int) or _v < 1):
         "must be null or a positive integer."
     )
 
+# Memory cap for the parallel-CAP3 phase of `reduce_library`. LTR
+# classes whose per-class input FASTA is at least this many bytes run
+# sequentially in the rule's Phase 1; smaller classes run in parallel
+# in Phase 2. Default 50 MB matches the threshold the Python rewrite
+# was profiled against (peak resident drops from ~6 GB physical /
+# ~30 GB snakemake-reported on 4-way parallel down to ~2 GB physical
+# on this setting). Raise on machines with > 32 GB RAM available to
+# trade memory for parallelism; lower on tighter setups.
+if "reduce_library_max_parallel_bp" not in config:
+    config["reduce_library_max_parallel_bp"] = 50_000_000
+if (not isinstance(config["reduce_library_max_parallel_bp"], int)
+        or config["reduce_library_max_parallel_bp"] < 1):
+    raise ValueError(
+        "Invalid value for reduce_library_max_parallel_bp: "
+        "must be a positive integer (bytes)."
+    )
+
 
 # Define path to cleaned genome (will be created by clean_genome_fasta rule)
 genome_fasta_cleaned = F"{config['output_dir']}/genome_cleaned.fasta"
@@ -1100,12 +1117,31 @@ rule concatenate_libraries:
         """
 
 rule reduce_library:
+    """
+    Per-classification CAP3 / mmseqs2 dedup of the combined library.
+
+    The Python implementation (scripts/reduce_library_size.py) replaces
+    the R version (scripts/reduce_library_size.R, retained for parity
+    testing only). Both produce byte-identical output; the Python
+    rewrite drops actual peak memory from ~6 GB to ~2 GB on the medium
+    fixture and eliminates the snakemake benchmark over-count caused
+    by COW-shared pages from forked R workers (which previously
+    reported 30+ GB max_rss on inputs of a few hundred KB and triggered
+    GHA-runner OOM kills in release.yml's test-in-container step).
+
+    Two-pass scheduling caps physical peak: LTR classes whose input
+    FASTA size meets `reduce_library_max_parallel_bp` (default 50 MB)
+    run sequentially in Phase 1; everything else runs in parallel in
+    Phase 2. tests/test_reduce_library_parity.sh asserts byte-identity
+    against the R reference on any input.
+    """
     input:
         library=F"{config['output_dir']}/Libraries/combined_library.fasta"
     output:
         library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced.fasta"
     params:
-        reduce_library_size = config["reduce_library"]
+        reduce_library_size = config["reduce_library"],
+        max_parallel_bp = config["reduce_library_max_parallel_bp"]
     log:
         stdout=F"{config['output_dir']}/Libraries/reduce_library.log",
         stderr=F"{config['output_dir']}/Libraries/reduce_library.err"
@@ -1126,7 +1162,9 @@ rule reduce_library:
             cp  {input.library} {output.library_reduced}
             exit 0
         fi
-        reduce_library_size.R -i {input.library} -o {output.library_reduced} -t {threads} -d $workdir
+        reduce_library_size.py -i {input.library} -o {output.library_reduced} \
+            -t {threads} -d $workdir \
+            --max-parallel-bp {params.max_parallel_bp}
         """
 
 rule repeatmasker:
