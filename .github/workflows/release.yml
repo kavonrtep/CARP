@@ -6,7 +6,12 @@ name: release
 # only tested, published artefacts are archived.
 on:
   push:
-    tags: ['v*']
+    # Trigger on any tag whose name starts with a digit. Matches the
+    # project's convention of unprefixed PEP 440 tags
+    # (e.g. 0.9.0rc1, 0.9.0, 1.0.0). Won't match accidental non-version
+    # tags such as 'wip' or 'test'. The earlier 'v*' pattern never
+    # matched because none of the project's tags use a v prefix.
+    tags: ['[0-9]*']
   workflow_dispatch:
     inputs:
       tag:
