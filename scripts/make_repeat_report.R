@@ -874,7 +874,22 @@ json_satellite_bar <- function(sat_data, seq_info) {
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ── E1. Load Plotly.js ─────────────────────────────────────────────────────
-load_plotly_js <- function() {
+# Writes plotly.min.js as a sibling file of the report and returns a
+# <script src="plotly.min.js"> tag, rather than inlining ~4.5 MB into every
+# report. A smaller HTML document parses faster (the inline copy was a major
+# contributor to the browser stall on large genomes) and the library can be
+# browser-cached. Falls back to the CDN if the library can't be staged.
+load_plotly_js <- function(outdir) {
+  url       <- "https://cdn.plot.ly/plotly-2.35.2.min.js"
+  sibling   <- file.path(outdir, "plotly.min.js")
+  tag_local <- '<script src="plotly.min.js"></script>'
+
+  # If already staged next to the report, reuse it.
+  if (file.exists(sibling) && file.info(sibling)$size > 0) {
+    message("Using staged Plotly.js: ", sibling)
+    return(tag_local)
+  }
+
   script_dir   <- tryCatch(normalizePath(dirname(sys.frame(1)$ofile), mustWork = FALSE),
                             error = function(e) ".")
   pipeline_dir <- dirname(script_dir)
@@ -885,18 +900,22 @@ load_plotly_js <- function() {
   )
   local_js <- Find(file.exists, candidates)
   if (!is.null(local_js)) {
-    message("Using local Plotly.js: ", local_js)
-    return(paste(readLines(local_js, warn = FALSE), collapse = "\n"))
+    if (file.copy(local_js, sibling, overwrite = TRUE)) {
+      message("Staged Plotly.js from ", local_js, " -> ", sibling)
+      return(tag_local)
+    }
+    warning("Could not copy Plotly.js to ", sibling, "; referencing source path.")
+    return(sprintf('<script src="%s"></script>', local_js))
   }
-  url  <- "https://cdn.plot.ly/plotly-2.35.2.min.js"
-  dest <- tempfile(fileext = ".js")
-  ok   <- tryCatch({ download.file(url, dest, quiet = TRUE, method = "auto"); TRUE },
-                    error = function(e) FALSE)
-  if (ok && file.exists(dest)) {
-    message("Downloaded Plotly.js from CDN (consider caching in data/plotly.min.js)")
-    return(paste(readLines(dest, warn = FALSE), collapse = "\n"))
+
+  ok <- tryCatch({ download.file(url, sibling, quiet = TRUE, method = "auto"); TRUE },
+                 error = function(e) FALSE)
+  if (ok && file.exists(sibling) && file.info(sibling)$size > 0) {
+    message("Downloaded Plotly.js from CDN to ", sibling,
+            " (consider caching in data/plotly.min.js)")
+    return(tag_local)
   }
-  warning("Plotly.js not found locally and could not be downloaded.")
+  warning("Plotly.js not found locally and could not be staged; using CDN.")
   sprintf('<script src="%s"></script>', url)
 }
 
@@ -1202,7 +1221,7 @@ h3{color:#34495e;font-size:0.95em;margin:14px 0 8px}
 .row-unspec{background:#f0f0f0;color:#666}
 .caption{font-size:0.8em;color:#888;margin-top:6px;font-style:italic}
 </style>
-<script>%s</script>
+%s
 <script>%s</script>
 </head>
 <body>
@@ -1355,6 +1374,19 @@ main <- function() {
   track_seqs   <- seq_thresh$track_seqs
   message(sprintf("Chart seqs: %d / Track seqs: %d", length(chart_seqs), length(track_seqs)))
 
+  # Sequence subset for the concatenated density panels. Restricting to
+  # track_seqs (>= min_len_tracks, capped at max_tracks) keeps the genome-wide
+  # density view to the assembled chromosomes/scaffolds instead of every tiny
+  # contig: each extra sequence adds an SVG separator line + x-axis tick label
+  # to every density plot, and thousands of them are what made large
+  # fragmented assemblies (e.g. 3,300+ contigs) freeze the browser. Falls back
+  # to the full genome when no sequence meets the track threshold (small
+  # genomes), preserving the previous behaviour there.
+  density_seq_info <- genome_info[genome_info$seqname %in% track_seqs, , drop = FALSE]
+  if (nrow(density_seq_info) == 0) density_seq_info <- genome_info
+  message(sprintf("Density-panel sequences: %d / %d",
+                  nrow(density_seq_info), nrow(genome_info)))
+
   seq_len_named <- setNames(genome_info$length, genome_info$seqname)
 
   # ── Per-sequence composition ───────────────────────────────────────────
@@ -1445,12 +1477,12 @@ main <- function() {
   else NULL
 
   message("Building density panel 1 (top-level categories)...")
-  density_top_chart     <- json_concat_density_plot(top_bw_map,     genome_info, d_bin)
+  density_top_chart     <- json_concat_density_plot(top_bw_map,     density_seq_info, d_bin)
   message("Building density panel 2 (LTR lineages)...")
-  density_lineage_chart <- json_concat_density_plot(lineage_bw_map, genome_info, d_bin)
+  density_lineage_chart <- json_concat_density_plot(lineage_bw_map, density_seq_info, d_bin)
   message("Building density panel 3 (TRC clusters)...")
   # Reverse so TRC_1 ends up at the top (matches summary_plots.pdf: rev(trc_bw))
-  density_trc_chart     <- json_concat_density_plot(rev(trc_bw_map), genome_info, d_bin)
+  density_trc_chart     <- json_concat_density_plot(rev(trc_bw_map), density_seq_info, d_bin)
 
   sat_bar_chart <- if (!is.null(sat_data$per_seq) && nrow(sat_data$per_seq) > 0)
     json_satellite_bar(sat_data, genome_info)
@@ -1458,7 +1490,7 @@ main <- function() {
 
   # ── Render HTML ────────────────────────────────────────────────────────
   message("Loading Plotly.js...")
-  plotly_js <- load_plotly_js()
+  plotly_js <- load_plotly_js(outdir)
 
   cards_html       <- html_cards(genome_info, comp, ltr_stats, tir_stats,
                                    line_stats, seq_thresh)
