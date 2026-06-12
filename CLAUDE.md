@@ -89,9 +89,10 @@ singularity shell -B $PWD assembly_repeat_annotation_pipeline.sif
 ## Important Architecture Details
 
 ### Conda Environment Management
-- Environments defined in `envs/` directory (tidecluster.yaml, bedtools.yaml, dante_tir.yaml, etc.)
+- Environments defined in `envs/` directory (tidecluster.yaml, tidecluster_run.yaml, bedtools.yaml, dante_tir.yaml, etc.)
 - Pipeline automatically manages conda environments through Snakemake
-- Main computational environment: `tidecluster.yaml` (contains DANTE, DANTE_LTR, TideCluster tools)
+- Main computational environment: `tidecluster.yaml` (contains DANTE, DANTE_LTR, RepeatMasker, and the R/report stack — used by ~18 rules). Despite the file name it no longer ships TideCluster.
+- TideCluster environment: `tidecluster_run.yaml` (TideCluster 1.15.2 + bundled TideHunter/mmseqs2/RepeatMasker/rtracklayer) — used only by the `tidecluster_long`, `tidecluster_short`, and `tidecluster_reannotate` rules. Split out because TideCluster ≥1.15 needs r-base ≥4.2 (via r-igraph) while DANTE pins r-base 4.1.3, so the two cannot share one conda env.
 - Specialized environment: `dante_tir.yaml` (contains DANTE_TIR tool for TIR transposon detection)
 
 ### DANTE_TIR Fallback Workflow
