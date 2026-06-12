@@ -1,0 +1,25 @@
+# Dedicated env for the TideCluster rules (tidecluster_long, tidecluster_short,
+# tidecluster_reannotate). Split out from envs/tidecluster.yaml because
+# TideCluster >=1.15 needs r-base >=4.2 (via r-igraph 2.0.3) while DANTE pins
+# r-base 4.1.3 — the two cannot coexist in one conda env.
+#
+# TideCluster 1.15.2 already bundles TideHunter, mmseqs2, RepeatMasker
+# (4.1.2.p1 — same version as the shared env, so tc_reannotate results are
+# unchanged), rtracklayer and optparse. The helper scripts the TideCluster
+# rules call directly are declared explicitly so the env is self-documenting
+# and robust to future TideCluster dependency changes:
+#   - calculate_density_batch.R -> bioconductor-rtracklayer, r-optparse
+#   - reduce_dimer_library.py    -> mmseqs2
+name: tidecluster_run
+channels:
+  - conda-forge
+  - bioconda
+  - petrnovak
+dependencies:
+  - tidecluster=1.15.2
+  - bioconductor-rtracklayer
+  - r-optparse
+  - mmseqs2
+  - r-jsonlite
+  - r-yaml
+  - pyyaml

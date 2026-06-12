@@ -1,12 +1,26 @@
+# Shared "main" computational env: DANTE, DANTE_LTR, the R/report stack, and
+# RepeatMasker. Used by ~20 rules (dante, dante_ltr, library construction,
+# repeatmasker, and all the R bigwig/summary/report rules).
+#
+# NOTE: TideCluster is intentionally NOT here. TideCluster >=1.15 requires
+# r-base >=4.2 (via r-igraph 2.0.3), but DANTE hard-pins r-base 4.1.3, so the
+# two cannot share a conda env. The TideCluster rules use envs/tidecluster_run.yaml
+# instead. The file name is kept for minimal churn even though it no longer
+# ships TideCluster.
+#
+# repeatmasker is pinned explicitly: it used to be pulled in transitively via
+# the tidecluster package, so removing TideCluster from this env would
+# otherwise silently drop RepeatMasker (4.1.2.p1) that the `repeatmasker` and
+# `dante_ltr` rules depend on.
 name: tidecluster
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.8.2
   - dante_ltr=0.4.0.4
   - dante=0.2.5
+  - repeatmasker=4.1.2.p1
   - seqkit=2.8.2
   - cap3=10.2011
   - r-jsonlite

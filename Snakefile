@@ -712,7 +712,7 @@ rule tidecluster_long:
     benchmark:
         F"{config['output_dir']}/benchmarks/tidecluster_long.tsv"
     conda:
-        "envs/tidecluster.yaml"
+        "envs/tidecluster_run.yaml"
     threads: workflow.cores
 
     shell:
@@ -779,7 +779,7 @@ rule tidecluster_short:
     benchmark:
         F"{config['output_dir']}/benchmarks/tidecluster_short.tsv"
     conda:
-        "envs/tidecluster.yaml"
+        "envs/tidecluster_run.yaml"
     threads: workflow.cores
 
     shell:
@@ -827,7 +827,7 @@ rule tidecluster_reannotate:
     benchmark:
         F"{config['output_dir']}/benchmarks/tidecluster_reannotate.tsv"
     conda:
-        "envs/tidecluster.yaml"
+        "envs/tidecluster_run.yaml"
     threads: workflow.cores
     shell:
         """
@@ -1538,7 +1538,29 @@ rule add_html_outputs:
         F"{config['output_dir']}/benchmarks/add_html_outputs.tsv"
     shell:
         """
-        ln -s -r {input.tc_index} {output.tc_index}
+        # TideCluster's v2 report (TideCluster_index.html) is NOT self-contained:
+        # it loads styling/JS from a sibling TideCluster_report/ directory by
+        # relative path. A plain symlink at the output root makes the browser
+        # resolve those asset URLs against the root (where TideCluster_report/
+        # does not exist), so the page renders unstyled. Write a tiny redirect
+        # page instead — the browser navigates to the real path, where the
+        # report's relative assets resolve correctly.
+        cat > {output.tc_index} <<'HTML'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=TideCluster/default/TideCluster_index.html">
+<title>TideCluster report</title>
+</head>
+<body>
+<script>location.replace("TideCluster/default/TideCluster_index.html");</script>
+<p>Redirecting to the <a href="TideCluster/default/TideCluster_index.html">TideCluster report</a>…</p>
+</body>
+</html>
+HTML
+        # DANTE_LTR_summary.html is self-contained (no sibling assets), so a
+        # relative symlink renders fine.
         ln -s -r {input.dante_ltr_index} {output.dante_ltr_index}
         """
 
