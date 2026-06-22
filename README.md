@@ -353,7 +353,7 @@ Everything Unified-derived is **tier-resolved**: `Repeat_Annotation_Unified.gff3
 Guidance for downstream consumers:
 
 - For the **authoritative "where are the tandem repeats" view**, use the Unified tracks — the aggregate `Tandem_repeats_*.bw` for genome-wide totals, or the unified per-family tracks for one family.
-- For each `TRC_<n>` you get **two per-family tracks**: the *unified* one (authoritative, tier-resolved union of structural + similarity) and the *structural* one (TideCluster clustering only). The structural per-family track is a **subset** of the unified one — pair them to see how much of a family is captured structurally vs. added by similarity remasking.
+- For each `TRC_<n>` you get **two per-family tracks**: the *unified* one (authoritative, tier-resolved) and the *structural* one (TideCluster clustering only). Relative to structural, unified **adds** the RepeatMasker-remasking territory for that family and **removes** any stretch reassigned to an overlapping higher-priority element — so unified is usually the larger of the two, but can be smaller where a family overlaps a mobile element. Pair them to see how much of a family is captured structurally vs. added by similarity remasking. (When the RM-on-TideCluster pass is empty and nothing overlaps, the two are identical.)
 - Per-family tandem tracks cover only `TRC_<n>`-named families; RM `Satellite/Unknown` and TideHunter residuals contribute to the aggregate but have no family track.
 
 #### Migration — BigWig paths changed (0.9.0rc6)
