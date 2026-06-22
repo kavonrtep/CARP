@@ -26,7 +26,8 @@ BENCHMARKED_RULES = [
     "make_track_for_masking", "make_track_for_Ns",
     "make_summary_statistics_and_split_by_class", "make_bigwig_density",
     "add_top_level_outputs", "calculate_bigwig_density", "add_html_outputs",
-    "make_rm_tandem_per_family_bigwig",
+    "make_unified_tandem_per_family_bigwig",
+    "make_tidecluster_tandem_per_family_bigwig",
     "calculate_seqlengths", "make_summary_plots", "make_repeat_report",
     "make_unified_annotation",
 ]
@@ -156,7 +157,7 @@ rule all:
         F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_clustering.gff3",
         F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3",
         F"{config['output_dir']}/TideCluster/TideCluster_clustering_default_and_short_merged.gff3",
-        F"{config['output_dir']}/TideCluster/default/.bigwig_done",
+        F"{config['output_dir']}/Tandem_repeats_TideCluster_split_by_family_bigwig/.done",
         F"{config['output_dir']}/Libraries/class_ii_library.fasta",
         F"{config['output_dir']}/Libraries/LTR_RTs_library_clean.fasta",
         F"{config['output_dir']}/Libraries/combined_library.fasta",
@@ -169,11 +170,11 @@ rule all:
         F"{config['output_dir']}/DANTE_LTR_report.html",
         F"{config['output_dir']}/gaps_10plus.bed",
         F"{config['output_dir']}/summary_statistics.csv",
-        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_10k.bw",
-        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_100k.bw",
-        F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
-        F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done",
-        F"{config['output_dir']}/Tandem_repeats_RepeatMasker_split_files_bigwig/.done",
+        F"{config['output_dir']}/Repeat_density/Repeat_density_total_10k.bw",
+        F"{config['output_dir']}/Repeat_density/Repeat_density_total_100k.bw",
+        F"{config['output_dir']}/Tandem_repeats_TideCluster_10k.bw",
+        F"{config['output_dir']}/Repeat_density_by_class_bigwig/.done",
+        F"{config['output_dir']}/Tandem_repeats_unified_split_by_family_bigwig/.done",
         F"{config['output_dir']}/summary_plots.pdf",
         F"{config['output_dir']}/benchmark_report.html",
         F"{config['output_dir']}/repeat_annotation_report.html",
@@ -704,7 +705,7 @@ rule tidecluster_long:
         dimer_library_default=F"{config['output_dir']}/TideCluster/default/TideCluster_consensus_dimer_library.fasta",
         tr_default_short=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter_short.gff3",
         html=F"{config['output_dir']}/TideCluster/default/TideCluster_index.html",
-        bigwig_done=F"{config['output_dir']}/TideCluster/default/.bigwig_done"
+        split_files=directory(F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_split_files")
     params:
         prefix = lambda wildcards, output: output.gff3_clust.replace("_clustering.gff3", ""),
         library = config.get("tandem_repeat_library", "")
@@ -750,17 +751,12 @@ rule tidecluster_long:
         [ -f {output.tr_default_short} ]      || echo "##gff-version 3" > {output.tr_default_short}
         [ -f {output.dimer_library_default} ] || : > {output.dimer_library_default}
         [ -f {output.html} ]                  || : > {output.html}
-        scripts_dir=$(realpath scripts)
-        export PATH=$scripts_dir:$PATH
         cd $wd
-        if [ -d TideCluster_clustering_split_files ]; then
-            mkdir -p TideCluster_clustering_split_files_bigwig
-            calculate_density_batch.R -d TideCluster_clustering_split_files -o TideCluster_clustering_split_files_bigwig -g $genome_seqlengths
-            touch .bigwig_done
-        else
-            echo "No split files found"
-            touch .bigwig_done
-        fi
+        # Ensure the per-cluster split-files directory exists so the declared
+        # directory() output is satisfied even when TideCluster produced no
+        # clusters. Per-family density BigWigs are built downstream by the
+        # dedicated make_tidecluster_tandem_per_family_bigwig rule.
+        mkdir -p TideCluster_clustering_split_files
         """
 
 
@@ -1423,9 +1419,9 @@ rule make_bigwig_density:
         cvs=F"{config['output_dir']}/summary_statistics.csv",  # this file is available if gffs were created
         genome_seqlengths=F"{config['output_dir']}/genome_seqlengths.rds"
     output:
-        checkpoint=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done"
+        checkpoint=F"{config['output_dir']}/Repeat_density_by_class_bigwig/.done"
     params:
-        bwdir=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig",
+        bwdir=F"{config['output_dir']}/Repeat_density_by_class_bigwig",
         gffdir=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3",
         genome_fasta=genome_fasta_cleaned
     log:
@@ -1499,18 +1495,24 @@ rule add_top_level_outputs:
         """
 
 rule calculate_bigwig_density:
+    """
+    Genome-wide total density (from the Unified annotation — all repeats,
+    incl. tandems) and the structural TideCluster total density (a subset:
+    TideCluster clustering only). Per-class and per-family tracks are built
+    by make_bigwig_density / the per-family rules.
+    """
     input:
-        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat.gff3",
-        F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
+        unified=F"{config['output_dir']}/Repeat_Annotation_Unified.gff3",
+        tc=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
         genome_seqlengths=F"{config['output_dir']}/genome_seqlengths.rds"
     output:
-        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_10k.bw",
-        F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_100k.bw",
-        F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_10k.bw",
-        F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_100k.bw"
+        total_10k=F"{config['output_dir']}/Repeat_density/Repeat_density_total_10k.bw",
+        total_100k=F"{config['output_dir']}/Repeat_density/Repeat_density_total_100k.bw",
+        tc_10k=F"{config['output_dir']}/Tandem_repeats_TideCluster_10k.bw",
+        tc_100k=F"{config['output_dir']}/Tandem_repeats_TideCluster_100k.bw"
     log:
-        stdout=F"{config['output_dir']}/RepeatMasker/calculate_bigwig_density.log",
-        stderr=F"{config['output_dir']}/RepeatMasker/calculate_bigwig_density.err"
+        stdout=F"{config['output_dir']}/logs/calculate_bigwig_density.log",
+        stderr=F"{config['output_dir']}/logs/calculate_bigwig_density.err"
     benchmark:
         F"{config['output_dir']}/benchmarks/calculate_bigwig_density.tsv"
     conda:
@@ -1522,38 +1524,39 @@ rule calculate_bigwig_density:
         set -x
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        calculate_density.R -b {input[0]} -o {output[0]} -f gff3 --window 10000 -g {input.genome_seqlengths}
-        calculate_density.R -b {input[0]} -o {output[1]} -f gff3 --window 100000 -g {input.genome_seqlengths}
-        calculate_density.R -b {input[1]} -o {output[2]} -f gff3 --window 10000 -g {input.genome_seqlengths}
-        calculate_density.R -b {input[1]} -o {output[3]} -f gff3 --window 100000 -g {input.genome_seqlengths}
+        mkdir -p $(dirname {output.total_10k})
+        calculate_density.R -b {input.unified} -o {output.total_10k}  -f gff3 --window 10000  -g {input.genome_seqlengths}
+        calculate_density.R -b {input.unified} -o {output.total_100k} -f gff3 --window 100000 -g {input.genome_seqlengths}
+        calculate_density.R -b {input.tc}      -o {output.tc_10k}     -f gff3 --window 10000  -g {input.genome_seqlengths}
+        calculate_density.R -b {input.tc}      -o {output.tc_100k}    -f gff3 --window 100000 -g {input.genome_seqlengths}
         """
 
 
-rule make_rm_tandem_per_family_bigwig:
+rule make_unified_tandem_per_family_bigwig:
     """
-    FR-2b: per-family density BigWigs for the RepeatMasker tandem pass.
+    Per-family tandem density BigWigs from the Unified annotation.
 
-    Tandem_repeats_RepeatMasker.gff3 (the genome-wide RepeatMasker
-    remasking of the TideCluster library) carries Name=TRC_<n>. Split it
-    by Name and emit one density BigWig per family — the same
-    split-by-family + per-window density already produced for the
-    TideCluster pass (TideCluster_clustering_split_files_bigwig) — so the
-    browser can compare TideCluster calls vs. the RepeatMasker remasking
-    per family. All families are emitted; FR-1 keeps each file tiny.
+    Splits Repeat_Annotation_Unified.gff3 to the tandem families
+    (Name=TRC_<n>) and emits one density BigWig per family. Because Unified
+    is tier-resolved, each family's track is the structural (TideCluster) ∪
+    similarity (RM-on-TideCluster) territory for that family, minus any
+    region won by a higher-priority mobile element. This is the authoritative
+    per-family view; the structural-only counterpart is produced by
+    make_tidecluster_tandem_per_family_bigwig. Empty input is a no-op.
     """
     input:
-        gff=F"{config['output_dir']}/Tandem_repeats_RepeatMasker.gff3",
+        unified=F"{config['output_dir']}/Repeat_Annotation_Unified.gff3",
         genome_seqlengths=F"{config['output_dir']}/genome_seqlengths.rds"
     output:
-        done=F"{config['output_dir']}/Tandem_repeats_RepeatMasker_split_files_bigwig/.done"
+        done=F"{config['output_dir']}/Tandem_repeats_unified_split_by_family_bigwig/.done"
     params:
-        splitdir=F"{config['output_dir']}/Tandem_repeats_RepeatMasker_split_files",
-        bwdir=F"{config['output_dir']}/Tandem_repeats_RepeatMasker_split_files_bigwig"
+        splitdir=F"{config['output_dir']}/Tandem_repeats_unified_split_by_family_gff3",
+        bwdir=F"{config['output_dir']}/Tandem_repeats_unified_split_by_family_bigwig"
     log:
-        stdout=F"{config['output_dir']}/logs/make_rm_tandem_per_family_bigwig.log",
-        stderr=F"{config['output_dir']}/logs/make_rm_tandem_per_family_bigwig.err"
+        stdout=F"{config['output_dir']}/logs/make_unified_tandem_per_family_bigwig.log",
+        stderr=F"{config['output_dir']}/logs/make_unified_tandem_per_family_bigwig.err"
     benchmark:
-        F"{config['output_dir']}/benchmarks/make_rm_tandem_per_family_bigwig.tsv"
+        F"{config['output_dir']}/benchmarks/make_unified_tandem_per_family_bigwig.tsv"
     conda:
         "envs/tidecluster.yaml"
     shell:
@@ -1565,11 +1568,51 @@ rule make_rm_tandem_per_family_bigwig:
         export PATH=$scripts_dir:$PATH
         ls_absolute_path=$(realpath {input.genome_seqlengths})
         mkdir -p {params.splitdir} {params.bwdir}
-        split_gff_by_name.R -i {input.gff} -o {params.splitdir}
+        split_gff_by_name.R -i {input.unified} -o {params.splitdir} --name-prefix TRC_
         if ls {params.splitdir}/*.gff3 >/dev/null 2>&1; then
             calculate_density_batch.R -d {params.splitdir} -o {params.bwdir} -g $ls_absolute_path
         else
             echo "No tandem families to split — nothing to do"
+        fi
+        touch {output.done}
+        """
+
+
+rule make_tidecluster_tandem_per_family_bigwig:
+    """
+    Per-family STRUCTURAL tandem density BigWigs (TideCluster clustering
+    only — a subset of the Unified per-family union). Reads the per-cluster
+    split GFF3s that tidecluster_long emits (default run only) and writes one
+    density BigWig per family. Empty / no-cluster input is a no-op.
+    """
+    input:
+        tc_clust=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
+        split_files=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_split_files",
+        genome_seqlengths=F"{config['output_dir']}/genome_seqlengths.rds"
+    output:
+        done=F"{config['output_dir']}/Tandem_repeats_TideCluster_split_by_family_bigwig/.done"
+    params:
+        bwdir=F"{config['output_dir']}/Tandem_repeats_TideCluster_split_by_family_bigwig"
+    log:
+        stdout=F"{config['output_dir']}/logs/make_tidecluster_tandem_per_family_bigwig.log",
+        stderr=F"{config['output_dir']}/logs/make_tidecluster_tandem_per_family_bigwig.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/make_tidecluster_tandem_per_family_bigwig.tsv"
+    conda:
+        "envs/tidecluster.yaml"
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        ls_absolute_path=$(realpath {input.genome_seqlengths})
+        mkdir -p {params.bwdir}
+        if ls {input.split_files}/*.gff3 >/dev/null 2>&1; then
+            calculate_density_batch.R -d {input.split_files} -o {params.bwdir} -g $ls_absolute_path
+        else
+            echo "No TideCluster per-cluster split files — nothing to do"
         fi
         touch {output.done}
         """
@@ -1639,9 +1682,10 @@ rule calculate_seqlengths:
 rule make_summary_plots:
     input:
         SL = F"{config['output_dir']}/genome_seqlengths.rds",
-        bw1 = F"{config['output_dir']}/RepeatMasker/Repeat_Annotation_NoSat_10k.bw",
-        bw2_info = F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done"
-        # these inputs are not used explicitly, but they are necessary for the rule to run
+        bw1 = F"{config['output_dir']}/Repeat_density/Repeat_density_total_10k.bw",
+        bw2_info = F"{config['output_dir']}/Repeat_density_by_class_bigwig/.done",
+        bw_tc = F"{config['output_dir']}/Tandem_repeats_TideCluster_split_by_family_bigwig/.done"
+        # these inputs gate ordering; the plot script reads the BigWig dirs directly
     output:
         F"{config['output_dir']}/summary_plots.pdf"
     params:
@@ -1693,8 +1737,8 @@ rule make_repeat_report:
     input:
         fai   = genome_fasta_cleaned,
         stats = F"{config['output_dir']}/summary_statistics.csv",
-        bw_rm = F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_bigwig/.done",
-        bw_tc = F"{config['output_dir']}/TideCluster/default/.bigwig_done",
+        bw_rm = F"{config['output_dir']}/Repeat_density_by_class_bigwig/.done",
+        bw_tc = F"{config['output_dir']}/Tandem_repeats_TideCluster_split_by_family_bigwig/.done",
         ltr   = F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
         tir   = F"{config['output_dir']}/DANTE_TIR/TIR_classification_summary.txt",
         line  = F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3"
