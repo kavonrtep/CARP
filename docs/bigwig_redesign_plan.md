@@ -1,7 +1,7 @@
 # Density BigWig redesign — plan & data flow
 
-**Status:** PLAN — design finalized, all open questions resolved (§9); no
-code changed yet. Target release: 0.9.0rc5 line.
+**Status:** IMPLEMENTED in 0.9.0rc6 (all phases). This document is retained as
+the design rationale and old→new path reference.
 **Scope:** density BigWig outputs and their source annotations only. GFF3
 annotations and the masking pipeline are unchanged except where noted.
 

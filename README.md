@@ -282,9 +282,7 @@ HTML reports:
   - `TideCluster_annotation.gff3` - Annotated based on custom library (if provided)
   - `TideCluster_index.html` - Interactive HTML report
   - `TideCluster_consensus_dimer_library.fasta` - Consensus sequences
-  - `TideCluster_clustering_10k.bw` and `TideCluster_clustering_100k.bw` - BigWig density of all TideCluster (structure-based) clusters combined
-  - `TideCluster_clustering_split_files/` - Split GFF3 files, one per cluster (`TRC_<n>`)
-  - `TideCluster_clustering_split_files_bigwig/{10k,100k}/TRC_<n>_*.bw` - Per-family (`TRC_<n>`) **structure-based** tandem density; see "Density BigWig tracks" below
+  - `TideCluster_clustering_split_files/` - Split GFF3 files, one per cluster (`TRC_<n>`). These feed the structural per-family density BigWigs (written to the top-level `Tandem_repeats_TideCluster_split_by_family_bigwig/`, see "Density BigWig tracks" below)
   - `RM_on_TideCluster_Library.gff3` - RepeatMasker annotation using tandem repeat library
 - `short_monomer/` - Short monomer run (10-39 bp)
   - Similar structure to `default/` directory
@@ -301,12 +299,10 @@ HTML reports:
 - `RM_on_combined_library.out` - RepeatMasker standard output
 - `RM_on_combined_library.gff3` - RepeatMasker annotations in GFF3
 - `RM_on_combined_library_plus_DANTE.gff3` - Merged RepeatMasker and DANTE annotations
-- `Repeat_Annotation_NoSat.gff3` - RepeatMasker annotation excluding tandem repeats. Used for the masking BED and the visualisation tracks below; **not** the source of `summary_statistics.csv` (see next paragraph)
-- `Repeat_Annotation_NoSat_10k.bw` and `Repeat_Annotation_NoSat_100k.bw` - Density tracks
+- `Repeat_Annotation_NoSat.gff3` - RepeatMasker annotation excluding tandem repeats. Used **only** for the masking BED (`all_repeats_for_masking.bed`); it is **not** the source of `summary_statistics.csv` or of any density BigWig (those come from `Repeat_Annotation_Unified.gff3` — see "Density BigWig tracks" below)
 
-**Tandem_repeats_RepeatMasker_split_files/** and **Tandem_repeats_RepeatMasker_split_files_bigwig/** - Per-family RepeatMasker tandem tracks
-- `Tandem_repeats_RepeatMasker_split_files/TRC_<n>.gff3` - `Tandem_repeats_RepeatMasker.gff3` split by family (`Name=TRC_<n>`)
-- `Tandem_repeats_RepeatMasker_split_files_bigwig/{10k,100k}/TRC_<n>_*.bw` - Per-family **similarity-based** tandem density (genome-wide RepeatMasker remasking of the TideCluster library, untrimmed); the per-family counterpart to the TideCluster per-cluster tracks. See "Density BigWig tracks" below
+**Repeat_density/** - Genome-wide total density (Unified)
+- `Repeat_density_total_10k.bw` and `Repeat_density_total_100k.bw` - density of **all** repeats from `Repeat_Annotation_Unified.gff3` (includes tandems). Replaces the former RM-only `RepeatMasker/Repeat_Annotation_NoSat_*.bw`
 
 **Repeat_Annotation_NoSat_split_by_class_gff3/** - Classification-specific annotations
 - Individual GFF3 files for each major repeat class
@@ -315,39 +311,62 @@ HTML reports:
 - A `Tandem_repeats.gff3` here aggregates TideCluster default + short clusters, TideHunter short tandems, and any RepeatMasker `Satellite/*` calls
 - A `Class_II.Subclass_1.TIR.gff3` rollup aggregates all TIR superfamilies (the union of `Class_II/Subclass_1/TIR…` features), so TIR gets one density row alongside the Copia/Gypsy rollups
 
-**Repeat_Annotation_NoSat_split_by_class_bigwig/** - Per-class density visualizations
+**Repeat_density_by_class_bigwig/** - Per-class density visualizations
 - BigWig files for each repeat class/superfamily at 10kb and 100kb windows, derived from `Repeat_Annotation_Unified.gff3`
 - Includes class/superfamily rollups: `All_Ty1_Copia_*.bw`, `All_Ty3_Gypsy_*.bw`, and `Class_II.Subclass_1.TIR_*.bw` (TIR-level rollup across all TIR superfamilies)
 - The `Tandem_repeats_*.bw` track here is the **aggregate** tandem density (see "Density BigWig tracks" below)
 - Suitable for genome browsers (IGV, UCSC, JBrowse)
 
+**Tandem-repeat density (top level)**
+- `Tandem_repeats_TideCluster_10k.bw` / `_100k.bw` - structural TideCluster total (all clusters combined)
+- `Tandem_repeats_TideCluster_split_by_family_bigwig/{10k,100k}/TRC_<n>_*.bw` - **structural** per-family density (TideCluster clustering only)
+- `Tandem_repeats_unified_split_by_family_bigwig/{10k,100k}/TRC_<n>_*.bw` - **unified** per-family density (from `Repeat_Annotation_Unified.gff3`; structural ∪ similarity, tier-resolved)
+- `Tandem_repeats_unified_split_by_family_gff3/TRC_<n>.gff3` - the per-family GFF3s the unified per-family BigWigs are built from
+
 `summary_statistics.csv` is computed from `Repeat_Annotation_Unified.gff3`. Beginning with this release, the historical `Satellites` row is replaced by `Tandem_repeats` (covers TideCluster + TideHunter + RepeatMasker `Satellite/*` calls); per-class numbers also rise to reflect DANTE-direct annotations that previously went unreported.
 
 ### Density BigWig tracks
 
-All `*.bw` outputs are per-window **density** tracks with identical value semantics, ready for genome browsers (JBrowse, IGV, UCSC):
+All `*.bw` outputs are per-window **density** tracks with identical value semantics, ready for genome browsers (JBrowse, IGV, UCSC). **Every annotation-derived density track is built from `Repeat_Annotation_Unified.gff3`** (the tier-resolved, non-overlapping master annotation); the only exception is the structural TideCluster tracks, which are intentionally built from the TideCluster clustering alone (see below).
 
-- **Value** = fraction of the window covered by that track's features (`0`–`1`), computed as mean per-base coverage per bin and then smoothed with a 10-bin moving average. (Where a track's features overlap each other the value can exceed 1; for the non-overlapping annotations the pipeline emits it stays within `[0, 1]`.)
+- **Value** = fraction of the window covered by that track's features (`0`–`1`), computed as mean per-base coverage per bin and then smoothed with a 10-bin moving average. (Where a track's features overlap each other the value can exceed 1; for the non-overlapping Unified annotation it stays within `[0, 1]`.)
 - **Window size**: `_10k` files use 1 kb bins (~10 kb effective smoothing window); `_100k` files use 10 kb bins (~100 kb effective window).
 - **Encoding (sparse)**: tracks are written run-length-merged — consecutive windows with an *exactly equal* value (including zero runs) are collapsed into one variable-width interval. This is lossless (non-zero values are unchanged at every position) and needs no consumer change; it makes satellite/per-family tracks dramatically smaller.
 
+#### The track families
+- **Total** — `Repeat_density/Repeat_density_total_{10k,100k}.bw`: all repeats genome-wide (Unified).
+- **Per class / superfamily** — `Repeat_density_by_class_bigwig/{10k,100k}/…`: one track per class, plus the `All_Ty1_Copia`, `All_Ty3_Gypsy`, and `Class_II.Subclass_1.TIR` rollups (Unified).
+
 #### Tandem-repeat tracks — which one to use
 
-Three different tandem-repeat density views are produced. They are **not** interchangeable:
+Tandem repeats get an aggregate track plus **two per-family views** (structural and unified). They are **not** interchangeable:
 
-| Track | Detection basis | Scope | Per-family? | Conflict-trimmed? |
-|---|---|---|---|---|
-| `Repeat_Annotation_NoSat_split_by_class_bigwig/{10k,100k}/Tandem_repeats_*.bw` | structural ∪ similarity (TideCluster + TideHunter + RepeatMasker) | aggregate of all families | no | **yes** |
-| `TideCluster/default/TideCluster_clustering_split_files_bigwig/{10k,100k}/TRC_<n>_*.bw` | structural only (TideCluster clustering) | one track per family | yes | no |
-| `Tandem_repeats_RepeatMasker_split_files_bigwig/{10k,100k}/TRC_<n>_*.bw` | similarity only (genome-wide RepeatMasker remasking) | one track per family | yes | no |
+| Track | Detection basis | Scope | Per-family? |
+|---|---|---|---|
+| `Repeat_density_by_class_bigwig/{10k,100k}/Tandem_repeats_*.bw` | Unified (structural ∪ similarity, tier-resolved) | aggregate of all families | no |
+| `Tandem_repeats_unified_split_by_family_bigwig/{10k,100k}/TRC_<n>_*.bw` | Unified `Name=TRC_<n>` (structural ∪ similarity, tier-resolved) | one track per family | yes |
+| `Tandem_repeats_TideCluster_split_by_family_bigwig/{10k,100k}/TRC_<n>_*.bw` | structural only (TideCluster clustering) | one track per family | yes |
+| `Tandem_repeats_TideCluster_{10k,100k}.bw` | structural only (TideCluster clustering) | aggregate of all families | no |
 
-The aggregate track is derived from `Repeat_Annotation_Unified.gff3`, which is non-overlapping by tier-priority: structure-based mobile elements (LTR/TIR/LINE/DANTE) outrank tandem layers, and within tandem the TideCluster structural calls outrank the RepeatMasker remasking. So any tandem territory that overlaps a higher-priority element is **reassigned to that element** rather than counted as tandem.
+Everything Unified-derived is **tier-resolved**: `Repeat_Annotation_Unified.gff3` is non-overlapping by priority — structure-based mobile elements (LTR/TIR/LINE/DANTE) outrank tandem layers, and within tandem the TideCluster structural calls outrank the RepeatMasker remasking. Any tandem territory overlapping a higher-priority element is **reassigned to that element** rather than counted as tandem.
 
 Guidance for downstream consumers:
 
-- For the **most complete single "where are the tandem repeats" footprint**, use the aggregate `Tandem_repeats_*.bw` — it unions both detection bases and de-duplicates per base (structural wins on overlap).
-- To **compare structural vs. similarity detection per family**, place the TideCluster per-family track next to the RepeatMasker per-family track for the same `TRC_<n>`.
-- The per-family RepeatMasker tracks are **untrimmed** (taken straight from `Tandem_repeats_RepeatMasker.gff3`), so a family's per-family coverage can exceed its contribution to the trimmed aggregate. The aggregate is therefore the right track for genome-wide totals; the per-family tracks are the right tracks for per-family comparison.
+- For the **authoritative "where are the tandem repeats" view**, use the Unified tracks — the aggregate `Tandem_repeats_*.bw` for genome-wide totals, or the unified per-family tracks for one family.
+- For each `TRC_<n>` you get **two per-family tracks**: the *unified* one (authoritative, tier-resolved union of structural + similarity) and the *structural* one (TideCluster clustering only). The structural per-family track is a **subset** of the unified one — pair them to see how much of a family is captured structurally vs. added by similarity remasking.
+- Per-family tandem tracks cover only `TRC_<n>`-named families; RM `Satellite/Unknown` and TideHunter residuals contribute to the aggregate but have no family track.
+
+#### Migration — BigWig paths changed (0.9.0rc6)
+
+BigWig outputs were renamed/relocated and re-sourced from Unified. GFF3 paths are unchanged. Repoint any genome-browser (JBrowse, etc.) tracks:
+
+| Old (≤ 0.9.0rc5) | New (≥ 0.9.0rc6) | Note |
+|---|---|---|
+| `RepeatMasker/Repeat_Annotation_NoSat_{10k,100k}.bw` | `Repeat_density/Repeat_density_total_{10k,100k}.bw` | source: RM-only-no-tandems → **Unified (all repeats)** |
+| `Repeat_Annotation_NoSat_split_by_class_bigwig/` | `Repeat_density_by_class_bigwig/` | values unchanged (already Unified) |
+| `TideCluster/default/TideCluster_clustering_{10k,100k}.bw` | `Tandem_repeats_TideCluster_{10k,100k}.bw` | values unchanged (structural TC) |
+| `TideCluster/default/TideCluster_clustering_split_files_bigwig/` | `Tandem_repeats_TideCluster_split_by_family_bigwig/` | values unchanged (structural TC) |
+| `Tandem_repeats_RepeatMasker_split_files_bigwig/` (rc-only) | `Tandem_repeats_unified_split_by_family_bigwig/` | source: raw RM-on-TC → **Unified `TRC_<n>`** |
 
 ## Build the container
 
@@ -377,7 +396,8 @@ identical to what the release workflow would publish.
 
 
 ## Changelog:
-- v 0.9.0rc5 - Density BigWigs written run-length-merged (sparse, lossless, much smaller); new `Class_II.Subclass_1.TIR` density rollup; new per-family BigWigs for the RepeatMasker tandem pass (`Tandem_repeats_RepeatMasker_split_files_bigwig/`); output-file documentation expanded for the tandem-repeat tracks
+- v 0.9.0rc6 - Density BigWigs reworked: all annotation-derived tracks now sourced from `Repeat_Annotation_Unified.gff3`; BigWig outputs renamed/relocated (breaking — see "Migration" in Output structure); genome-wide total now includes tandems (`Repeat_density/Repeat_density_total_*.bw`); per-family tandem tracks come in two flavours per `TRC_<n>` (structural TideCluster + Unified union); fixed crash on empty `RM_on_TideCluster_Library.gff3`
+- v 0.9.0rc5 - Density BigWigs written run-length-merged (sparse, lossless, much smaller); new `Class_II.Subclass_1.TIR` density rollup; new per-family BigWigs for the RepeatMasker tandem pass (superseded by rc6)
 - v 0.8.0 - Bug fix in DANTE_LINE, filtering of tandem repeats from DANTE_LINE added
 - v 0.7.4 - TideCluster updated to v. 1.8.0  with --long option added to detect tandem repeats with monomer up to 25kb. Bugfix in subtracting tandem repeats from dispersed repeats.
 - v 0.7.2 DANTE_LINE added,
