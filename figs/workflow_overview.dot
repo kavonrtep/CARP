@@ -15,6 +15,7 @@ digraph pipeline {
   "Input preparation" -> "DANTE protein-domain annotation";
   "Input preparation" -> "Tandem repeats (TideCluster)";
   "DANTE protein-domain annotation" -> "LTR retrotransposons (DANTE_LTR)";
+  "DANTE protein-domain annotation" -> "TIR DNA transposons (DANTE_TIR)";
   "DANTE protein-domain annotation" -> "LINEs (DANTE_LINE)";
   "LTR retrotransposons (DANTE_LTR)" -> "TIR DNA transposons (DANTE_TIR)";
   "TIR DNA transposons (DANTE_TIR)" -> "Repeat library construction";

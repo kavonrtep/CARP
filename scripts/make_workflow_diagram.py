@@ -65,6 +65,19 @@ STAGES = [
         "make_summary_plots", "make_benchmark_report", "make_repeat_report"]),
 ]
 
+# Stage-edges that must always be drawn (never removed by transitive
+# reduction), so a primary dependency isn't hidden behind a secondary path.
+# The DANTE protein-domain stage fans out to all three element callers; that
+# fan-out is the primary flow, but TIR also depends on the LTR *library*
+# (build_fallback_tir_library), which would otherwise let reduction drop the
+# direct DANTE->TIR edge. Only edges that are genuine rule dependencies are
+# pinned (others are silently ignored).
+PINNED_EDGES = {
+    ("DANTE protein-domain annotation", "LTR retrotransposons (DANTE_LTR)"),
+    ("DANTE protein-domain annotation", "TIR DNA transposons (DANTE_TIR)"),
+    ("DANTE protein-domain annotation", "LINEs (DANTE_LINE)"),
+}
+
 # Muted, print-friendly fill colours (one per stage, in order).
 PALETTE = [
     "#E8EEF7", "#DCE9D5", "#F6E7CF", "#F3D9D5", "#E7Dced",
@@ -144,14 +157,17 @@ def get_rule_edges(snakefile, snakemake_bin):
     return edges
 
 
-def transitive_reduction(edges):
+def transitive_reduction(edges, protected=frozenset()):
     """Drop edges implied by a longer path (DAG transitive reduction), so the
-    overview shows immediate stage-to-stage flow instead of every skip edge."""
+    overview shows immediate stage-to-stage flow instead of every skip edge.
+    Edges in ``protected`` are never removed."""
     succ = {}
     for a, b in edges:
         succ.setdefault(a, set()).add(b)
     reduced = set(edges)
     for a, b in list(edges):
+        if (a, b) in protected:
+            continue
         stack = [s for s in succ.get(a, ()) if s != b]
         seen = set()
         while stack:
@@ -194,7 +210,8 @@ def build_dot(snakefile, snakemake_bin):
         sa, sb = r2s.get(a), r2s.get(b)
         if sa and sb and sa != sb and stage_idx[sa] < stage_idx[sb]:
             stage_edges.add((sa, sb))
-    stage_edges = transitive_reduction(stage_edges)
+    protected = PINNED_EDGES & stage_edges
+    stage_edges = transitive_reduction(stage_edges, protected)
 
     lines = [
         "digraph pipeline {",
