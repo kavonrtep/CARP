@@ -131,13 +131,12 @@ load_dante_line_stats <- function(outdir) {
 # ── B6. Discover BigWig files ──────────────────────────────────────────────
 discover_bw_files <- function(outdir, bin_width) {
   suffix <- if (bin_width == 100000) "_100k.bw" else "_10k.bw"
-  bw_dir_rm <- file.path(outdir, "Repeat_Annotation_NoSat_split_by_class_bigwig",
+  bw_dir_rm <- file.path(outdir, "Repeat_density_by_class_bigwig",
                           if (bin_width == 100000) "100k" else "10k")
-  bw_dir_tc <- file.path(outdir, "TideCluster", "default",
-                          "TideCluster_clustering_split_files_bigwig",
+  bw_dir_tc <- file.path(outdir, "Tandem_repeats_TideCluster_split_by_family_bigwig",
                           if (bin_width == 100000) "100k" else "10k")
-  tc_agg    <- file.path(outdir, "TideCluster", "default",
-                          paste0("TideCluster_clustering", suffix))
+  tc_agg    <- file.path(outdir,
+                          paste0("Tandem_repeats_TideCluster", suffix))
 
   find_bw <- function(dir, pattern) {
     if (!dir.exists(dir)) return(character(0))
@@ -453,8 +452,7 @@ discover_lineage_bw_files <- function(rm_dir, bin_width) {
 discover_trc_bw_files <- function(outdir, bin_width) {
   res     <- if (bin_width == 100000L) "100k" else "10k"
   suffix  <- paste0("_", res, ".bw")
-  trc_dir <- file.path(outdir, "TideCluster", "default",
-                        "TideCluster_clustering_split_files_bigwig", res)
+  trc_dir <- file.path(outdir, "Tandem_repeats_TideCluster_split_by_family_bigwig", res)
   mon_f   <- file.path(outdir, "TideCluster", "default", "TideCluster_kite",
                         "monomer_size_best_estimate_stat.csv")
   if (!dir.exists(trc_dir)) return(list())
@@ -1427,9 +1425,9 @@ main <- function() {
   message("Building density track data...")
   d_bin   <- 100000L
   d_res   <- "100k"
-  rm_100k <- file.path(outdir, "Repeat_Annotation_NoSat_split_by_class_bigwig", d_res)
-  tc_agg_100k <- file.path(outdir, "TideCluster", "default",
-                             paste0("TideCluster_clustering_", d_res, ".bw"))
+  rm_100k <- file.path(outdir, "Repeat_density_by_class_bigwig", d_res)
+  tc_agg_100k <- file.path(outdir,
+                             paste0("Tandem_repeats_TideCluster_", d_res, ".bw"))
   find_100k <- function(stem) {
     p <- file.path(rm_100k, paste0(stem, "_", d_res, ".bw"))
     if (file.exists(p)) p else NULL
