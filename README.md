@@ -377,6 +377,7 @@ identical to what the release workflow would publish.
 
 
 ## Changelog:
+- v 0.9.0rc5 - Density BigWigs written run-length-merged (sparse, lossless, much smaller); new `Class_II.Subclass_1.TIR` density rollup; new per-family BigWigs for the RepeatMasker tandem pass (`Tandem_repeats_RepeatMasker_split_files_bigwig/`); output-file documentation expanded for the tandem-repeat tracks
 - v 0.8.0 - Bug fix in DANTE_LINE, filtering of tandem repeats from DANTE_LINE added
 - v 0.7.4 - TideCluster updated to v. 1.8.0  with --long option added to detect tandem repeats with monomer up to 25kb. Bugfix in subtracting tandem repeats from dispersed repeats.
 - v 0.7.2 DANTE_LINE added,
