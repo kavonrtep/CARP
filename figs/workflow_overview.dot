@@ -1,0 +1,26 @@
+digraph pipeline {
+  graph [rankdir=TB, fontname="Helvetica", labelloc="t", fontsize=20, label="Assembly Repeat Annotation Pipeline\n(stage overview — hover any box for its rules)", nodesep=0.4, ranksep=0.55];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=13, margin="0.18,0.10", penwidth=1.2, color="#555555"];
+  edge [color="#777777", penwidth=1.3, arrowsize=0.8];
+  "Input preparation" [label="1. Input preparation\n(3 rules)", fillcolor="#E8EEF7", tooltip="clean_genome_fasta — Clean FASTA headers by removing everything after the first whitespace character.\nindex_genome_fasta — Create FASTA index (.fai) for the cleaned genome.\ncalculate_seqlengths — (no description)"];
+  "DANTE protein-domain annotation" [label="2. DANTE protein-domain annotation\n(2 rules)", fillcolor="#DCE9D5", tooltip="dante — (no description)\nfilter_dante — (no description)"];
+  "LTR retrotransposons (DANTE_LTR)" [label="3. LTR retrotransposons (DANTE_LTR)\n(2 rules)", fillcolor="#F6E7CF", tooltip="dante_ltr — (no description)\nmake_library_of_ltrs — (no description)"];
+  "TIR DNA transposons (DANTE_TIR)" [label="4. TIR DNA transposons (DANTE_TIR)\n(5 rules)", fillcolor="#F3D9D5", tooltip="dante_tir — (no description)\ndante_tir_fallback — Fallback TIR detection using TPase domain flanking-region analysis.\nmerge_dante_tir_with_fallback — Merge primary DANTE_TIR and fallback annotations.\nmake_tir_combined_library — Build the TIR repeat library from primary DANTE_TIR elements only.\nbuild_fallback_tir_library — Build the optional DANTE_TIR_FALLBACK-derived library."];
+  "LINEs (DANTE_LINE)" [label="5. LINEs (DANTE_LINE)\n(1 rule)", fillcolor="#E7Dced", tooltip="dante_line — (no description)"];
+  "Tandem repeats (TideCluster)" [label="6. Tandem repeats (TideCluster)\n(4 rules)", fillcolor="#D6ECEC", tooltip="tidecluster_long — (no description)\ntidecluster_short — (no description)\ntidecluster_reannotate — (no description)\nmerge_tidecluster_default_and_short — (no description)"];
+  "Repeat library construction" [label="7. Repeat library construction\n(4 rules)", fillcolor="#EDE3D0", tooltip="make_subclass_2_library — (no description)\nfilter_ltr_rt_library — (no description)\nconcatenate_libraries — (no description)\nreduce_library — Per-classification CAP3 / mmseqs2 dedup of the combined library."];
+  "RepeatMasker similarity annotation" [label="8. RepeatMasker similarity annotation\n(3 rules)", fillcolor="#F1D9E6", tooltip="repeatmasker — (no description)\nsubtract_satellites_from_rm — (no description)\nmerge_rm_and_dante — (no description)"];
+  "Unified annotation" [label="9. Unified annotation\n(2 rules)", fillcolor="#DfE7EE", tooltip="make_unified_annotation — Produce a single, tier-prioritised repeat annotation GFF3 from all pipeline layers.\nvalidate_classifications — Fail fast if any upstream tool emits a classification not listed in"];
+  "Density tracks, outputs & reports" [label="10. Density tracks, outputs & reports\n(12 rules)", fillcolor="#E9E4DE", tooltip="make_summary_statistics_and_split_by_class — Compute summary_statistics.csv and the per-class split GFFs from\nmake_bigwig_density — (no description)\ncalculate_bigwig_density — Genome-wide total density (from the Unified annotation — all repeats,\nmake_unified_tandem_per_family_bigwig — Per-family tandem density BigWigs from the Unified annotation.\nmake_tidecluster_tandem_per_family_bigwig — Per-family STRUCTURAL tandem density BigWigs (TideCluster clustering\nmake_track_for_masking — (no description)\nmake_track_for_Ns — (no description)\nadd_top_level_outputs — (no description)\nadd_html_outputs — (no description)\nmake_summary_plots — (no description)\nmake_benchmark_report — (no description)\nmake_repeat_report — (no description)"];
+  "Input preparation" -> "DANTE protein-domain annotation";
+  "Input preparation" -> "Tandem repeats (TideCluster)";
+  "DANTE protein-domain annotation" -> "LTR retrotransposons (DANTE_LTR)";
+  "DANTE protein-domain annotation" -> "LINEs (DANTE_LINE)";
+  "LTR retrotransposons (DANTE_LTR)" -> "TIR DNA transposons (DANTE_TIR)";
+  "TIR DNA transposons (DANTE_TIR)" -> "Repeat library construction";
+  "LINEs (DANTE_LINE)" -> "Repeat library construction";
+  "Tandem repeats (TideCluster)" -> "RepeatMasker similarity annotation";
+  "Repeat library construction" -> "RepeatMasker similarity annotation";
+  "RepeatMasker similarity annotation" -> "Unified annotation";
+  "Unified annotation" -> "Density tracks, outputs & reports";
+}

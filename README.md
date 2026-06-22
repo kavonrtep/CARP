@@ -368,6 +368,22 @@ BigWig outputs were renamed/relocated and re-sourced from Unified. GFF3 paths ar
 | `TideCluster/default/TideCluster_clustering_split_files_bigwig/` | `Tandem_repeats_TideCluster_split_by_family_bigwig/` | values unchanged (structural TC) |
 | `Tandem_repeats_RepeatMasker_split_files_bigwig/` (rc-only) | `Tandem_repeats_unified_split_by_family_bigwig/` | source: raw RM-on-TC → **Unified `TRC_<n>`** |
 
+## Workflow diagram
+
+A high-level schematic of the analysis stages lives at
+[`figs/workflow_overview.svg`](figs/workflow_overview.svg) (and `.png`). Its
+structure is derived **live from the Snakefile** — `scripts/make_workflow_diagram.py`
+runs `snakemake --rulegraph`, groups the rules into analysis stages, transitively
+reduces the dependency graph, and labels each stage with an SVG tooltip listing
+its rules and their docstrings. Regenerate after changing the workflow:
+
+```bash
+scripts/make_workflow_diagram.py            # writes figs/workflow_overview.{dot,svg,png}
+```
+
+Requires `snakemake` and Graphviz `dot` on PATH. The script fails loudly if a new
+rule is not assigned to a stage, so the figure cannot silently drift.
+
 ## Build the container
 
 Release builds are produced by GitHub Actions
