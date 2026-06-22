@@ -1,6 +1,17 @@
 #!/usr/bin/env Rscript
 library(optparse)
 
+# Resolve this script's own directory so we can source the shared
+# density helper that sits beside it. Works whether the script is run
+# from the repo checkout or from /opt/pipeline/scripts in the container,
+# because --file= always carries the resolved path to this script.
+.density_script_dir <- local({
+  a <- commandArgs(trailingOnly = FALSE)
+  f <- grep("^--file=", a, value = TRUE)
+  if (length(f)) dirname(normalizePath(sub("^--file=", "", f[1]))) else getwd()
+})
+source(file.path(.density_script_dir, "density_utils.R"))
+
 get_density <- function(x, chr_size=NULL, tw=1000000){
   cvg <- coverage(x)
   bins <- tileGenome(chr_size, tilewidth = tw)
@@ -97,4 +108,7 @@ chr_size_in_order <- chr_size_all[seqlevels(g)]
 window_size <- opt$window/10 # 10 bins per window
 d <- get_density2(g, chr_size_in_order, N_for_mean = 10, step_size = window_size)
 
-export(d, opt$output, format="bigwig")
+# FR-1: write the BigWig run-length-merged (adjacent equal-value tiles,
+# incl. zero runs, collapsed into one interval) instead of one entry per
+# window. Lossless; non-zero values unchanged at every position.
+export(rle_merge_granges(d), opt$output, format="bigwig")

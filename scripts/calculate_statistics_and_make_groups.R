@@ -124,6 +124,18 @@ if (length(gypsy) > 0){
   writeLines(c("##gff-version 3", "##", "## No gypsy found"), opt$gypsy)
 }
 
+# FR-2a: TIR-level density rollup. Write the union of everything
+# classified under Class_II/Subclass_1/TIR — bare TIR, all five
+# superfamilies, and DANTE_TIR_fallback partials present in Unified —
+# into the split dir as Class_II.Subclass_1.TIR.gff3. make_bigwig_density
+# then emits Class_II.Subclass_1.TIR_{10k,100k}.bw automatically, giving
+# TIR one density row alongside the Copia/Gypsy/LINE rollups. Written
+# after the per-Name split loop so it supersets any bare-TIR file.
+tir <- rm[grepl("Class_II/Subclass_1/TIR", rm$Name, fixed = TRUE)]
+if (length(tir) > 0){
+  export(tir, paste0(opt$dir, "/Class_II.Subclass_1.TIR.gff3"), format="gff3")
+}
+
 
 # table output is at the end - it server as checkpoint in snakemake
 write.table(out, file=opt$output, row.names=FALSE, sep="\t")
