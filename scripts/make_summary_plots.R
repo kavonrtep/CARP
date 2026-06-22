@@ -90,8 +90,7 @@ plot_tracks <- function(main_tracks, SL,
 
 
 SL <- readRDS(paste0(main_dir, "/genome_seqlengths.rds"))
-dir_100k_RA <- paste0(main_dir,"/Repeat_Annotation_NoSat_split_by_class_bigwig/100k")
-dir_100k_TC <- paste0(main_dir,"/TideCluster/default")
+dir_100k_RA <- paste0(main_dir,"/Repeat_density_by_class_bigwig/100k")
 # sort by lengths
 SL <- SL[order(SL, decreasing = TRUE)]
 widths <- SL/sum(SL)*100
@@ -103,7 +102,7 @@ list_of_tracks <-  c(
   rDNA = paste0(dir_100k_RA, "/rDNA_100k.bw"),
   Ty1_Copia = paste0(dir_100k_RA, "/All_Ty1_Copia_100k.bw"),
   Ty3_Gypsy = paste0(dir_100k_RA, "/All_Ty3_Gypsy_100k.bw"),
-  Tandem_repeats_TC = paste0(dir_100k_TC, "/TideCluster_clustering_100k.bw")
+  Tandem_repeats_TC = paste0(main_dir, "/Tandem_repeats_TideCluster_100k.bw")
 )
 # load only existing files
 main_tracks <- list()
@@ -126,7 +125,7 @@ names(main_tracks_df_list) <- names(main_tracks)
 
 
 # plot lineges
-RM_dir <- paste0(main_dir, "/Repeat_Annotation_NoSat_split_by_class_bigwig/100k")
+RM_dir <- paste0(main_dir, "/Repeat_density_by_class_bigwig/100k")
 lineages_file <- dir(RM_dir, pattern = "LTR.Ty")
 # keep only defined lineages
 lineages <- c('Ale', 'Alesia', 'Angela', 'Bianca', 'Bryco', 'Gymco-I', 'Gymco-II',
@@ -159,7 +158,7 @@ monomer_best_estimage <- read.table(
 
 major_bigwig <- dir(
   paste0(main_dir,
-         "/TideCluster/default/TideCluster_clustering_split_files_bigwig/100k"),
+         "/Tandem_repeats_TideCluster_split_by_family_bigwig/100k"),
   pattern = "bw")
 
 trc_name <- gsub("_100k.bw", "", major_bigwig)
@@ -178,7 +177,7 @@ for (i in 1:N){
   monomer_size <- names(sort(table(monomer_best_estimage$position[monomer_best_estimage$TRC_ID == label]),
                         decreasing = TRUE)[1])
   label <- paste0(label, " (", monomer_size, "bp)")
-  trc_bw[[label]] <- import(paste0(main_dir, "/TideCluster/default/TideCluster_clustering_split_files_bigwig/100k/",
+  trc_bw[[label]] <- import(paste0(main_dir, "/Tandem_repeats_TideCluster_split_by_family_bigwig/100k/",
                                      major_bigwig[[i]]))
 }
 
