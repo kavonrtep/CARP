@@ -8,6 +8,27 @@ if (FALSE){
 suppressPackageStartupMessages({
   library(rtracklayer)
 })
+
+# Robustness: on ANY uncaught error (e.g. data too large to render, an
+# allocation failure, a malformed input) emit a one-page placeholder PDF and
+# exit 0, so the Snakemake rule still gets a valid output instead of failing or
+# leaving a truncated file. Per-panel failures are handled separately below
+# (placeholder panel); this global handler catches everything else.
+write_placeholder_pdf <- function(out, msg){
+  try(grDevices::graphics.off(), silent = TRUE)  # close any half-open device
+  try({
+    pdf(out, width = 8, height = 6)
+    plot.new()
+    text(0.5, 0.55, "Summary plots not rendered", cex = 1.6, col = "grey25")
+    text(0.5, 0.42, msg, cex = 0.8, col = "grey55")
+    dev.off()
+  }, silent = TRUE)
+}
+options(error = function(){
+  write_placeholder_pdf(output_pdf, geterrmessage())
+  quit(save = "no", status = 0)
+})
+
 smooth_score <- function(x, N_for_mean = 10){
   # extend the score in each direction by N_for_mean-1 zeros
   sc <- c(rep(0, N_for_mean-1), x, rep(0, N_for_mean-1))

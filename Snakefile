@@ -1700,13 +1700,22 @@ rule make_summary_plots:
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
-        set -euo pipefail
+        set -uo pipefail   # NOT -e: failures are handled explicitly below
         set -x
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        # command can fail but it should not stop the workflow
-        make_summary_plots.R {params.output_dir} {output} || true
-        touch {output}
+        # Plotting must never fail the workflow. The R script already falls back
+        # to a placeholder PDF on internal errors; this is the outer net for the
+        # cases R cannot catch (e.g. the process is OOM-killed): if the script
+        # exits non-zero or leaves no/empty output, write a placeholder so the
+        # rule still produces a valid, non-empty PDF. (No bare `touch`, which
+        # would create a 0-byte "PDF".)
+        rc=0
+        make_summary_plots.R {params.output_dir} {output} || rc=$?
+        if [ "$rc" -ne 0 ] || [ ! -s {output} ]; then
+            echo "make_summary_plots.R failed (rc=$rc) or produced empty output; writing placeholder PDF"
+            make_placeholder_pdf.R {output} "Summary plots not rendered"
+        fi
         """
 
 
