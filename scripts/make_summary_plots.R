@@ -21,8 +21,19 @@ smooth_score <- function(x, N_for_mean = 10){
 
 plot_tracks <- function(main_tracks, SL,
                         loess_50_threshold = 50, loess_100_threshold = 100,reverse = FALSE,
-                        col1 = "#00000050", col2 = "#FF000050", col3 = "#FF0000FF") {
-  ymax <- max(sapply(main_tracks, function(x) max(x$score)))
+                        col1 = "#00000050", col2 = "#FF000050", col3 = "#FF0000FF",
+                        empty_msg = "no tracks available") {
+  # Drop NULL/empty tracks and bail out gracefully on an empty set, so a
+  # genome lacking a whole category (e.g. no LTR lineages or no satellites)
+  # yields a labelled placeholder page instead of crashing mid-PDF.
+  main_tracks <- main_tracks[!vapply(main_tracks, is.null, logical(1))]
+  main_tracks <- main_tracks[vapply(main_tracks, function(x) length(x) > 0, logical(1))]
+  if (length(main_tracks) == 0){
+    plot.new(); text(0.5, 0.5, empty_msg, cex = 1.2, col = "grey40")
+    return(invisible(NULL))
+  }
+  ymax <- max(sapply(main_tracks, function(x) max(x$score)), na.rm = TRUE)
+  if (!is.finite(ymax) || ymax <= 0) ymax <- 1
   par(mar=c(5,1,1,1))
   if (reverse){
     ylims <- c(length(main_tracks)*1.1 * ymax, 0)
@@ -146,15 +157,19 @@ names(lineages_bw) <- gsub(".+[.]", "",
 
 # plot major satellites
 
-monomer_estimates_kite <- read.table(
-  paste0(main_dir,
-         "/TideCluster/default/TideCluster_kite/monomer_size_top3_estimats.csv"),
-  header = TRUE, sep = "\t")
+read_csv_or_empty <- function(path){
+  if (file.exists(path)) {
+    tryCatch(read.table(path, header = TRUE, sep = "\t"),
+             error = function(e) data.frame())
+  } else {
+    data.frame()
+  }
+}
+monomer_estimates_kite <- read_csv_or_empty(
+  paste0(main_dir, "/TideCluster/default/TideCluster_kite/monomer_size_top3_estimats.csv"))
 
-monomer_best_estimage <- read.table(
-  paste0(main_dir,
-         "/TideCluster/default/TideCluster_kite/monomer_size_best_estimate_stat.csv"),
-  header = TRUE, sep = "\t")
+monomer_best_estimage <- read_csv_or_empty(
+  paste0(main_dir, "/TideCluster/default/TideCluster_kite/monomer_size_best_estimate_stat.csv"))
 
 major_bigwig <- dir(
   paste0(main_dir,
@@ -169,15 +184,19 @@ major_bigwig <- major_bigwig[order(trc_index)]
 trc_name <- trc_name[order(trc_index)]
 trc_index <- trc_index[order(trc_index)]
 
-# read first max 15 satellites
+# read first max 20 satellites (seq_len handles the no-satellite case: N == 0)
 N <- min(20, length(major_bigwig))
 trc_bw <- list()
-for (i in 1:N){
+have_monomer <- all(c("position", "TRC_ID") %in% names(monomer_best_estimage))
+for (i in seq_len(N)){
   label <- trc_name[i]
-  monomer_size <- names(sort(table(monomer_best_estimage$position[monomer_best_estimage$TRC_ID == label]),
-                        decreasing = TRUE)[1])
-  label <- paste0(label, " (", monomer_size, "bp)")
-  trc_bw[[label]] <- import(paste0(main_dir, "/Tandem_repeats_TideCluster_split_by_family_bigwig/100k/",
+  monomer_size <- NA
+  if (have_monomer){
+    monomer_size <- names(sort(table(monomer_best_estimage$position[monomer_best_estimage$TRC_ID == label]),
+                          decreasing = TRUE)[1])
+  }
+  lab <- if (is.null(monomer_size) || is.na(monomer_size)) label else paste0(label, " (", monomer_size, "bp)")
+  trc_bw[[lab]] <- import(paste0(main_dir, "/Tandem_repeats_TideCluster_split_by_family_bigwig/100k/",
                                      major_bigwig[[i]]))
 }
 
@@ -185,16 +204,20 @@ for (i in 1:N){
 
 
 pdf(output_pdf, width = 14, height = 7)
-plot_tracks(main_tracks, SL)
-
-
-
-plot_tracks(lineages_bw, SL)
-
-
-
-
-plot_tracks(rev(trc_bw), SL)
-dev.off()
+on.exit(dev.off(), add = TRUE)   # always finalise a valid PDF
+# Each panel is isolated: an error in one (e.g. an empty category) draws a
+# placeholder and does not abort the others or truncate the file.
+safe_panel <- function(expr, msg){
+  tryCatch(expr, error = function(e){
+    message("summary_plots: ", msg, " panel failed: ", conditionMessage(e))
+    plot.new(); text(0.5, 0.5, paste0(msg, " unavailable"), cex = 1.2, col = "grey40")
+  })
+}
+safe_panel(plot_tracks(main_tracks, SL, empty_msg = "no repeat-class tracks"),
+           "repeat-class")
+safe_panel(plot_tracks(lineages_bw, SL, empty_msg = "no LTR lineage tracks"),
+           "LTR lineage")
+safe_panel(plot_tracks(rev(trc_bw), SL, empty_msg = "no satellite (TRC) tracks"),
+           "satellite")
 
 
