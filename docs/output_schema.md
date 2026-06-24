@@ -15,7 +15,11 @@ The manifest is implemented in `scripts/manifest.py`; the authoritative
 `outputs` map lives there (`OUTPUTS`) and `OUTPUT_SCHEMA_VERSION` is the current
 value.
 
-## v2 — CARP 0.9.0rc6 onward (current)
+## v2 — CARP 0.9.0rc6 and rc7 (current)
+
+The output **layout** contract is unchanged across rc6 and rc7; rc7 only *adds*
+`carp_manifest.json` itself (additive, no layout change — see the note at the
+bottom), so it stays `schema_version: "2"`.
 
 Density BigWigs reworked and renamed, all sourced from
 `Repeat_Annotation_Unified.gff3` and written sparse (run-length-merged):
