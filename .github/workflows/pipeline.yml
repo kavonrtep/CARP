@@ -193,6 +193,14 @@ jobs:
       - name: Assert fixture outputs
         run: bash scripts/assert_fixture_outputs.sh ${{ matrix.fixture }}
 
+      # Manifest sync guard: every path declared in carp_manifest.json must
+      # exist in the produced output tree. Gated to the medium fixture (the
+      # release gate that produces the full output set) so a renamed/removed
+      # output that the manifest still points at turns CI red.
+      - name: Assert manifest matches produced outputs
+        if: matrix.fixture == 'medium'
+        run: python scripts/assert_manifest_outputs.py tests/fixtures/output_${{ matrix.fixture }}
+
       - name: Upload output on failure
         if: failure()
         uses: actions/upload-artifact@v4
