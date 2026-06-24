@@ -75,6 +75,18 @@ else:
     if config["reduce_library"] not in [True, False]:
         raise ValueError("Invalid value for reduce_library_size. Must be either True or False.")
 
+# Rotation-invariant reduction of the TideCluster consensus *dimer* library
+# used by tidecluster_reannotate. DECOUPLED from `reduce_library` (which
+# governs the main RepeatMasker / CAP3 library) and defaults to True: it is
+# lossless for masking (validated: masked bp unchanged within ±0.15% on
+# tiny_pea and an 800 Mbp genome) while shrinking the dimer library ~5–20×,
+# making the genome-wide tandem remasking ~1.5–5× faster. See
+# scripts/reduce_dimer_library.py.
+if "reduce_tidecluster_library" not in config:
+    config["reduce_tidecluster_library"] = True
+elif config["reduce_tidecluster_library"] not in [True, False]:
+    raise ValueError("Invalid value for reduce_tidecluster_library. Must be either True or False.")
+
 # DANTE_TIR_FALLBACK stringency knobs. Both default to 3; both must be
 # positive integers. See dante_tir_fallback.py for semantics.
 for _key in ("dante_tir_fallback_min_alignments", "dante_tir_fallback_min_cluster_size"):
@@ -818,7 +830,7 @@ rule tidecluster_reannotate:
     params:
         outdir=directory(F"{config['output_dir']}/TideCluster"),
         tc_sensitivity=tc_sensitivity,
-        reduce_library=config["reduce_library"]
+        reduce_dimer=config["reduce_tidecluster_library"]
     log:
         stdout=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.log",
         stderr=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.err"
@@ -842,7 +854,7 @@ rule tidecluster_reannotate:
             exit 0
         fi
 
-        if [ "{params.reduce_library}" = "True" ]; then
+        if [ "{params.reduce_dimer}" = "True" ]; then
             reduced={params.outdir}/default/TideCluster_consensus_dimer_library_reduced.fasta
             reduce_dimer_library.py \
                 -i {input.dimer_library_default} \
