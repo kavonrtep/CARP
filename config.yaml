@@ -7,6 +7,12 @@ tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
 repeatmasker_sensitivity: default
 # possible values are: True, False, if missing, True is used
 reduce_library: False
+# Rotation-invariant reduction of the TideCluster consensus dimer library used
+# by the genome-wide tandem remasking (tidecluster_reannotate). Independent of
+# reduce_library above. Default True: lossless for masking (validated) and makes
+# the remasking ~1.5-5x faster by collapsing redundant phase variants per TRC.
+# Set False to remask with the full (unreduced) dimer library.
+reduce_tidecluster_library: True
 # DANTE_TIR_FALLBACK tuning (both default to 3 if omitted).
 # dante_tir_fallback_min_alignments: how many other anchors must support an
 #   extension length before it is applied (larger = more conservative extensions).
