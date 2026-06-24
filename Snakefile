@@ -1441,6 +1441,7 @@ rule make_bigwig_density:
         stderr=F"{config['output_dir']}/logs/make_bigwig_density.err"
     benchmark:
         F"{config['output_dir']}/benchmarks/make_bigwig_density.tsv"
+    threads: workflow.cores
     conda:
         "envs/tidecluster.yaml"
     shell:
@@ -1452,7 +1453,7 @@ rule make_bigwig_density:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         ls_absolute_path=$(realpath {input.genome_seqlengths})
-        calculate_density_batch.R -d {params.gffdir} -o {params.bwdir} -g $ls_absolute_path
+        calculate_density_batch.R -d {params.gffdir} -o {params.bwdir} -g $ls_absolute_path -t {threads}
         touch {output.checkpoint}
         """
 
@@ -1569,6 +1570,7 @@ rule make_unified_tandem_per_family_bigwig:
         stderr=F"{config['output_dir']}/logs/make_unified_tandem_per_family_bigwig.err"
     benchmark:
         F"{config['output_dir']}/benchmarks/make_unified_tandem_per_family_bigwig.tsv"
+    threads: workflow.cores
     conda:
         "envs/tidecluster.yaml"
     shell:
@@ -1582,7 +1584,7 @@ rule make_unified_tandem_per_family_bigwig:
         mkdir -p {params.splitdir} {params.bwdir}
         split_gff_by_name.R -i {input.unified} -o {params.splitdir} --name-prefix TRC_
         if ls {params.splitdir}/*.gff3 >/dev/null 2>&1; then
-            calculate_density_batch.R -d {params.splitdir} -o {params.bwdir} -g $ls_absolute_path
+            calculate_density_batch.R -d {params.splitdir} -o {params.bwdir} -g $ls_absolute_path -t {threads}
         else
             echo "No tandem families to split — nothing to do"
         fi
@@ -1610,6 +1612,7 @@ rule make_tidecluster_tandem_per_family_bigwig:
         stderr=F"{config['output_dir']}/logs/make_tidecluster_tandem_per_family_bigwig.err"
     benchmark:
         F"{config['output_dir']}/benchmarks/make_tidecluster_tandem_per_family_bigwig.tsv"
+    threads: workflow.cores
     conda:
         "envs/tidecluster.yaml"
     shell:
@@ -1622,7 +1625,7 @@ rule make_tidecluster_tandem_per_family_bigwig:
         ls_absolute_path=$(realpath {input.genome_seqlengths})
         mkdir -p {params.bwdir}
         if ls {input.split_files}/*.gff3 >/dev/null 2>&1; then
-            calculate_density_batch.R -d {input.split_files} -o {params.bwdir} -g $ls_absolute_path
+            calculate_density_batch.R -d {input.split_files} -o {params.bwdir} -g $ls_absolute_path -t {threads}
         else
             echo "No TideCluster per-cluster split files — nothing to do"
         fi
