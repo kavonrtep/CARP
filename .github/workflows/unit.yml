@@ -32,6 +32,9 @@ jobs:
       - name: Python classification vector
         run: python tests/test_classification.py
 
+      - name: Output manifest contract
+        run: python tests/test_manifest.py
+
       - name: R classification vector
         run: Rscript tests/test_classification.R
 

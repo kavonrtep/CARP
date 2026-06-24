@@ -177,6 +177,7 @@ rDNA_45S/ITS1
                   or "-n" in args.snakemake_args.split())
     finalise_fn = None
     extend_fn = None
+    manifest_finalise_fn = None
     if not is_dry_run:
         try:
             sys.path.insert(0, os.path.join(script_dir, "scripts"))
@@ -188,6 +189,18 @@ rDNA_45S/ITS1
             extend_fn = extend_with_envs
         except Exception as e:
             print(F"WARNING: failed to write phase-1 provenance: {e}",
+                  file=sys.stderr)
+        # Output manifest (FR-3): carp_manifest.json — a SEPARATE artifact from
+        # provenance (schema + file map, not a completion gate), written by the
+        # same wrapper hook so manifest and provenance can't drift and both are
+        # present on success and failure.
+        try:
+            sys.path.insert(0, os.path.join(script_dir, "scripts"))
+            from manifest import init_manifest, finalise_manifest
+            init_manifest(output_dir)
+            manifest_finalise_fn = finalise_manifest
+        except Exception as e:
+            print(F"WARNING: failed to write output manifest: {e}",
                   file=sys.stderr)
 
     # Phase-2 provenance prep: ensure conda envs are created, then
@@ -230,6 +243,18 @@ rDNA_45S/ITS1
                 exit_status=("completed" if rc == 0 else "failed"))
         except Exception as e:
             print(F"WARNING: failed to finalise provenance: {e}",
+                  file=sys.stderr)
+
+    # Flip the manifest's exit_status before we return (and thus before any
+    # scratch->NFS copy-back and the exit-code DONE markers), so it travels
+    # with the outputs. Never gates completion — a failure here only warns.
+    if manifest_finalise_fn is not None:
+        try:
+            manifest_finalise_fn(
+                output_dir,
+                "completed" if rc == 0 else "failed")
+        except Exception as e:
+            print(F"WARNING: failed to finalise output manifest: {e}",
                   file=sys.stderr)
 
     if rc != 0:
