@@ -2,3 +2,6 @@
 /hermit/
 /tests/fixtures/output_*/
 /context/
+
+# Personal, machine-specific Claude Code settings (permissions etc.)
+.claude/settings.local.json

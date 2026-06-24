@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // \"\"'); if printf '%s' \"$cmd\" | grep -Eq 'git[[:space:]]+commit.*--amend|git[[:space:]]+rebase|git[[:space:]]+reset.*--hard|git[[:space:]]+tag.*(-d|--delete|-f|--force)|git[[:space:]]+push.*(--force|--force-with-lease|-f)|git[[:space:]]+push.*[[:space:]]:'; then printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"Rewriting git history — run: git rev-parse origin/main first. Never amend/move a commit or tag already on origin (you push from the host between turns).\"}}'; fi",
+            "statusMessage": "git history-rewrite guard"
+          }
+        ]
+      }
+    ]
+  }
+}
