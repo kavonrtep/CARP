@@ -242,6 +242,10 @@ Summary files:
 - `all_repeats_for_masking.bed` - Merged coordinates of all repeats (BED format)
 - `gaps_10plus.bed` - Assembly gaps (N regions ≥10 bp)
 
+Metadata files (written by `run_pipeline.py`):
+- `carp_manifest.json` - Machine-readable output contract: `schema_version` plus a map of stable logical names → output paths, so downstream consumers (e.g. a genome-browser portal) resolve files by name instead of guessing the layout. Written on every run (success or fail; `exit_status` reflects which). See [`docs/output_schema.md`](docs/output_schema.md)
+- `run_provenance.json` - Pipeline version, git SHA, config, and per-environment tool versions for the run
+
 HTML reports:
 - `TideCluster_report.html` - Interactive report for tandem repeat analysis
 - `DANTE_LTR_report.html` - Summary of LTR retrotransposon findings
@@ -412,6 +416,7 @@ identical to what the release workflow would publish.
 
 
 ## Changelog:
+- v 0.9.0rc7 - Emit `carp_manifest.json` at the output root (machine-readable output contract: `schema_version` + logical-name→path map; written by `run_pipeline.py` on success and failure). See [`docs/output_schema.md`](docs/output_schema.md)
 - v 0.9.0rc6 - Density BigWigs reworked: all annotation-derived tracks now sourced from `Repeat_Annotation_Unified.gff3`; BigWig outputs renamed/relocated (breaking — see "Migration" in Output structure); genome-wide total now includes tandems (`Repeat_density/Repeat_density_total_*.bw`); per-family tandem tracks come in two flavours per `TRC_<n>` (structural TideCluster + Unified union); fixed crash on empty `RM_on_TideCluster_Library.gff3`
 - v 0.9.0rc5 - Density BigWigs written run-length-merged (sparse, lossless, much smaller); new `Class_II.Subclass_1.TIR` density rollup; new per-family BigWigs for the RepeatMasker tandem pass (superseded by rc6)
 - v 0.8.0 - Bug fix in DANTE_LINE, filtering of tandem repeats from DANTE_LINE added
