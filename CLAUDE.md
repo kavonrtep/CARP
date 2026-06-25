@@ -41,7 +41,7 @@ The pipeline follows a multi-stage workflow:
 - Config files follow pattern `config*.yaml` (e.g., `config.yaml`, `config_minimal.yaml`)
 - Required parameters: `genome_fasta`, `output_dir`
 - Optional parameters: `custom_library`, `tandem_repeat_library`, `repeatmasker_sensitivity`, `reduce_library`, `reduce_tidecluster_library`
-- `reduce_library` (main RepeatMasker/CAP3 library reduction) and `reduce_tidecluster_library` (rotation-invariant reduction of the TideCluster consensus *dimer* library used by `tidecluster_reannotate`, default True) are **independent** flags. The dimer reducer (`scripts/reduce_dimer_library.py`) aligns each monomer against the already-doubled dimers (`mmseqs easy-search`, `--cov-mode 2`) so rotational phase variants collapse per-TRC — lossless for masking, ~5–20× smaller dimer library, faster remasking.
+- `reduce_library` (main RepeatMasker/CAP3 library reduction) and `reduce_tidecluster_library` (rotation-invariant reduction of the TideCluster consensus *dimer* library used by `tidecluster_reannotate`, default True) are **independent** flags. The dimer reducer (`scripts/reduce_dimer_library.py`) aligns each monomer against the already-doubled dimers (`mmseqs easy-search`, `--cov-mode 2`) so rotational phase variants collapse per-TRC — lossless for masking, ~5–20× smaller dimer library, faster remasking. If `mmseqs` fails for a group (e.g. segfault), the reducer retries that group single-threaded and, if it still fails, keeps the group **unreduced** rather than aborting — so a pathological group can't fail the whole run (still lossless; that TRC's dimer library just stays full-size).
 
 ### Critical Workflow Rules
 - `dante` → `dante_ltr` → `make_library_of_ltrs`: LTR retrotransposon discovery and library creation
