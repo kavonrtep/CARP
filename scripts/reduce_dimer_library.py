@@ -116,8 +116,13 @@ def reduce_trc_group(records, work_dir, min_seq_id, min_cov, threads):
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     sys.stderr.write(result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError("mmseqs easy-search failed")
+    if result.returncode != 0 or not os.path.exists(out_m8):
+        tail = "\n".join(result.stderr.strip().splitlines()[-5:])
+        raise RuntimeError(
+            f"mmseqs easy-search failed (returncode {result.returncode}, "
+            f"signal {-result.returncode if result.returncode < 0 else 'n/a'})"
+            + (f"; stderr tail:\n{tail}" if tail else "")
+        )
 
     uf = _UF(n)
     with open(out_m8) as fh:
@@ -169,14 +174,45 @@ def main():
     )
 
     output_records = []
+    fallback_groups = 0
+    fallback_seqs = 0
     with tempfile.TemporaryDirectory() as tmp_root:
         for trc_id in sorted(groups):
             records = groups[trc_id]
             work_dir = os.path.join(tmp_root, trc_id.replace("/", "_"))
             os.makedirs(work_dir, exist_ok=True)
-            reps = reduce_trc_group(
-                records, work_dir, args.min_seq_id, args.min_cov, args.threads
-            )
+            try:
+                reps = reduce_trc_group(
+                    records, work_dir, args.min_seq_id, args.min_cov, args.threads
+                )
+            except Exception as exc:
+                # mmseqs can segfault / error on a pathological group. The
+                # reduction is a lossless optimisation, never a correctness
+                # requirement, so degrade gracefully instead of failing the
+                # whole pipeline. First retry single-threaded (many mmseqs
+                # segfaults are thread races / memory pressure with many
+                # threads); if that still fails, keep the group UNREDUCED —
+                # masking is unaffected, the dimer library for this TRC just
+                # stays full-size.
+                sys.stderr.write(
+                    f"  WARNING: {trc_id}: reduction failed ({exc}); "
+                    f"retrying single-threaded\n"
+                )
+                retry_dir = os.path.join(work_dir, "retry_t1")
+                os.makedirs(retry_dir, exist_ok=True)
+                try:
+                    reps = reduce_trc_group(
+                        records, retry_dir, args.min_seq_id, args.min_cov, 1
+                    )
+                except Exception as exc2:
+                    sys.stderr.write(
+                        f"  WARNING: {trc_id}: reduction failed again ({exc2}); "
+                        f"keeping all {len(records)} sequences unreduced "
+                        f"(lossless — masking unaffected)\n"
+                    )
+                    reps = records
+                    fallback_groups += 1
+                    fallback_seqs += len(records)
             sys.stderr.write(f"  {trc_id}: {len(records)} → {len(reps)} sequences\n")
             output_records.extend(reps)
 
@@ -185,6 +221,13 @@ def main():
         f"Dimer library: {n_input} → {len(output_records)} sequences "
         f"after rotation-invariant per-TRC reduction\n"
     )
+    if fallback_groups:
+        sys.stderr.write(
+            f"NOTE: {fallback_groups} TRC group(s) ({fallback_seqs} sequences) "
+            f"could not be reduced (mmseqs failed) and were kept unreduced. "
+            f"This is lossless for masking; the only effect is a larger dimer "
+            f"library and slightly slower remasking for those groups.\n"
+        )
 
 
 if __name__ == "__main__":
