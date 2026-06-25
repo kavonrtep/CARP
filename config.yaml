@@ -13,6 +13,20 @@ reduce_library: False
 # the remasking ~1.5-5x faster by collapsing redundant phase variants per TRC.
 # Set False to remask with the full (unreduced) dimer library.
 reduce_tidecluster_library: True
+# Second-round CONTAINMENT reduction of the RepeatMasker library (independent of
+# reduce_library). After the per-class CAP3/mmseqs reduction, this drops short
+# repeat fragments that are fully contained in a longer element of the SAME
+# class; RepeatMasker masks their genomic copies via the container, so masking
+# and classification are preserved. Validated masked-bp-lossless on the Pisum
+# pangenome (~-22% library bp, ~-30% RepeatMasker wall-time). Default True; set
+# False to feed RepeatMasker the full per-class-reduced library.
+reduce_library_containment: True
+# Thresholds for the containment pass above: a fragment is removed only if a
+# longer same-class sequence covers at least containment_min_coverage of its
+# length at >= containment_min_identity percent identity. 80 / 0.90 is the
+# validated lossless default; raise for a more conservative reduction.
+containment_min_identity: 80
+containment_min_coverage: 0.90
 # DANTE_TIR_FALLBACK tuning (both default to 3 if omitted).
 # dante_tir_fallback_min_alignments: how many other anchors must support an
 #   extension length before it is applied (larger = more conservative extensions).

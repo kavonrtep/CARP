@@ -87,6 +87,22 @@ if "reduce_tidecluster_library" not in config:
 elif config["reduce_tidecluster_library"] not in [True, False]:
     raise ValueError("Invalid value for reduce_tidecluster_library. Must be either True or False.")
 
+# Second-round CONTAINMENT reduction of the per-class-reduced library before
+# RepeatMasker (independent of reduce_library). Removes short fragments fully
+# contained in a longer same-class element; RepeatMasker masks their copies via
+# the container, so masking + classification are preserved. See
+# scripts/containment_reduce_library.py. Validated masked-bp-lossless on the
+# Pisum pangenome at 80% identity / 0.90 coverage (~-22% library bp, ~-30%
+# RepeatMasker wall-time).
+if "reduce_library_containment" not in config:
+    config["reduce_library_containment"] = True
+elif config["reduce_library_containment"] not in [True, False]:
+    raise ValueError("Invalid value for reduce_library_containment. Must be either True or False.")
+if "containment_min_identity" not in config:
+    config["containment_min_identity"] = 80
+if "containment_min_coverage" not in config:
+    config["containment_min_coverage"] = 0.90
+
 # DANTE_TIR_FALLBACK stringency knobs. Both default to 3; both must be
 # positive integers. See dante_tir_fallback.py for semantics.
 for _key in ("dante_tir_fallback_min_alignments", "dante_tir_fallback_min_cluster_size"):
@@ -1177,12 +1193,58 @@ rule reduce_library:
             --max-parallel-bp {params.max_parallel_bp}
         """
 
+rule reduce_library_containment:
+    """
+    Second-round CONTAINMENT reduction of the per-class-reduced library, run
+    just before RepeatMasker. The per-class CAP3/mmseqs `reduce_library` step
+    leaves many short fragments fully contained in a longer element of the same
+    class; this pass (`containment_reduce_library.py`, blastn greedy) drops a
+    fragment when a retained, strictly longer, SAME-class sequence covers
+    >= containment_min_coverage of it at >= containment_min_identity identity.
+    RepeatMasker masks those fragments' genomic copies via the container, so
+    masking AND classification are preserved — validated masked-bp-lossless on
+    the Pisum pangenome (~-22% library bp, ~-30% RepeatMasker wall-time at
+    80 / 0.90). Toggle with `reduce_library_containment` (default True);
+    blastn-unavailable / failure copies the library through unchanged.
+    """
+    input:
+        library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced.fasta"
+    output:
+        library_containment=F"{config['output_dir']}/Libraries/combined_library_reduced_containment.fasta"
+    params:
+        enabled=config["reduce_library_containment"],
+        min_identity=config["containment_min_identity"],
+        min_coverage=config["containment_min_coverage"]
+    log:
+        stdout=F"{config['output_dir']}/Libraries/reduce_library_containment.log",
+        stderr=F"{config['output_dir']}/Libraries/reduce_library_containment.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/reduce_library_containment.tsv"
+    conda: "envs/tidecluster.yaml"
+    threads: workflow.cores
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        if [ "{params.enabled}" = "False" ]; then
+            cp {input.library_reduced} {output.library_containment}
+            exit 0
+        fi
+        workdir=$(dirname {output.library_containment})/containment_workdir
+        containment_reduce_library.py -i {input.library_reduced} -o {output.library_containment} \
+            -t {threads} -d $workdir \
+            --min-identity {params.min_identity} --min-coverage {params.min_coverage}
+        """
+
 rule repeatmasker:
     input:
         genome_fasta=genome_fasta_cleaned,
         library=F"{config['output_dir']}/Libraries/combined_library.fasta",
         library_short=F"{config['output_dir']}/Libraries/combined_library_short_names.fasta",
-        library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced.fasta"
+        library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced_containment.fasta"
 
 
     output:
