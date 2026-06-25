@@ -33,6 +33,32 @@ import sys
 import tempfile
 from collections import defaultdict
 
+# mmseqs nucleotide k-mer length for the monomer-vs-dimer prefilter.
+#
+# The mmseqs DEFAULT (15) segfaults / aborts when the query (a monomer = first
+# half of a dimer) is short relative to k — and the required margin grows with
+# k (k=15 dies even on a 21 bp monomer; k=9 is fine at 15 bp; k=7 is fine down
+# to 11 bp). A short tandem monomer is exactly the common case here, so we pin
+# a small k. A smaller k only makes the prefilter MORE sensitive (more candidate
+# pairs); specificity is still enforced by --min-seq-id / coverage and the
+# Python identity+coverage check, so clustering quality is unaffected.
+MMSEQS_KMER = 7
+
+# Groups whose shortest monomer is below this are skipped (kept unreduced): even
+# k=7 crashes at <=10 bp, and such ultra-short satellites are rare in the default
+# TideCluster run and carry negligible reduction value. 12 keeps a 1 bp cushion
+# over the observed k=7 safe floor (11 bp).
+MIN_MONOMER_FOR_MMSEQS = 12
+
+# Two dimers are merged only if the shorter is at least this fraction of the
+# longer. Rotational phase variants of a family share the dimer length, so this
+# is permissive for the intended merges while it blocks nested/harmonic periods
+# (2x, 3x, ... the monomer) from collapsing onto the longest rep — which would
+# silently drop masking of the shorter period (see reduce_trc_group). Rotations
+# share the dimer length exactly, so this is strict (only ~5% wobble allowed for
+# consensus differences); erring high merely keeps more reps (still lossless).
+LEN_RATIO_MIN = 0.95
+
 
 def parse_fasta(path):
     """Yield (header_without_gt, sequence) pairs from a FASTA file."""
@@ -66,28 +92,21 @@ def trc_id_of(header):
     return header[idx + 1:] if idx != -1 else header
 
 
-class _UF:
-    """Minimal union-find."""
-    def __init__(self, n):
-        self.p = list(range(n))
-
-    def find(self, x):
-        while self.p[x] != x:
-            self.p[x] = self.p[self.p[x]]
-            x = self.p[x]
-        return x
-
-    def union(self, a, b):
-        ra, rb = self.find(a), self.find(b)
-        if ra != rb:
-            self.p[ra] = rb
-
-
 def reduce_trc_group(records, work_dir, min_seq_id, min_cov, threads):
     """Cluster one TRC group rotation-invariantly (monomer-vs-dimer).
 
     ``records`` is a list of (header, dimer_seq). Returns the representative
-    records (longest dimer per cluster). Groups of <=1 are returned unchanged.
+    records. Groups of <=1 are returned unchanged.
+
+    Clustering is GREEDY / star, not single-linkage: a sequence is dropped only
+    if its monomer aligns (>=min_seq_id identity, >=min_cov query coverage,
+    within the length guard) directly to a KEPT representative's dimer, so the
+    rep is similar enough to mask every sequence it replaces. (An earlier
+    union-find version chained variants transitively, so the single kept rep
+    could be too divergent from the far end of the chain.) This keeps the
+    reduction lossless for small/medium families; large satellite families can
+    still under-mask because RepeatMasker needs the full consensus diversity to
+    tile them — a known, accepted limitation documented in CLAUDE.md.
     """
     n = len(records)
     if n <= 1:
@@ -109,6 +128,7 @@ def reduce_trc_group(records, work_dir, min_seq_id, min_cov, threads):
         "--cov-mode", "2",               # coverage of the QUERY (the monomer)
         "-c", str(min_cov),
         "--alignment-mode", "3", "-a",
+        "-k", str(MMSEQS_KMER),          # small k: default (15) crashes on short monomers
         "-e", "1e-5",
         "--threads", str(threads),
         "-v", "1",
@@ -124,29 +144,46 @@ def reduce_trc_group(records, work_dir, min_seq_id, min_cov, threads):
             + (f"; stderr tail:\n{tail}" if tail else "")
         )
 
-    uf = _UF(n)
+    # represents[t] = set of sequences q that target t can represent: q's
+    # monomer aligns into t's dimer at >=identity / >=query-coverage AND the two
+    # dimers are of near-equal length. Direction matters — t's dimer contains
+    # q's monomer, so RepeatMasker masks q's genomic arrays using t.
+    represents = defaultdict(set)
+    for i in range(n):
+        represents[i].add(i)
     with open(out_m8) as fh:
         for line in fh:
             f = line.rstrip("\n").split("\t")
-            # default m8: query target pident ... (qcov not in default cols)
-            # we request an explicit format below, so parse accordingly
             q, t, pid, qcov = f[0], f[1], f[2], f[3]
             q, t = int(q), int(t)
             if q == t:
                 continue
+            # Length guard: only merge dimers of near-equal length. Rotational
+            # phase variants of a family share the dimer length (= 2x the same
+            # consensus monomer); a nested/harmonic period (e.g. a 21 bp monomer
+            # vs a 105 bp one in the same TRC) would otherwise pass the
+            # query-coverage test — the short query aligns fully inside the long
+            # dimer — and collapsing it onto the longer rep LOSES masking of the
+            # shorter period. Different length => different period => keep separate.
+            lq, lt = len(records[q][1]), len(records[t][1])
+            if min(lq, lt) < LEN_RATIO_MIN * max(lq, lt):
+                continue
             pid = float(pid)
             pid = pid * 100 if pid <= 1 else pid
             if pid >= min_seq_id * 100 and float(qcov) >= min_cov:
-                uf.union(q, t)
+                represents[t].add(q)
 
-    clusters = defaultdict(list)
-    for i in range(n):
-        clusters[uf.find(i)].append(i)
-
+    # Greedy set cover, longest dimer first (most complete consensus). A rep
+    # covers exactly the sequences that align directly to it; anything left
+    # uncovered becomes its own rep — so every dropped sequence is guaranteed to
+    # have a kept rep that masks it.
+    assigned = set()
     reps = []
-    for members in clusters.values():
-        best = max(members, key=lambda i: len(records[i][1]))  # longest dimer
-        reps.append(records[best])
+    for i in sorted(range(n), key=lambda i: (-len(records[i][1]), i)):
+        if i in assigned:
+            continue
+        reps.append(records[i])
+        assigned |= represents[i]
     return reps
 
 
@@ -176,11 +213,25 @@ def main():
     output_records = []
     fallback_groups = 0
     fallback_seqs = 0
+    short_groups = 0
     with tempfile.TemporaryDirectory() as tmp_root:
         for trc_id in sorted(groups):
             records = groups[trc_id]
             work_dir = os.path.join(tmp_root, trc_id.replace("/", "_"))
             os.makedirs(work_dir, exist_ok=True)
+            # Skip the mmseqs path for groups whose shortest monomer is too short
+            # for the nucleotide prefilter (it would crash for ANY k). Keep them
+            # unreduced — lossless, and these ultra-short tandems are negligible.
+            shortest_mono = min(len(s) // 2 for _, s in records) if records else 0
+            if len(records) > 1 and shortest_mono < MIN_MONOMER_FOR_MMSEQS:
+                sys.stderr.write(
+                    f"  {trc_id}: shortest monomer ~{shortest_mono} bp is below the "
+                    f"mmseqs prefilter floor ({MIN_MONOMER_FOR_MMSEQS} bp); kept "
+                    f"unreduced ({len(records)} sequences)\n"
+                )
+                output_records.extend(records)
+                short_groups += 1
+                continue
             try:
                 reps = reduce_trc_group(
                     records, work_dir, args.min_seq_id, args.min_cov, args.threads
@@ -221,6 +272,11 @@ def main():
         f"Dimer library: {n_input} → {len(output_records)} sequences "
         f"after rotation-invariant per-TRC reduction\n"
     )
+    if short_groups:
+        sys.stderr.write(
+            f"NOTE: {short_groups} TRC group(s) had monomers too short for the "
+            f"mmseqs prefilter and were kept unreduced (lossless).\n"
+        )
     if fallback_groups:
         sys.stderr.write(
             f"NOTE: {fallback_groups} TRC group(s) ({fallback_seqs} sequences) "
