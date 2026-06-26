@@ -12,6 +12,17 @@ import multiprocessing
 import os
 import tempfile
 
+# Canonical RepeatMasker .out header (2 columns lines + 1 blank). Only used as
+# a fallback when NO chunk produced a .out at all (a genome with zero library
+# hits — pathological; rDNA normally always matches). Exact spacing is
+# immaterial because downstream parsers skip the first two lines and there are
+# no data rows in that case.
+RM_OUT_HEADER_LINES = [
+    "   SW   perc perc perc  query      position in query    matching  repeat      position in repeat\n",
+    "score   div. del. ins.  sequence   begin end   (left)   repeat    class/family begin end (left)  ID\n",
+    "\n",
+]
+
 
 def read_fasta_sequence_size(fasta_file):
     """Read size of sequence into dictionary"""
@@ -84,11 +95,15 @@ def split_fasta_to_chunks(fasta_file, chunk_size=100000000, overlap=100000, temp
     # open output and input files, use with statement to close files
     # TODO - avoid using dictionary - could be problem for large files!!
     fasta_dict = read_single_fasta_to_dictionary(open(fasta_file, 'r'))
+    # Index matching_table rows by original header once. This was previously a
+    # per-header `[x for x in matching_table if x[0]==header]` scan inside the
+    # loop -> O(headers x chunks), pathological on highly fragmented assemblies.
+    rows_by_header = {}
+    for row in matching_table:
+        rows_by_header.setdefault(row[0], []).append(row)
     with open(fasta_file_split, 'w') as fh_out:
         for header in fasta_dict:
-            print(header)
-            matching_table_part = [x for x in matching_table if x[0] == header]
-            for header2, i, start, end, new_header in matching_table_part:
+            for header2, i, start, end, new_header in rows_by_header.get(header, []):
                 fh_out.write('>' + new_header + '\n')
                 fh_out.write(fasta_dict[header][start:end] + '\n')
     return fasta_file_split, matching_table
@@ -235,21 +250,45 @@ def repeatmasker(fasta_file, library, workdir='.', sensitivity='default'):
     # get RepeatMasker gff3 file
     return rm_out_file
 
-def split_fasta_to_files(fasta_file, workdir):
-    """
-    Split fasta file to files
-    :param fasta_file:
-    :param workdir:
-    :return:
+def split_fasta_to_files(fasta_file, workdir, chunk_size=5000000):
+    """Pack chunk records into multi-FASTA files of <= chunk_size bp each.
+
+    Previously this wrote ONE file per chunk record, so every small scaffold
+    became its own RepeatMasker invocation — and each RM invocation
+    re-preprocesses the entire library. On a fragmented assembly (thousands of
+    kilobase scaffolds) that is thousands of redundant library preprocessings
+    and a near-serial run. Here, consecutive chunk records are binned together
+    up to chunk_size, collapsing those tiny scaffolds into a handful of
+    multi-FASTA files.
+
+    Chunk boundaries are UNCHANGED (the big-sequence pieces from
+    split_fasta_to_chunks, ~chunk_size each, still land in a bin of their own);
+    only the file grouping changes. RepeatMasker masks each record in a
+    multi-FASTA independently, so the per-record .out rows — and therefore the
+    final annotation — are identical; only the number of RM processes (and the
+    redundant per-process library preprocessing) drops.
     """
     fasta_dict = read_single_fasta_to_dictionary(open(fasta_file, 'r'))
     fasta_files = []
+    cur_fh = None
+    cur_size = 0
     for header, sequence in fasta_dict.items():
-        fasta_file = tempfile.NamedTemporaryFile(delete=False, dir=workdir).name
-        fasta_files.append(fasta_file)
-        with open(fasta_file, 'w') as fh:
-            fh.write('>' + header + '\n')
-            fh.write(sequence + '\n')
+        seq_len = len(sequence)
+        # Close the current bin when adding this record would push it over
+        # chunk_size. A record >= chunk_size simply lands in a bin of its own.
+        if cur_fh is not None and cur_size > 0 and cur_size + seq_len > chunk_size:
+            cur_fh.close()
+            cur_fh = None
+        if cur_fh is None:
+            path = tempfile.NamedTemporaryFile(delete=False, dir=workdir).name
+            fasta_files.append(path)
+            cur_fh = open(path, 'w')
+            cur_size = 0
+        cur_fh.write('>' + header + '\n')
+        cur_fh.write(sequence + '\n')
+        cur_size += seq_len
+    if cur_fh is not None:
+        cur_fh.close()
     return fasta_files
 
 def main():
@@ -274,14 +313,17 @@ def main():
     if not os.path.exists(tmp_dir):
         os.makedirs(tmp_dir)
 
+    rm_chunk_size = 5000000
     fasta_parts, matching_table = split_fasta_to_chunks(args.fasta,
-                                                        chunk_size=5000000,
+                                                        chunk_size=rm_chunk_size,
                                                         overlap=2000,
                                                         temp_dir=tmp_dir)
 
     matching_table_dict = {x[4]: x for x in matching_table}
 
-    fasta_parts_files = split_fasta_to_files(fasta_parts, tmp_dir)
+    # Pack chunk records into <= rm_chunk_size multi-FASTA files so small
+    # scaffolds share one RepeatMasker invocation (see split_fasta_to_files).
+    fasta_parts_files = split_fasta_to_files(fasta_parts, tmp_dir, rm_chunk_size)
 
     print("Number of fasta parts: ", len(fasta_parts_files))
 
@@ -291,23 +333,34 @@ def main():
                             [tmp_dir] * len(fasta_parts_files),
                             [args.sensitivity] * len(fasta_parts_files)))
 
-    print(rm_arguments)
     with multiprocessing.Pool(args.threads) as pool:
         pool.starmap(repeatmasker, rm_arguments)
 
-
-    # recalculate coordinates in RepeatMasker output files
+    # recalculate coordinates in RepeatMasker output files. RepeatMasker emits
+    # no .out for a chunk with zero hits; treat a missing .out as contributing
+    # no rows (the original code crashed with FileNotFoundError here on
+    # fragmented inputs).
     for fasta_part in fasta_parts_files:
+        rm_out = fasta_part + '.out'
         out_recalculated = fasta_part + '.out.recalculated'
-        recalculate_rm_out_coordinates(fasta_part + '.out',
-                                       matching_table_dict, out_recalculated)
+        if not os.path.exists(rm_out):
+            open(out_recalculated, 'w').close()
+            continue
+        recalculate_rm_out_coordinates(rm_out, matching_table_dict,
+                                       out_recalculated)
     # concatenate RepeatMasker output files
     with open(args.out, 'w') as fh_out:
-        # add RM header from the first file - original - not recalculated
-        with open(fasta_parts_files[0] + '.out', 'r') as fh_in:
-            # header is first three lines
-            for i in range(3):
-                fh_out.write(fh_in.readline())
+        # RM header (first three lines) from the first chunk that produced a
+        # .out; fall back to the canonical header only if no chunk had hits.
+        header_lines = None
+        for fasta_part in fasta_parts_files:
+            rm_out = fasta_part + '.out'
+            if os.path.exists(rm_out):
+                with open(rm_out, 'r') as fh_in:
+                    header_lines = [fh_in.readline() for _ in range(3)]
+                break
+        fh_out.writelines(header_lines if header_lines is not None
+                          else RM_OUT_HEADER_LINES)
 
         for fasta_part in fasta_parts_files:
             with open(fasta_part + '.out.recalculated', 'r') as fh_in:
