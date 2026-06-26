@@ -92,6 +92,18 @@ sudo singularity build assembly_repeat_annotation_pipeline.sif Singularity
 singularity shell -B $PWD assembly_repeat_annotation_pipeline.sif
 ```
 
+### Releasing
+`version.py` is the single source of truth; a release is a version bump + an
+**unprefixed** tag equal to it (`1.0.0rc1`, not `v1.0.0rc1`). Use the `/release`
+skill or run its helper directly — it validates, bumps `version.py`, runs the
+cheap CI gates, commits and tags (no push):
+```bash
+.claude/skills/release/cut-release.sh <VERSION>   # e.g. 1.0.0rc1
+```
+Then push from the **host** (the sandbox has no ssh): `git push origin main && git push origin <VERSION>`.
+The tag push drives `.github/workflows/release.yml` (SIF build → in-container
+fixture → GHCR → GitHub Release → Zenodo). See `.claude/skills/release/SKILL.md`.
+
 ## Important Architecture Details
 
 ### Conda Environment Management
