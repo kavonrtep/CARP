@@ -61,6 +61,7 @@ jobs:
           cache-environment: true
       - run: python tests/test_classification.py
       - run: python tests/test_manifest.py
+      - run: python tests/test_unified_gff3_spec.py
       - run: Rscript tests/test_classification.R
 
   # ─────────────────────────────────────────────────────────────────────
