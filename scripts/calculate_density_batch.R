@@ -75,24 +75,41 @@ dir.create(directory_for_10k,  showWarnings=FALSE, recursive=TRUE)
 dir.create(directory_for_100k, showWarnings=FALSE, recursive=TRUE)
 chr_size_all <- readRDS(opt$genome)
 
-process_one <- function(f){
+# Parallelise over (file x resolution) units rather than over files alone.
+# One dominant per-class file (e.g. Mobile_elements) otherwise occupies a
+# single core for the whole rule while the other workers idle; splitting each
+# file's two BigWig resolutions into independent tasks lets that file's 10k and
+# 100k tracks compute on two cores. Output is unchanged: each task writes its
+# own independent .bw and the per-resolution computation is byte-for-byte the
+# former two-statement process_one. (The dominant file is imported once per
+# resolution instead of once total — a small cost dwarfed by overlapping its
+# two coverage/binnedAverage passes.)
+tasks <- list()
+for (f in files) {
   base_noext <- sub("\\.gff3$", "", basename(f))
-  base_bw10k  <- file.path(directory_for_10k,  paste0(base_noext, "_10k.bw"))
-  base_bw100k <- file.path(directory_for_100k, paste0(base_noext, "_100k.bw"))
-  g <- import(f, format="gff3")
-  if (length(g) == 0) return(paste("No regions found in the input file:", f))
-  # FR-1: write run-length-merged BigWigs (adjacent equal-value tiles,
-  # incl. zero runs, collapsed into one interval) instead of one entry
-  # per window. Lossless; non-zero values unchanged at every position.
-  export(rle_merge_granges(density_per_family(g, chr_size_all, 1000,  10)), base_bw10k,  format="bigwig")
-  export(rle_merge_granges(density_per_family(g, chr_size_all, 10000, 10)), base_bw100k, format="bigwig")
+  tasks[[length(tasks) + 1L]] <- list(
+    f = f, step = 1000L,
+    out = file.path(directory_for_10k,  paste0(base_noext, "_10k.bw")))
+  tasks[[length(tasks) + 1L]] <- list(
+    f = f, step = 10000L,
+    out = file.path(directory_for_100k, paste0(base_noext, "_100k.bw")))
+}
+
+process_task <- function(tk){
+  g <- import(tk$f, format="gff3")
+  if (length(g) == 0) return(paste("No regions found in the input file:", tk$f))
+  # FR-1: write a run-length-merged BigWig (adjacent equal-value tiles, incl.
+  # zero runs, collapsed into one interval). Lossless; values unchanged.
+  export(rle_merge_granges(density_per_family(g, chr_size_all, tk$step, 10)),
+         tk$out, format="bigwig")
   "ok"
 }
 
-res <- mclapply(files, function(f)
-  tryCatch(process_one(f), error=function(e) paste("ERROR", f, ":", conditionMessage(e))),
+res <- mclapply(tasks, function(tk)
+  tryCatch(process_task(tk), error=function(e) paste("ERROR", tk$f, ":", conditionMessage(e))),
   mc.cores = max(1L, opt$threads))
 
 errs <- unlist(res)[grepl("^ERROR", unlist(res))]
 if (length(errs)) { writeLines(errs, stderr()); quit(save="no", status=1) }
-cat(sprintf("calculate_density_batch: %d files, %d threads, done\n", length(files), opt$threads))
+cat(sprintf("calculate_density_batch: %d files (%d tasks), %d threads, done\n",
+            length(files), length(tasks), opt$threads))
