@@ -29,14 +29,32 @@ gff_cleanup <- function(gff){
   ## remove overlapin annotation track - assign new annot
   gff_disjoin <- disjoin(gff, with.revmap=TRUE)
   ## append annotation:
-  #  get number of cores from environment variable CPU_COUNT
+  #  Number of parallel workers: honour the CPU_COUNT the rule exports
+  #  (the cores the JOB was given). Fall back to detectCores() only when
+  #  CPU_COUNT is unset. The previous code unconditionally overrode the
+  #  CPU_COUNT read with detectCores() (the machine-wide core count), so on
+  #  a shared HPC node it forked ~0.8x ALL physical cores, each mclapply
+  #  worker COW-sharing the large GRanges -> reported max_rss exploded
+  #  (296 GB on a 3.9 Gb genome) and the job oversubscribed its allocation.
+  #  mc.cores never affects the result (mclapply preserves input order),
+  #  only speed/memory.
   num_cores <- as.integer(Sys.getenv("CPU_COUNT"))
   if (is.na(num_cores)){
     num_cores <- detectCores()
   }
-  num_cores <- detectCores()
-  gff_names <- mclapply(as.list(gff_disjoin$revmap), FUN = function(x)gff$Name[x], mc.cores = round(num_cores *0.8))
-  gff_strands <- mclapply(as.list(gff_disjoin$revmap), FUN = function(x)strand(gff[x]), mc.cores = round(num_cores *0.8))
+  if (is.na(num_cores) || num_cores < 1L){
+    num_cores <- 1L
+  }
+  mc_cores <- max(1L, round(num_cores * 0.8))
+  #  Single fused mclapply pass over the disjoint ranges, returning BOTH
+  #  the per-range Name vector and strand in one shot. Fusing the two
+  #  former passes halves the fork/join and the COW pages touched.
+  gff_annot <- mclapply(as.list(gff_disjoin$revmap),
+                        FUN = function(x) list(name = gff$Name[x],
+                                               strand = strand(gff[x])),
+                        mc.cores = mc_cores)
+  gff_names <- lapply(gff_annot, `[[`, "name")
+  gff_strands <- lapply(gff_annot, `[[`, "strand")
   new_annot <- sapply(sapply(gff_names, unique), paste, collapse="|")
   new_annot_uniq <- unique(new_annot)
   lca_annot <- sapply(strsplit(new_annot_uniq, "|", fixed = TRUE), resolve_name)
