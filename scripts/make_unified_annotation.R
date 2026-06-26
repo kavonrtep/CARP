@@ -108,7 +108,7 @@ safe_import <- function(path) {
 # All other tool-specific columns are dropped before combining to avoid
 # CharacterList vs character schema incompatibilities that cause NSBS errors.
 .META_COLS <- c("ID", "Name", "classification", "source_tier",
-                "source_tool", "element_type")
+                "source_tool", "element_type", "TRC", "TE_origin")
 
 # Subset a GRanges to a set of sequence names.
 # Also standardizes seqlevels and mcols schema so that c() / reduce()
@@ -204,22 +204,42 @@ load_tier2_dante <- function(path) {
   raw
 }
 
+# Map a TideCluster clustering / RM-on-TC feature to (Name, classification, TRC).
+# TideCluster >=1.16.0 flags rDNA TRCs with `rDNA_type=45S|5S` in the clustering
+# GFF3; we surface those as array-level rDNA_45S / rDNA_5S (no internal
+# 18S/ITS/5.8S/IGS/25S substructure, matching TideCluster's design), which routes
+# them to the rDNA class downstream (calculate_statistics_and_make_groups.R keys
+# on `^rDNA`) and keeps them out of the Tandem_repeats aggregation. The
+# originating TRC id is preserved in a `TRC` attribute for traceability (NA on
+# non-rDNA features → omitted on export). All other TRCs keep the
+# Satellite/TideCluster/<TRC> classification unchanged.
+normalise_tc_satellite <- function(gr, tier, tool) {
+  if (length(gr) == 0) return(gr)
+  gr$type <- "repeat_region"
+  trc   <- as.character(gr$Name)
+  rtype <- if (!is.null(gr$rDNA_type)) as.character(gr$rDNA_type) else rep(NA_character_, length(gr))
+  is45  <- !is.na(rtype) & rtype == "45S"
+  is5   <- !is.na(rtype) & rtype == "5S"
+  cls   <- paste0("Satellite/TideCluster/", trc)
+  cls[is45] <- "rDNA_45S"
+  cls[is5]  <- "rDNA_5S"
+  gr <- set_meta(gr, cls, cls, tier, tool)
+  gr$TRC <- ifelse(is45 | is5, trc, NA_character_)
+  gr
+}
+
 load_tier3_tidecluster <- function(path_default, path_short) {
   message("Loading TideCluster default: ", path_default)
   def <- safe_import(path_default)
   message("Loading TideCluster short monomer: ", path_short)
   sho <- safe_import(path_short)
-
-  normalise_tc <- function(gr, tool) {
-    if (length(gr) == 0) return(gr)
-    gr$type <- "repeat_region"
-    cls <- paste0("Satellite/TideCluster/", as.character(gr$Name))
-    set_meta(gr, as.character(gr$Name), cls, 3L, tool)
-  }
-  list(
-    default = normalise_tc(def, "TideCluster_default"),
-    short   = normalise_tc(sho, "TideCluster_short")
-  )
+  d <- normalise_tc_satellite(def, 3L, "TideCluster_default")
+  s <- normalise_tc_satellite(sho, 3L, "TideCluster_short")
+  message("  ", if (length(d)) sum(grepl("^rDNA_", d$classification)) else 0,
+          " default + ",
+          if (length(s)) sum(grepl("^rDNA_", s$classification)) else 0,
+          " short rDNA-labelled arrays")
+  list(default = d, short = s)
 }
 
 load_tier4_tc_rm <- function(path) {
@@ -227,9 +247,7 @@ load_tier4_tc_rm <- function(path) {
   raw <- safe_import(path)
   if (length(raw) == 0) return(GRanges())
 
-  raw$type <- "repeat_region"
-  cls <- paste0("Satellite/TideCluster/", as.character(raw$Name))
-  raw <- set_meta(raw, as.character(raw$Name), cls, 4L, "TideCluster_RM")
+  raw <- normalise_tc_satellite(raw, 4L, "TideCluster_RM")
   message("  ", length(raw), " RM-on-TideCluster features")
   raw
 }
@@ -437,6 +455,56 @@ lca_classification <- function(classifications) {
   paste(common, collapse = "/")
 }
 
+# ── TR-from-structural-TE resolution (Item 3) ────────────────────────────────
+# A length-qualified TideCluster clustering TRC (Tier 3) that tandemly stacks
+# multiple structural TEs (Tier 1: DANTE_LTR/TIR/LINE) of one family is itself a
+# TE-derived satellite (e.g. the OZ408687.1 Ale array → TRC_13). Policy: the
+# satellite WINS the region — it is tagged TE_origin=<LCA class of the covered
+# structural TEs> and the structural TEs underneath are removed from the unified
+# output (they remain in the DANTE_* GFF3s). Judged against STRUCTURAL
+# annotation only (Tier 1), never RepeatMasker, and only for clustering TRCs,
+# which already carry TideCluster's -m/-M length filters; TideHunter residuals
+# (Tier 6) never reach this tier.
+TE_ORIGIN_MIN_ELEMENTS  <- 2L    # ≥ this many distinct structural TEs under the TRC
+TE_ORIGIN_MIN_LCA_DEPTH <- 3L    # shared lineage ≥ this many '/'-levels (e.g. Class_I/LTR/Ty1_copia)
+# ≥ this fraction of the TRC's array bp covered by those structural TEs. DANTE
+# annotates only *complete* elements, so a tandem array of mostly-degraded
+# monomers is only partially covered: calibrated on OZ408687.1 TRC_13 (a true
+# Ale-derived array at 0.35 coverage) vs the genome's two genuine large
+# satellites with incidental TE insertions (TRC_1 11 Mb / TRC_3 1.9 Mb, both
+# ~0.00) — a wide, clean gap. 0.25 sits in it with margin on both sides.
+TE_ORIGIN_MIN_COVERAGE  <- 0.25
+
+.cls_depth <- function(x)
+  if (is.na(x) || !nzchar(x)) 0L else length(strsplit(x, "/", fixed = TRUE)[[1]])
+
+# Identify TE-derived TRCs among Tier-3 clustering satellites `t3` against the
+# structural TE tier `t1`. Returns a named character vector: TRC-Name ->
+# TE_origin class (one entry per qualifying TRC). Grouping is by satellite Name
+# (the TRC id); run separately on default vs short to avoid the TRC_<n> name
+# collision between the two clustering runs. rDNA arrays share a Name but never
+# qualify (they do not overlap structural TEs).
+identify_te_derived_trcs <- function(t3, t1) {
+  if (length(t3) == 0 || length(t1) == 0) return(character(0))
+  t3p <- granges(t3); strand(t3p) <- "*"
+  t1p <- granges(t1); strand(t1p) <- "*"
+  nm  <- as.character(t3$Name)
+  out <- character(0)
+  for (name in unique(nm)) {
+    arrays <- reduce(t3p[nm == name])
+    h <- unique(subjectHits(findOverlaps(arrays, t1p)))
+    if (length(h) < TE_ORIGIN_MIN_ELEMENTS) next
+    lca <- lca_classification(t1$classification[h])
+    if (.cls_depth(lca) < TE_ORIGIN_MIN_LCA_DEPTH) next
+    trc_bp <- sum(as.numeric(width(arrays)))
+    if (trc_bp <= 0) next
+    cov_bp <- sum(as.numeric(width(intersect(arrays, t1p[h]))))
+    if (cov_bp / trc_bp < TE_ORIGIN_MIN_COVERAGE) next
+    out[[name]] <- lca
+  }
+  out
+}
+
 # After trimming lower-tier features against higher tiers, some overlaps can be
 # re-introduced (two fragments of different features now cover the same region).
 # disjoin + LCA resolves these, producing strictly non-overlapping output.
@@ -482,10 +550,44 @@ process_batch <- function(seqs, data, min_len) {
   level1 <- GRanges()
   level2 <- GRanges()
 
-  # ── Step 1: Tier 1 — structure-based elements (no trimming) ──────────────
-  if (length(t1) > 0) level1 <- t1
-  log_msg(sprintf("  %s  step1 done: level1=%d (+ %d tier1)",
-                  batch_label, length(level1), length(t1)))
+  # ── Pre-pass: TR-from-structural-TE (Item 3) ─────────────────────────────
+  # Flag length-qualified Tier-3 clustering TRCs that tandemly stack ≥2 same-
+  # family structural TEs. Those satellites WIN: tag them TE_origin and trim the
+  # covered structural Tier-1/2 features out (they remain in the DANTE_* GFF3s).
+  # Run default vs short separately (TRC_<n> names collide across the two runs).
+  te_sat <- GRanges()
+  trc_origin_def <- if (length(t3_def) > 0 && length(t1) > 0) identify_te_derived_trcs(t3_def, t1) else character(0)
+  trc_origin_sho <- if (length(t3_sho) > 0 && length(t1) > 0) identify_te_derived_trcs(t3_sho, t1) else character(0)
+  if (length(trc_origin_def) + length(trc_origin_sho) > 0) {
+    tag_te <- function(gr, omap) {
+      if (length(gr) == 0) return(gr)
+      gr$TE_origin <- unname(omap[as.character(gr$Name)])  # NA where not TE-derived
+      gr
+    }
+    t3_def <- tag_te(t3_def, trc_origin_def)
+    t3_sho <- tag_te(t3_sho, trc_origin_sho)
+    def_te <- if (length(t3_def) > 0) !is.na(t3_def$TE_origin) else logical(0)
+    sho_te <- if (length(t3_sho) > 0) !is.na(t3_sho$TE_origin) else logical(0)
+    te_sat <- suppressWarnings(c(t3_def[def_te], t3_sho[sho_te]))
+    t3_def <- t3_def[!def_te]
+    t3_sho <- t3_sho[!sho_te]
+    # Structural tiers lose their portion under the TE-derived satellites.
+    te_sat_r <- reduce(granges(te_sat), ignore.strand = TRUE)
+    t1 <- trim_to_nonoverlap(t1, te_sat_r, min_len)
+    t2 <- trim_to_nonoverlap(t2, te_sat_r, min_len)
+    t1_ltr <- if (length(t1) > 0) t1[t1$source_tool == "DANTE_LTR"] else GRanges()
+    log_msg(sprintf("  %s  pre-pass: %d TE-derived TRC(s) → te_sat=%d feats; t1→%d t2→%d",
+                    batch_label, length(trc_origin_def) + length(trc_origin_sho),
+                    length(te_sat), length(t1), length(t2)))
+  }
+
+  # ── Step 1: Tier 1 — structure-based elements ────────────────────────────
+  # TE-derived satellites win their region: seed Level 1 with them, then add the
+  # (te_sat-trimmed) structural Tier-1 elements.
+  if (length(te_sat) > 0) level1 <- suppressWarnings(c(level1, te_sat))
+  if (length(t1) > 0)     level1 <- suppressWarnings(c(level1, t1))
+  log_msg(sprintf("  %s  step1 done: level1=%d (te_sat=%d + tier1=%d)",
+                  batch_label, length(level1), length(te_sat), length(t1)))
 
   # ── Step 2: Tier 2 — DANTE domains, trim against Tier 1 ──────────────────
   t2_trimmed <- timed(sprintf("  %s  step2: trim Tier2 (%d) vs Tier1 (%d)",
@@ -508,15 +610,29 @@ process_batch <- function(seqs, data, min_len) {
       t3_def_l1 <- t3_def[setdiff(seq_along(t3_def), in_idx)]
     }
   }
+  # Standard tier priority for the non-TE-derived remainder: trim against
+  # everything already placed (te_sat + Tier 1 + Tier 2). A satellite that merely
+  # abuts or contains a single structural element yields that contested span to
+  # it (the inserted/abutting TE wins), keeping the rest. TE-derived satellites
+  # already won their whole region in the pre-pass; the within-LTR clusters above
+  # stay nested. This is what removes the residual satellite-vs-structural-TE
+  # overlaps (the non-TE-derived counterpart of the TR-from-TE fix).
+  n_nested <- length(t3_def) - length(t3_def_l1)
+  if (length(t3_def_l1) > 0) {
+    higher_3  <- if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges()
+    t3_def_l1 <- timed(sprintf("  %s  step3: trim Tier3 default (%d) vs placed",
+                               batch_label, length(t3_def_l1)),
+                       trim_to_nonoverlap(t3_def_l1, higher_3, min_len))
+  }
   if (length(t3_def_l1) > 0) level1 <- suppressWarnings(c(level1, t3_def_l1))
-  log_msg(sprintf("  %s  step3 done: +%d (L1), +%d (L2 nested in LTR) → level1=%d",
-                  batch_label, length(t3_def_l1),
-                  length(t3_def) - length(t3_def_l1), length(level1)))
+  log_msg(sprintf("  %s  step3 done: +%d (L1, trimmed vs higher), +%d (L2 nested in LTR) → level1=%d",
+                  batch_label, length(t3_def_l1), n_nested, length(level1)))
 
-  # ── Step 4: Tier 3 short monomer — trim against Tier 3 default + Tier 1 ──
-  t3s_trimmed <- timed(sprintf("  %s  step4: trim Tier3 short (%d) vs Tier3 def+Tier1",
-                                batch_label, length(t3_sho)),
-                        trim_to_nonoverlap(t3_sho, suppressWarnings(c(t3_def_l1, t1)), min_len))
+  # ── Step 4: Tier 3 short monomer — trim against everything placed so far ──
+  higher_4 <- if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges()
+  t3s_trimmed <- timed(sprintf("  %s  step4: trim Tier3 short (%d) vs placed (%d regions)",
+                                batch_label, length(t3_sho), length(higher_4)),
+                        trim_to_nonoverlap(t3_sho, higher_4, min_len))
   if (length(t3s_trimmed) > 0) level1 <- suppressWarnings(c(level1, t3s_trimmed))
   log_msg(sprintf("  %s  step4 done: +%d → level1=%d",
                   batch_label, length(t3s_trimmed), length(level1)))
@@ -719,7 +835,7 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
 
 # ── 7. Sanity checks ──────────────────────────────────────────────────────────
 
-sanity_check <- function(gr, seqlengths_vec) {
+sanity_check <- function(gr, seqlengths_vec, overlaps_tsv = NULL) {
   log_msg("── Sanity checks ──────────────────────────────────────────────")
   # gr is the in-memory GRanges returned by finalise_output — no GFF3 re-parse
   # required (saves ~30s on a large file and avoids CharacterList coercions).
@@ -735,6 +851,48 @@ sanity_check <- function(gr, seqlengths_vec) {
   }
   l1 <- gr[!has_parent]
   l2 <- gr[has_parent]
+
+  # ── Residual-overlap report (Item 3b) ────────────────────────────────────
+  # Every Level-1 vs Level-1 overlap where NEITHER partner is
+  # Simple_repeat / Low_complexity. Non-fatal. After the TR-from-TE fix this
+  # should contain no satellite/rDNA-vs-structural-TE rows (the bug class);
+  # same-tool partial-TE overlaps may legitimately remain and are surfaced for
+  # review. Always (re)writes the file, header-only when there are no overlaps.
+  if (!is.null(overlaps_tsv)) {
+    hdr     <- "seqid\tstart\tend\tname_a\tclass_a\ttier_a\tname_b\tclass_b\ttier_b\toverlap_bp"
+    allowed <- grepl("^Simple_repeat|^Low_complexity", as.character(l1$classification))
+    cand    <- l1[!allowed]
+    n_ov    <- 0L
+    if (length(cand) >= 2) {
+      ch <- findOverlaps(cand, cand, ignore.strand = TRUE)
+      ch <- ch[queryHits(ch) < subjectHits(ch)]
+      if (length(ch) > 0) {
+        qi <- queryHits(ch); si <- subjectHits(ch)
+        df <- data.frame(
+          seqid      = as.character(seqnames(cand))[qi],
+          start      = pmax(start(cand)[qi], start(cand)[si]),
+          end        = pmin(end(cand)[qi],   end(cand)[si]),
+          name_a     = as.character(cand$Name)[qi],
+          class_a    = as.character(cand$classification)[qi],
+          tier_a     = as.character(cand$source_tier)[qi],
+          name_b     = as.character(cand$Name)[si],
+          class_b    = as.character(cand$classification)[si],
+          tier_b     = as.character(cand$source_tier)[si],
+          overlap_bp = pmin(end(cand)[qi], end(cand)[si]) -
+                       pmax(start(cand)[qi], start(cand)[si]) + 1L,
+          stringsAsFactors = FALSE)
+        write.table(df, overlaps_tsv, sep = "\t", quote = FALSE,
+                    row.names = FALSE, col.names = TRUE)
+        n_ov <- nrow(df)
+      }
+    }
+    if (n_ov == 0L) writeLines(hdr, overlaps_tsv)
+    message(sprintf("Overlap report: %d non-simple/low Level-1 overlap pair(s) → %s",
+                    n_ov, overlaps_tsv))
+    if (n_ov > 0L)
+      warning(n_ov, " residual non-simple/low overlap(s) in unified annotation; see ",
+              basename(overlaps_tsv))
+  }
 
   # 1. TE features (tier 1–5 TE) should be non-overlapping; Simple/Low can overlap.
   is_simple <- grepl("^Simple_repeat|^Low_complexity|^Satellite|^Unknown",
@@ -891,7 +1049,8 @@ log_msg("── Finalising output ───────────────�
 all_feats <- finalise_output(level1_all, level2_all, seqlengths_vec, opt$output)
 
 # Sanity checks on the in-memory GRanges (avoids re-parsing the GFF3)
-sanity_check(all_feats, seqlengths_vec)
+sanity_check(all_feats, seqlengths_vec,
+             overlaps_tsv = sub("\\.gff3$", ".overlaps.tsv", opt$output))
 
 log_msg("Done. Output: ", opt$output,
         sprintf("  (total wall time: %.1fs)", proc.time()[3] - .script_start))
