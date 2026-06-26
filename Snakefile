@@ -185,6 +185,43 @@ if (not isinstance(config["reduce_library_max_big_cap3_parallel"], int)
         "must be a positive integer."
     )
 
+# ── TideCluster 1.16.0 knobs ─────────────────────────────────────────────────
+# rDNA identification (run_all/tarean, default-on in TideCluster). When True the
+# clustering GFF3 gains rDNA_type=45S|5S on rDNA TRCs, which
+# make_unified_annotation.R surfaces as array-level rDNA_45S / rDNA_5S. Set
+# False to pass --no_rdna and keep those arrays as generic Satellite TRCs.
+if "tidecluster_detect_rdna" not in config:
+    config["tidecluster_detect_rdna"] = True
+if not isinstance(config["tidecluster_detect_rdna"], bool):
+    raise ValueError("Invalid value for tidecluster_detect_rdna: must be a boolean.")
+
+# Optional override for TideCluster's rDNA reference library (blastn subject for
+# 45S/5S calling). Empty string → TideCluster's bundled data/rdna_library.fasta
+# (validated on the OZ408684.1 calibration array). Point at the pipeline's richer
+# data/rdna_library.fasta only if the bundled one under-calls on your taxon.
+if "tidecluster_rdna_library" not in config:
+    config["tidecluster_rdna_library"] = ""
+if not isinstance(config["tidecluster_rdna_library"], str):
+    raise ValueError("Invalid value for tidecluster_rdna_library: must be a string path.")
+
+# Cross-TRC overlap resolution (default-on in TideCluster 1.16.0): the clustering
+# GFF3 is made non-overlapping across satellite TRCs (dominant-TRC-wins). Set
+# True here to pass --keep_overlaps and retain the raw overlapping regions.
+if "tidecluster_keep_trc_overlaps" not in config:
+    config["tidecluster_keep_trc_overlaps"] = False
+if not isinstance(config["tidecluster_keep_trc_overlaps"], bool):
+    raise ValueError("Invalid value for tidecluster_keep_trc_overlaps: must be a boolean.")
+
+# Genome chunk size (bp) for the parallel, pooled RepeatMasker in tc_reannotate
+# (TideCluster 1.16.0). Sequences below 2*chunk_size are only packed
+# (byte-identical); larger ones split, with <0.15% masked-bp drift at the cuts.
+# Default 50 Mb matches TideCluster's default and the pipeline's own RM wrapper.
+if "tidecluster_chunk_size" not in config:
+    config["tidecluster_chunk_size"] = 50_000_000
+if (not isinstance(config["tidecluster_chunk_size"], int)
+        or config["tidecluster_chunk_size"] < 1):
+    raise ValueError("Invalid value for tidecluster_chunk_size: must be a positive integer (bytes).")
+
 
 # Define path to cleaned genome (will be created by clean_genome_fasta rule)
 genome_fasta_cleaned = F"{config['output_dir']}/genome_cleaned.fasta"
@@ -753,7 +790,10 @@ rule tidecluster_long:
         split_files=directory(F"{config['output_dir']}/TideCluster/default/TideCluster_clustering_split_files")
     params:
         prefix = lambda wildcards, output: output.gff3_clust.replace("_clustering.gff3", ""),
-        library = config.get("tandem_repeat_library", "")
+        library = config.get("tandem_repeat_library", ""),
+        rdna_flag = "" if config["tidecluster_detect_rdna"] else "--no_rdna",
+        overlaps_flag = "--keep_overlaps" if config["tidecluster_keep_trc_overlaps"] else "",
+        rdna_library = config["tidecluster_rdna_library"]
     log:
         stdout=F"{config['output_dir']}/TideCluster/default/tidecluster_long.log",
         stderr=F"{config['output_dir']}/TideCluster/default/tidecluster_long.err"
@@ -773,18 +813,24 @@ rule tidecluster_long:
         original_dir=$PWD
         genome_absolute_path=$(realpath {input.genome_fasta})
         genome_seqlengths=$(realpath {input.genome_seqlengths})
+        # TideCluster 1.16.0 knobs (empty by default → TideCluster's own defaults).
+        rdna_lib_arg=""
+        if [ -n "{params.rdna_library}" ]; then
+            rdna_lib_arg="--rdna_library $(realpath {params.rdna_library})"
+        fi
+        tc_extra="{params.rdna_flag} {params.overlaps_flag} $rdna_lib_arg"
         # NOTE - there is a bug in tidecluster - it does not correctly format html links; solution is
         # to run it in the directory where the output will be created
         echo "Library: {input.library}"
         if [ -z "{params.library}" ]; then
             cd $wd
             echo "Running TideCluster without a library"
-            TideCluster.py run_all -pr $prefix -c {threads}  -f $genome_absolute_path --long
+            TideCluster.py run_all -pr $prefix -c {threads}  -f $genome_absolute_path --long $tc_extra
         else
             library_absolute_path=$(realpath {params.library})
             echo "Running TideCluster with a custom library"
             cd $wd
-            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -l $library_absolute_path --long
+            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -l $library_absolute_path --long $tc_extra
         fi
         # TideCluster may not create any of its outputs when TideHunter finds
         # zero candidates on a low-satellite genome (common for small CI
@@ -815,7 +861,10 @@ rule tidecluster_short:
         tr_short_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_tidehunter_short.gff3"
     params:
         prefix = lambda wildcards, output: output.gff3_clust.replace("_clustering.gff3", ""),
-        library = config.get("tandem_repeat_library", "")
+        library = config.get("tandem_repeat_library", ""),
+        rdna_flag = "" if config["tidecluster_detect_rdna"] else "--no_rdna",
+        overlaps_flag = "--keep_overlaps" if config["tidecluster_keep_trc_overlaps"] else "",
+        rdna_library = config["tidecluster_rdna_library"]
     log:
         stdout=F"{config['output_dir']}/TideCluster/short_monomer/tidecluster_short.log",
         stderr=F"{config['output_dir']}/TideCluster/short_monomer/tidecluster_short.err"
@@ -834,17 +883,23 @@ rule tidecluster_short:
         prefix=$(basename {params.prefix})
         original_dir=$PWD
         genome_absolute_path=$(realpath {input.genome_fasta})
+        # TideCluster 1.16.0 knobs (empty by default → TideCluster's own defaults).
+        rdna_lib_arg=""
+        if [ -n "{params.rdna_library}" ]; then
+            rdna_lib_arg="--rdna_library $(realpath {params.rdna_library})"
+        fi
+        tc_extra="{params.rdna_flag} {params.overlaps_flag} $rdna_lib_arg"
         # NOTE - there is a bug in tidecluster - it does not correctly format html links; solution is
         # to run it in the directory where the output will be created
         if [ -z "{params.library}" ]; then
             cd $wd
             echo "Running TideCluster without a library"
-            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -T "-p 10 -P 39 -c 5 -e 0.25" -m 5000
+            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -T "-p 10 -P 39 -c 5 -e 0.25" -m 5000 $tc_extra
         else
             echo "Running TideCluster with a custom library"
             library_absolute_path=$(realpath {params.library})
             cd $wd
-            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -l $library_absolute_path -T "-p 10 -P 39 -c 5 -e 0.25" -m 5000
+            TideCluster.py run_all -pr $prefix -c {threads} -f $genome_absolute_path -l $library_absolute_path -T "-p 10 -P 39 -c 5 -e 0.25" -m 5000 $tc_extra
         fi
         # Same defensive stubs as tidecluster_long (see comment there).
         cd $original_dir
@@ -863,7 +918,8 @@ rule tidecluster_reannotate:
     params:
         outdir=directory(F"{config['output_dir']}/TideCluster"),
         tc_sensitivity=tc_sensitivity,
-        reduce_dimer=config["reduce_tidecluster_library"]
+        reduce_dimer=config["reduce_tidecluster_library"],
+        chunk_size=config["tidecluster_chunk_size"]
     log:
         stdout=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.log",
         stderr=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.err"
@@ -903,7 +959,7 @@ rule tidecluster_reannotate:
         gff_absolute_path=$(realpath {output.gff3})
         cd {params.outdir}
         cp $dl_absolute_path .
-        tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path -c {threads} --sensitivity {params.tc_sensitivity}
+        tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path -c {threads} --sensitivity {params.tc_sensitivity} --chunk_size {params.chunk_size}
         rm $dl_basename
         """
 
@@ -1375,7 +1431,8 @@ rule make_unified_annotation:
         fai=F"{config['output_dir']}/genome_cleaned.fasta.fai",
         validation_marker=F"{config['output_dir']}/.classifications_validated"
     output:
-        gff=F"{config['output_dir']}/Repeat_Annotation_Unified.gff3"
+        gff=F"{config['output_dir']}/Repeat_Annotation_Unified.gff3",
+        overlaps=F"{config['output_dir']}/Repeat_Annotation_Unified.overlaps.tsv"
     log:
         stdout=F"{config['output_dir']}/Repeat_Annotation_Unified.log",
         stderr=F"{config['output_dir']}/Repeat_Annotation_Unified.err"

@@ -64,3 +64,21 @@ include_dante_tir_fallback_in_library: false
 # Multiplicity floor applied to fallback cluster sizes when the flag
 # above is true. Leave null to inherit dante_tir_min_multiplicity (3).
 dante_tir_fallback_library_min_multiplicity: null
+
+# ── TideCluster 1.16.0 options ───────────────────────────────────────────────
+# rDNA identification: when true, TideCluster flags 45S/5S rDNA TRCs and the
+# unified annotation labels them rDNA_45S / rDNA_5S (array-level) instead of a
+# generic Satellite TRC. Set false to disable (--no_rdna).
+tidecluster_detect_rdna: true
+# Optional override for TideCluster's rDNA reference library. Empty = the bundled
+# data/rdna_library.fasta (validated on the calibration array). Point at the
+# pipeline's own data/rdna_library.fasta if the bundled set under-calls.
+tidecluster_rdna_library: ""
+# Cross-TRC overlap resolution: when false (default), TideCluster makes the
+# clustering GFF3 non-overlapping across satellite TRCs (dominant-TRC-wins). Set
+# true to keep the raw overlapping regions (--keep_overlaps).
+tidecluster_keep_trc_overlaps: false
+# Genome chunk size (bp) for the parallel, pooled RepeatMasker in tc_reannotate
+# (the requested speedup). Sequences below 2x this are only packed
+# (byte-identical); larger ones split with <0.15% masked-bp drift. Default 50 Mb.
+tidecluster_chunk_size: 50000000
