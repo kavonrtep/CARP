@@ -73,6 +73,8 @@ echo "== gate: tests/test_classification.py =="
 python3 tests/test_classification.py
 echo "== gate: tests/test_manifest.py =="
 python3 tests/test_manifest.py
+echo "== gate: tests/test_unified_gff3_spec.py =="
+python3 tests/test_unified_gff3_spec.py
 echo "== gate: tests/test_classification.R (best-effort) =="
 if command -v Rscript >/dev/null 2>&1; then
   if Rscript tests/test_classification.R; then :; else
