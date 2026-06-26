@@ -168,6 +168,23 @@ if (not isinstance(config["reduce_library_max_parallel_bp"], int)
         "must be a positive integer (bytes)."
     )
 
+# How many big (>= reduce_library_max_parallel_bp) Class_I/LTR CAP3 classes
+# `reduce_library` runs CONCURRENTLY in its Phase 1b. CAP3 is single-threaded,
+# so >1 overlaps the big-class assemblies that dominate Phase-1 wall time, at
+# the cost of that many CAP3 working sets resident at once (a few hundred MB
+# each). mmseqs2 classes stay strictly sequential regardless (8 GB floor).
+# Output is byte-identical for any value. Default 4 suits the large-RAM HPC
+# nodes this pipeline targets; set to 1 to restore strictly-sequential Phase 1
+# on memory-constrained machines.
+if "reduce_library_max_big_cap3_parallel" not in config:
+    config["reduce_library_max_big_cap3_parallel"] = 4
+if (not isinstance(config["reduce_library_max_big_cap3_parallel"], int)
+        or config["reduce_library_max_big_cap3_parallel"] < 1):
+    raise ValueError(
+        "Invalid value for reduce_library_max_big_cap3_parallel: "
+        "must be a positive integer."
+    )
+
 
 # Define path to cleaned genome (will be created by clean_genome_fasta rule)
 genome_fasta_cleaned = F"{config['output_dir']}/genome_cleaned.fasta"
@@ -1167,7 +1184,8 @@ rule reduce_library:
         library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced.fasta"
     params:
         reduce_library_size = config["reduce_library"],
-        max_parallel_bp = config["reduce_library_max_parallel_bp"]
+        max_parallel_bp = config["reduce_library_max_parallel_bp"],
+        max_big_cap3_parallel = config["reduce_library_max_big_cap3_parallel"]
     log:
         stdout=F"{config['output_dir']}/Libraries/reduce_library.log",
         stderr=F"{config['output_dir']}/Libraries/reduce_library.err"
@@ -1190,7 +1208,9 @@ rule reduce_library:
         fi
         reduce_library_size.py -i {input.library} -o {output.library_reduced} \
             -t {threads} -d $workdir \
-            --max-parallel-bp {params.max_parallel_bp}
+            --max-parallel-bp {params.max_parallel_bp} \
+            --max-big-cap3-parallel {params.max_big_cap3_parallel} \
+            --max-blast-parallel {threads}
         """
 
 rule reduce_library_containment:

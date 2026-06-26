@@ -56,6 +56,7 @@ import subprocess
 import sys
 import tempfile
 from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -401,13 +402,53 @@ def _filter_singlets(
                 fout.write(line)
 
 
-def run_blast_filter(jobs: list[ClassJob], threads: int) -> None:
+def _blast_filter_one(job: ClassJob, threads: int) -> ClassJob:
+    """makeblastdb + blastn + coverage filter for ONE CAP3 class.
+
+    Returns the (possibly updated) job. Pure per-class work — its DB,
+    ``.blastn`` and ``_filtered`` artefacts all live under the class's own
+    workdir, so it is safe to run concurrently across classes. The drop-set
+    comes from ``analyze_blast`` (coverage-based), which is independent of
+    blastn hit order / ``-num_threads``, so the result is scheduling-invariant.
+    """
+    rc = subprocess.run(
+        ["makeblastdb", "-in", job.contig_file, "-dbtype", "nucl"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode
+    if rc != 0:
+        raise RuntimeError(f"[{job.class_name}] makeblastdb failed (status {rc})")
+    blast_out = job.singlet_file + ".blastn"
+    cmd = [
+        "blastn",
+        "-query", job.singlet_file,
+        "-db", job.contig_file,
+        *BLASTN_ARGS,
+        "-num_threads", str(max(1, threads)),
+        "-out", blast_out,
+    ]
+    rc = subprocess.run(cmd).returncode
+    if rc != 0:
+        raise RuntimeError(f"[{job.class_name}] blastn failed (status {rc})")
+    qcov = analyze_blast(Path(blast_out))
+    drop_ids = {q for q, c in qcov.items() if c > QCOV_DROP_THRESHOLD}
+    if drop_ids:
+        filtered_path = job.singlet_file + "_filtered"
+        _filter_singlets(job.singlet_file, filtered_path, drop_ids)
+        job.singlets_final_file = filtered_path
+    return job
+
+
+def run_blast_filter(jobs: list[ClassJob], threads: int,
+                     max_parallel: int = 1, start_method: str = "spawn") -> None:
     """For each CAP3 job that produced both contigs and singlets,
     run ``makeblastdb`` + ``blastn`` and drop singlets covered ≥ 98 %.
 
     This is the post-pass equivalent of the R script's loop after
-    ``mclapply``. We run sequentially (matches R's ``lapply``); BLAST
-    itself is multi-threaded via ``-num_threads``.
+    ``mclapply``. With ``max_parallel == 1`` it runs the classes sequentially
+    (matches R's ``lapply``, each blastn multi-threaded via ``-num_threads``).
+    With ``max_parallel > 1`` it runs that many classes concurrently, dividing
+    the thread budget — output is unchanged because each class is independent
+    and the drop decision is coverage-based.
     """
     candidates = [
         j for j in jobs
@@ -417,36 +458,26 @@ def run_blast_filter(jobs: list[ClassJob], threads: int) -> None:
     ]
     if not candidates:
         return
-    for job in candidates:
-        # makeblastdb on contigs
-        rc = subprocess.run(
-            ["makeblastdb", "-in", job.contig_file, "-dbtype", "nucl"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        ).returncode
-        if rc != 0:
-            raise RuntimeError(
-                f"[{job.class_name}] makeblastdb failed (status {rc})"
-            )
-        blast_out = job.singlet_file + ".blastn"
-        cmd = [
-            "blastn",
-            "-query", job.singlet_file,
-            "-db", job.contig_file,
-            *BLASTN_ARGS,
-            "-num_threads", str(threads),
-            "-out", blast_out,
-        ]
-        rc = subprocess.run(cmd).returncode
-        if rc != 0:
-            raise RuntimeError(
-                f"[{job.class_name}] blastn failed (status {rc})"
-            )
-        qcov = analyze_blast(Path(blast_out))
-        drop_ids = {q for q, c in qcov.items() if c > QCOV_DROP_THRESHOLD}
-        if drop_ids:
-            filtered_path = job.singlet_file + "_filtered"
-            _filter_singlets(job.singlet_file, filtered_path, drop_ids)
-            job.singlets_final_file = filtered_path
+    workers = max(1, min(max_parallel, len(candidates)))
+    if workers == 1:
+        # Sequential — byte-for-byte the original loop; full thread budget.
+        for job in candidates:
+            _blast_filter_one(job, threads)
+        return
+    per_job_threads = max(1, threads // workers)
+    sys.stderr.write(
+        f"[reduce_library] phase 3: {len(candidates)} BLAST job(s), "
+        f"workers={workers}, threads/job={per_job_threads}\n"
+    )
+    ctx = multiprocessing.get_context(start_method)
+    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
+        updated = list(pool.map(partial(_blast_filter_one, threads=per_job_threads),
+                                candidates))
+    # spawn workers mutate copies — propagate singlets_final_file back into the
+    # caller's job objects (assemble_output reads these), keyed by class index.
+    by_index = {j.index: j for j in jobs}
+    for u in updated:
+        by_index[u.index].singlets_final_file = u.singlets_final_file
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -539,6 +570,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                          "spawn gives the cleanest memory profile; fork is "
                          "faster to start workers but inherits the parent's "
                          "heap (the very thing we're avoiding here).")
+    ap.add_argument("--max-big-cap3-parallel", type=int, default=1,
+                    help="Number of big (>= --max-parallel-bp) Class_I/LTR CAP3 "
+                         "classes to run CONCURRENTLY in Phase 1. CAP3 is "
+                         "single-threaded, so >1 cuts Phase-1 wall time at the "
+                         "cost of that many CAP3 working sets resident at once. "
+                         "Default 1 preserves the strictly-sequential behaviour; "
+                         "raise on machines with ample RAM. mmseqs2 classes stay "
+                         "strictly sequential regardless (8 GB floor each).")
+    ap.add_argument("--max-blast-parallel", type=int, default=1,
+                    help="Number of Phase-3 per-class BLAST filter jobs to run "
+                         "CONCURRENTLY, each given (threads / workers) threads. "
+                         "Default 1 keeps the sequential loop. BLAST output is "
+                         "scheduling-independent so any value is output-safe.")
     return ap.parse_args(argv)
 
 
@@ -626,10 +670,24 @@ def main(argv: list[str] | None = None) -> int:
     # Phase split: memory-heavy (mmseqs2 + big CAP3) vs small CAP3
     big_jobs, small_jobs = _phase_partition(jobs, args.max_parallel_bp)
 
-    # Phase 1: memory-heavy classes, sequential
-    big_done = _run_phase(big_jobs, threads=1,
-                          start_method=args.start_method,
-                          label="phase 1 (mmseqs2 + big CAP3, sequential)")
+    # Phase 1 is split by TOOL so mmseqs2 stays strictly sequential (its
+    # ~8 GB-per-call floor, see _run_mmseqs) while the big, single-threaded
+    # CAP3 classes — which were the real Phase-1 wall-time sink — overlap up
+    # to --max-big-cap3-parallel. Reassembly is by class index below, so the
+    # split does not affect output order.
+    big_mmseqs = [j for j in big_jobs if not _should_use_cap3(j.class_name)]
+    big_cap3 = [j for j in big_jobs if _should_use_cap3(j.class_name)]
+
+    # Phase 1a: mmseqs2 classes — sequential, each with the full thread budget.
+    big_mmseqs_done = _run_phase(big_mmseqs, threads=1,
+                                 start_method=args.start_method,
+                                 label="phase 1a (mmseqs2, sequential)")
+    # Phase 1b: big CAP3 classes — bounded-parallel (CAP3 is single-threaded).
+    cap3_workers = max(1, min(args.max_big_cap3_parallel, len(big_cap3)))
+    big_cap3_done = _run_phase(big_cap3, threads=cap3_workers,
+                               start_method=args.start_method,
+                               label=f"phase 1b (big CAP3, {cap3_workers}-way parallel)")
+    big_done = big_mmseqs_done + big_cap3_done
     # Phase 2: small CAP3 remainder, parallel
     small_done = _run_phase(small_jobs, threads=args.threads,
                             start_method=args.start_method,
@@ -646,7 +704,9 @@ def main(argv: list[str] | None = None) -> int:
     # Phase 3: BLAST filter (singletons vs contigs, qcov > 0.98 → drop).
     # Matches the R loop after mclapply.
     sys.stderr.write("[reduce_library] phase 3: BLAST filter on CAP3 classes\n")
-    run_blast_filter(jobs, threads=args.threads)
+    run_blast_filter(jobs, threads=args.threads,
+                     max_parallel=args.max_blast_parallel,
+                     start_method=args.start_method)
 
     # Phase 4: assemble output
     sys.stderr.write("[reduce_library] phase 4: assemble output\n")
