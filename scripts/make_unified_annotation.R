@@ -108,7 +108,7 @@ safe_import <- function(path) {
 # All other tool-specific columns are dropped before combining to avoid
 # CharacterList vs character schema incompatibilities that cause NSBS errors.
 .META_COLS <- c("ID", "Name", "classification", "source_tier",
-                "source_tool", "element_type", "TRC", "TE_origin")
+                "source_tool", "element_type", "TE_origin")
 
 # Subset a GRanges to a set of sequence names.
 # Also standardizes seqlevels and mcols schema so that c() / reduce()
@@ -223,8 +223,14 @@ normalise_tc_satellite <- function(gr, tier, tool) {
   cls   <- paste0("Satellite/TideCluster/", trc)
   cls[is45] <- "rDNA_45S"
   cls[is5]  <- "rDNA_5S"
-  gr <- set_meta(gr, cls, cls, tier, tool)
-  gr$TRC <- ifelse(is45 | is5, trc, NA_character_)
+  # Name ALWAYS keeps the bare TRC id (TRC_<n>) — downstream apps and
+  # split_gff_by_name.R (--name-prefix TRC_) key on it, so it must stay byte-stable
+  # across versions for every satellite (rDNA included). The rDNA / TE-derived
+  # distinction lives in `classification` (rDNA_45S|5S) and the TE_origin
+  # attribute, never in Name. Plain-satellite records are therefore identical to
+  # the previous release; rDNA only changes `classification`. The stats splitter
+  # routes rDNA by classification (it carries Name=TRC_<n>).
+  gr <- set_meta(gr, trc, cls, tier, tool)
   gr
 }
 

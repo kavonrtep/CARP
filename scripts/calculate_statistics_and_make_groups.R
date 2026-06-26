@@ -31,6 +31,16 @@ rm <- import(opt$rm)
 
 genome_size <- sum(width(g))
 
+# TideCluster rDNA arrays carry classification=rDNA_45S|5S but keep Name=TRC_<n>
+# (kept stable for downstream apps that key on Name). Relabel their Name to the
+# rDNA class IN MEMORY so they are counted/split as rDNA instead of being folded
+# into Tandem_repeats below and routed to rDNA.gff3 by the ^rDNA Name match. The
+# Unified GFF3 on disk is untouched — only this script's grouping changes.
+if (!is.null(rm$classification)){
+  is_rdna <- grepl("^rDNA", as.character(rm$classification))
+  if (any(is_rdna)) rm$Name[is_rdna] <- as.character(rm$classification)[is_rdna]
+}
+
 # Collapse all tandem-repeat / satellite Names into a single
 # `Tandem_repeats` aggregation bucket. The Unified annotation carries
 # them under three Name patterns:
