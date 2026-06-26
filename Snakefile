@@ -732,6 +732,38 @@ rule dante_ltr:
         """
 
 
+rule resolve_ltr_tandems:
+    """
+    Collapse tandem LTR-RT (LTR_RT_TR) arrays in the DANTE_LTR annotation into a
+    single container element with the member copies kept as children, so the
+    unified annotation represents head-to-tail shared-LTR arrays once instead of
+    double-annotating the shared LTRs (Macko-Podgorni et al., Mobile DNA 2025).
+    Non-tandem elements pass through unchanged; a genome with no tandems yields a
+    file identical to the input. ONLY make_unified_annotation consumes this — the
+    LTR library (make_library_of_ltrs) and masking tracks keep using the per-copy
+    DANTE_LTR.gff3. See scripts/resolve_ltr_tandems.py.
+    """
+    input:
+        gff=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3"
+    output:
+        gff=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR_tandem_resolved.gff3"
+    log:
+        stdout=F"{config['output_dir']}/DANTE_LTR/resolve_ltr_tandems.log",
+        stderr=F"{config['output_dir']}/DANTE_LTR/resolve_ltr_tandems.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/resolve_ltr_tandems.tsv"
+    conda:
+        "envs/tidecluster.yaml"
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+        scripts_dir=$(realpath scripts)
+        export PATH="$scripts_dir:$PATH"
+        resolve_ltr_tandems.py -i {input.gff} -o {output.gff}
+        """
+
 
 rule make_library_of_ltrs:
     input:
@@ -1418,7 +1450,7 @@ rule make_unified_annotation:
     similarity-based ones (RepeatMasker). See annotation_rules.md for full tier hierarchy.
     """
     input:
-        ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
+        ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR_tandem_resolved.gff3",
         tir=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_combined.gff3",
         line=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
         dante=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",

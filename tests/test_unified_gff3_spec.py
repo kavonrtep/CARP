@@ -81,6 +81,17 @@ GOOD = [
     feat("OZ1", "RepeatMasker", "repeat_region", 25000, 25030, ".",
          ID="UA_L2_00000001", Name="Simple_repeat(ACC)n", classification="Simple_repeat(ACC)n",
          source_tier="5", source_tool="RepeatMasker", Parent="UA_L1_00000006"),
+    # Tandem LTR-RT: a container (Level 1; structure/copy_number, no element_type)
+    # plus a member copy (Level 2, Parent=container).  -- indices 16, 17 --
+    feat("OZ1", "DANTE_LTR", "transposable_element", 80000, 110000, "-",
+         ID="UA_L1_00000016", Name="Class_I/LTR/Ty3_gypsy/chromovirus/Tekay",
+         classification="Class_I/LTR/Ty3_gypsy/chromovirus/Tekay",
+         source_tier="1", source_tool="DANTE_LTR", structure="LTR_RT_TR", copy_number="4"),
+    feat("OZ1", "DANTE_LTR", "transposable_element", 80000, 90000, "-",
+         ID="UA_L2_00000002", Name="Class_I/LTR/Ty3_gypsy/chromovirus/Tekay",
+         classification="Class_I/LTR/Ty3_gypsy/chromovirus/Tekay",
+         source_tier="1", source_tool="DANTE_LTR", element_type="complete",
+         Parent="UA_L1_00000016"),
 ]
 
 
@@ -152,6 +163,14 @@ BAD_CASES = [
      _set(0, "Parent", "UA_L1_00000006"), "must not have a Parent"),
     ("malformed ID",
      _set(0, "ID", "L1_1"), "does not match"),
+    ("bad structure value",
+     _set(16, "structure", "FOO"), "structure 'FOO' not in"),
+    ("structure on non-DANTE_LTR",
+     _set(10, "structure", "LTR_RT_TR"), "structure only allowed"),
+    ("copy_number without structure",
+     _set(0, "copy_number", "3"), "copy_number requires"),
+    ("tandem member missing element_type",
+     _del(17, "element_type"), "missing element_type"),
 ]
 
 
