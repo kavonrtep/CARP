@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -1062,22 +1063,46 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
     per_subtype_results: List[Tuple[str, Optional[Path], Optional[Path]]] = []
     all_elements: List[TIRFallbackElement] = []
 
-    for subtype in sorted(tir_anchors_by_subtype.keys()):
-        anchors = tir_anchors_by_subtype[subtype]
-        gff_path, rep_path, elements, _ = process_subtype(
+    # Subtypes are independent: each writes to its own
+    # DANTE_TIR_FALLBACK/<subtype>/ directory with unique temp-file names and
+    # reads the shared feature lists read-only, so they can run concurrently.
+    # The thread budget is divided across the subtypes in flight (the inner
+    # all-vs-all alignment / mmseqs / seqkit steps each receive
+    # threads_per_subtype). Results are collected and then consumed in
+    # sorted-subtype order below, so the combined outputs are assembled in
+    # exactly the same order as the former serial loop. ThreadPoolExecutor
+    # (not processes): the heavy inner work is subprocesses + parasail C calls
+    # that release the GIL, and threads avoid pickling the shared feature lists
+    # per subtype.
+    subtypes_sorted = sorted(tir_anchors_by_subtype.keys())
+    n_workers = max(1, min(len(subtypes_sorted), args.threads))
+    threads_per_subtype = max(1, args.threads // n_workers)
+
+    def _run_one(subtype):
+        return subtype, process_subtype(
             subtype=subtype,
-            anchors=anchors,
+            anchors=tir_anchors_by_subtype[subtype],
             genome_fasta=args.genome,
             all_features=all_features,
             output_dir=output_dir,
             flank_size=args.flank,
-            threads=args.threads,
+            threads=threads_per_subtype,
             min_num_alignments=args.min_num_alignments,
             min_cluster_size=args.min_cluster_size,
             mask_features=mask_features,
             seq_lengths=seq_lengths,
             verbose=args.verbose,
         )
+
+    if n_workers == 1:
+        results_by_subtype = dict(_run_one(s) for s in subtypes_sorted)
+    else:
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            results_by_subtype = dict(executor.map(_run_one, subtypes_sorted))
+
+    # Consume in deterministic sorted-subtype order (matches the serial loop).
+    for subtype in subtypes_sorted:
+        gff_path, rep_path, elements, _ = results_by_subtype[subtype]
         per_subtype_results.append((subtype, gff_path, rep_path))
         all_elements.extend(elements)
 
