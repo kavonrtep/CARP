@@ -9,8 +9,24 @@ gff_cleanup <- function(gff){
   ## remove overlapin annotation track - assign new annot
   gff_disjoin <- disjoin(gff, with.revmap=TRUE)
   ## append annotation:
-  gff_names <- mclapply(as.list(gff_disjoin$revmap), FUN = function(x)gff$Name[x], mc.cores = 8)
-  gff_strands <- mclapply(as.list(gff_disjoin$revmap), FUN = function(x)strand(gff[x]), mc.cores = 8)
+  #  Parallel workers from CPU_COUNT (exported by the repeatmasker rule).
+  #  Fall back to a small fixed default rather than detectCores(): a
+  #  machine-wide count would oversubscribe the job's allocation and
+  #  balloon COW max_rss (see the sister fix in merge_repeat_annotations.R).
+  #  mc.cores never affects the result (mclapply preserves input order),
+  #  only speed/memory.
+  num_cores <- as.integer(Sys.getenv("CPU_COUNT"))
+  if (is.na(num_cores) || num_cores < 1L){
+    num_cores <- 4L
+  }
+  #  Single fused pass over the disjoint ranges (Name + strand together),
+  #  halving the fork/join versus the previous two separate mclapply calls.
+  gff_annot <- mclapply(as.list(gff_disjoin$revmap),
+                        FUN = function(x) list(name = gff$Name[x],
+                                               strand = strand(gff[x])),
+                        mc.cores = num_cores)
+  gff_names <- lapply(gff_annot, `[[`, "name")
+  gff_strands <- lapply(gff_annot, `[[`, "strand")
   new_annot <- sapply(sapply(gff_names, unique), paste, collapse="|")
   new_annot_uniq <- unique(new_annot)
   lca_annot <- sapply(strsplit(new_annot_uniq, "|", fixed = TRUE), resolve_name)

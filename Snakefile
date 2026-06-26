@@ -1269,6 +1269,9 @@ rule repeatmasker:
         set -x
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
+        # clean_rm_output.R reads CPU_COUNT for its mclapply worker count;
+        # export the rule's thread budget so it no longer hard-codes 8.
+        export CPU_COUNT={threads}
         library_absolute_path=$(realpath {input.library_reduced})
         genome_absolute_path=$(realpath {input.genome_fasta})
         out_absolute_path=$(realpath {output.out})
