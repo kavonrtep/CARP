@@ -35,6 +35,9 @@ jobs:
       - name: Output manifest contract
         run: python tests/test_manifest.py
 
+      - name: Unified GFF3 output contract (format-drift guard)
+        run: python tests/test_unified_gff3_spec.py
+
       - name: Containment library-reduction logic
         run: python tests/test_containment_reduce.py
 
