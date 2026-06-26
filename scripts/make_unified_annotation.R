@@ -108,7 +108,8 @@ safe_import <- function(path) {
 # All other tool-specific columns are dropped before combining to avoid
 # CharacterList vs character schema incompatibilities that cause NSBS errors.
 .META_COLS <- c("ID", "Name", "classification", "source_tier",
-                "source_tool", "element_type", "TE_origin")
+                "source_tool", "element_type", "TE_origin",
+                "structure", "copy_number")
 
 # Subset a GRanges to a set of sequence names.
 # Also standardizes seqlevels and mcols schema so that c() / reduce()
@@ -137,15 +138,43 @@ subset_seqs <- function(gr, seqs) {
 load_tier1_ltr <- function(path) {
   message("Loading DANTE_LTR: ", path)
   raw <- safe_import(path)
-  if (length(raw) == 0) return(list(top = GRanges(), children = GRanges()))
+  if (length(raw) == 0)
+    return(list(top = GRanges(), children = GRanges(), members = GRanges()))
 
-  top      <- raw[raw$type == "transposable_element"]
+  all_te   <- raw[raw$type == "transposable_element"]
   children <- raw[raw$type %in% c("protein_domain", "long_terminal_repeat",
                                    "target_site_duplication", "primer_binding_site")]
-  cls <- canonicalise(top$Final_Classification, source = "DANTE_LTR")
-  top <- set_meta(top, cls, cls, 1L, "DANTE_LTR")
-  top$element_type <- ifelse(grepl("^TE_partial_", top$ID, perl = TRUE),
-                             "partial", "complete")
+  # resolve_ltr_tandems.py marks tandem LTR-RT (LTR_RT_TR) arrays: a container
+  # feature (no Parent, structure=LTR_RT_TR) plus its member copies (Parent set).
+  # Containers + standalone elements are Level-1 tier-1; member copies become
+  # Level-2 children nested under their container.
+  has_parent <- if (!is.null(all_te$Parent)) {
+    p <- all_te$Parent
+    if (is(p, "CharacterList")) lengths(p) > 0 else !is.na(p)
+  } else rep(FALSE, length(all_te))
+  top     <- all_te[!has_parent]
+  members <- all_te[has_parent]
+
+  meta_te <- function(gr) {
+    if (length(gr) == 0) return(gr)
+    cls  <- canonicalise(gr$Final_Classification, source = "DANTE_LTR")
+    strv <- if (!is.null(gr$structure)) as.character(gr$structure)
+            else rep(NA_character_, length(gr))
+    is_container <- !is.na(strv) & strv == "LTR_RT_TR"
+    cn   <- if (!is.null(gr$copy_number)) as.character(gr$copy_number)
+            else rep(NA_character_, length(gr))
+    gr   <- set_meta(gr, cls, cls, 1L, "DANTE_LTR")
+    # element_type tags individual elements (complete/partial); tandem containers
+    # carry structure=LTR_RT_TR + copy_number instead.
+    et <- ifelse(grepl("^TE_partial_", gr$ID, perl = TRUE), "partial", "complete")
+    et[is_container] <- NA_character_
+    gr$element_type <- et
+    gr$structure    <- ifelse(is_container, "LTR_RT_TR", NA_character_)
+    gr$copy_number  <- ifelse(is_container, cn, NA_character_)
+    gr
+  }
+  top     <- meta_te(top)
+  members <- meta_te(members)
 
   # Strip verbose alignment attributes to reduce memory
   verbose_attrs <- c("DB_Seq", "Region_Seq", "Query_Seq", "Best_Hit_DB_Pos",
@@ -153,10 +182,11 @@ load_tier1_ltr <- function(path) {
                      "upstream_domain", "downstream_domain", "domain_order")
   for (a in verbose_attrs) mcols(children)[[a]] <- NULL
 
-  message("  ", length(top), " top-level LTR elements (",
-          sum(top$element_type == "complete"), " complete, ",
-          sum(top$element_type == "partial"), " partial)")
-  list(top = top, children = children)
+  n_cont <- if (length(top) > 0) sum(!is.na(top$structure)) else 0L
+  message("  ", length(top), " top-level LTR features (", n_cont,
+          " tandem LTR_RT_TR container(s)); ", length(members),
+          " tandem member copies -> Level 2")
+  list(top = top, children = children, members = members)
 }
 
 load_tier1_tir <- function(path) {
@@ -511,6 +541,27 @@ identify_te_derived_trcs <- function(t3, t1) {
   out
 }
 
+# Generic tier-1 structural-overlap fallback. DANTE_LTR (tandem containers +
+# standalone) + DANTE_TIR + DANTE_LINE features must not overlap each other in the
+# unified output. Greedy longest-first: keep the longest element complete, trim
+# shorter overlapping ones to their non-overlapping remainder (>= min_len). This
+# catches structural overlaps that are NOT clean tandem LTR-RT arrays (those were
+# already collapsed upstream by resolve_ltr_tandems.py) — cross-lineage,
+# cross-tool, or partial overlaps. Fast no-op when no tier-1 features overlap.
+resolve_tier1_overlaps <- function(t1, min_len) {
+  if (length(t1) <= 1) return(t1)
+  h <- suppressWarnings(findOverlaps(t1, ignore.strand = TRUE,
+                                     drop.self = TRUE, drop.redundant = TRUE))
+  if (length(h) == 0) return(t1)
+  t1s  <- t1[order(width(t1), decreasing = TRUE)]   # longest first stays complete
+  kept <- t1s[1]
+  for (i in 2:length(t1s)) {
+    piece <- trim_to_nonoverlap(t1s[i], kept, min_len)
+    if (length(piece) > 0) kept <- suppressWarnings(c(kept, piece))
+  }
+  kept
+}
+
 # After trimming lower-tier features against higher tiers, some overlaps can be
 # re-introduced (two fragments of different features now cover the same region).
 # disjoin + LCA resolves these, producing strictly non-overlapping output.
@@ -541,6 +592,7 @@ process_batch <- function(seqs, data, min_len) {
                    lapply(data, subset_seqs, seqs = seqs))
   t1      <- sub$t1
   t1_ltr  <- if (length(t1) > 0) t1[t1$source_tool == "DANTE_LTR"] else GRanges()
+  t1_members <- sub$t1_members           # tandem LTR-RT member copies -> Level 2
   t2      <- sub$t2
   t3_def  <- sub$t3_def
   t3_sho  <- sub$t3_sho
@@ -587,13 +639,32 @@ process_batch <- function(seqs, data, min_len) {
                     length(te_sat), length(t1), length(t2)))
   }
 
+  # Generic tier-1 structural-overlap fallback (always): no two tier-1 elements
+  # overlap in the output. Clean tandem LTR-RT arrays were already collapsed
+  # upstream (resolve_ltr_tandems.py); this handles any residual cross-lineage /
+  # cross-tool / partial overlap. No-op when nothing overlaps (the common case).
+  n_t1_before <- length(t1)
+  t1 <- resolve_tier1_overlaps(t1, min_len)
+  t1_ltr <- if (length(t1) > 0) t1[t1$source_tool == "DANTE_LTR"] else GRanges()
+  if (length(t1) != n_t1_before)
+    log_msg(sprintf("  %s  tier1 overlap resolve: %d → %d features",
+                    batch_label, n_t1_before, length(t1)))
+
   # ── Step 1: Tier 1 — structure-based elements ────────────────────────────
   # TE-derived satellites win their region: seed Level 1 with them, then add the
   # (te_sat-trimmed) structural Tier-1 elements.
   if (length(te_sat) > 0) level1 <- suppressWarnings(c(level1, te_sat))
   if (length(t1) > 0)     level1 <- suppressWarnings(c(level1, t1))
-  log_msg(sprintf("  %s  step1 done: level1=%d (te_sat=%d + tier1=%d)",
-                  batch_label, length(level1), length(te_sat), length(t1)))
+  # Tandem LTR-RT member copies → Level 2, nested under their container (the
+  # container is a Tier-1 DANTE_LTR feature now in level1; finalise_output
+  # resolves each member's Parent by overlap via the DANTE_LTR parent lookup).
+  if (length(t1_members) > 0) {
+    t1_members$temp_parent_tool <- "DANTE_LTR"
+    level2 <- suppressWarnings(c(level2, t1_members))
+  }
+  log_msg(sprintf("  %s  step1 done: level1=%d (te_sat=%d + tier1=%d), +%d LTR members → L2",
+                  batch_label, length(level1), length(te_sat), length(t1),
+                  length(t1_members)))
 
   # ── Step 2: Tier 2 — DANTE domains, trim against Tier 1 ──────────────────
   t2_trimmed <- timed(sprintf("  %s  step2: trim Tier2 (%d) vs Tier1 (%d)",
@@ -991,14 +1062,15 @@ log_msg("Genome: ", length(seqlengths_vec), " sequences, ",
 
 # Decide whether to chunk
 data <- list(
-  t1     = t1,
-  t2     = t2,
-  t3_def = tc_data$default,
-  t3_sho = tc_data$short,
-  t4     = t4,
-  t5_te  = rm_data$te,
-  t5_sc  = rm_data$simple,
-  t6     = t6
+  t1         = t1,
+  t1_members = ltr_data$members,   # tandem LTR-RT member copies -> Level 2
+  t2         = t2,
+  t3_def     = tc_data$default,
+  t3_sho     = tc_data$short,
+  t4         = t4,
+  t5_te      = rm_data$te,
+  t5_sc      = rm_data$simple,
+  t6         = t6
 )
 
 # Decide batching. Even when the genome is below the "chunked processing"

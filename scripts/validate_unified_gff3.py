@@ -46,8 +46,9 @@ PARENT_RE = re.compile(r"^UA_L1_\d{8}$")
 STRANDS = {"+", "-", "."}
 REQUIRED_ATTRS = ("ID", "Name", "classification", "source_tier", "source_tool")
 ELEMENT_TYPE_VALUES = {"complete", "partial"}
-ELEMENT_TYPE_TOOL = "DANTE_LTR"          # element_type present iff this tool
+ELEMENT_TYPE_TOOL = "DANTE_LTR"          # element_type on DANTE_LTR individual elements
 TE_ORIGIN_TOOLS = {"TideCluster_default", "TideCluster_short"}  # only TE-derived satellites carry it
+STRUCTURE_VALUES = {"LTR_RT_TR"}         # tandem LTR-RT container marker (DANTE_LTR only)
 
 
 def _parse_attrs(col9):
@@ -139,14 +140,28 @@ def validate(path):
             v.append(f"L{lineno}: {tool} Name '{name}' must be bare TRC_<n> "
                      f"(downstream apps / split_gff_by_name.R depend on it)")
 
-        # element_type present iff DANTE_LTR; value constrained
+        # element_type tags DANTE_LTR *individual* elements (complete/partial);
+        # tandem LTR-RT containers (structure=LTR_RT_TR) carry structure instead.
+        is_container = a.get("structure") == "LTR_RT_TR"
         if "element_type" in a:
             if tool != ELEMENT_TYPE_TOOL:
                 v.append(f"L{lineno}: element_type only allowed on {ELEMENT_TYPE_TOOL}, not {tool}")
             elif a["element_type"] not in ELEMENT_TYPE_VALUES:
                 v.append(f"L{lineno}: element_type '{a['element_type']}' not in {sorted(ELEMENT_TYPE_VALUES)}")
-        elif tool == ELEMENT_TYPE_TOOL:
-            v.append(f"L{lineno}: {ELEMENT_TYPE_TOOL} feature missing element_type")
+        elif tool == ELEMENT_TYPE_TOOL and not is_container:
+            v.append(f"L{lineno}: {ELEMENT_TYPE_TOOL} element missing element_type")
+
+        # structure / copy_number — tandem LTR-RT (LTR_RT_TR) containers only
+        if "structure" in a:
+            if a["structure"] not in STRUCTURE_VALUES:
+                v.append(f"L{lineno}: structure '{a['structure']}' not in {sorted(STRUCTURE_VALUES)}")
+            if tool != ELEMENT_TYPE_TOOL:
+                v.append(f"L{lineno}: structure only allowed on {ELEMENT_TYPE_TOOL}, not {tool}")
+        if "copy_number" in a:
+            if not is_container:
+                v.append(f"L{lineno}: copy_number requires structure=LTR_RT_TR")
+            elif not a["copy_number"].isdigit():
+                v.append(f"L{lineno}: copy_number '{a['copy_number']}' is not an integer")
 
         # TE_origin only on TE-derived clustering satellites; value is a class path
         if "TE_origin" in a:

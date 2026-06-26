@@ -42,7 +42,9 @@ invariant** below, whose breakage silently emptied the per-family BigWig outputs
 | `classification` | **required** | slash-separated path; semantic label (drives `type`) |
 | `source_tier` | **required** | integer `1`–`6`, fixed per `source_tool` (table) |
 | `source_tool` | **required** | one of the nine tools (table); equals column 2 |
-| `element_type` | iff `source_tool=DANTE_LTR` | `complete` or `partial` |
+| `element_type` | DANTE_LTR individual elements (not tandem containers) | `complete` or `partial` |
+| `structure` | tandem LTR-RT **container** only (DANTE_LTR) | `LTR_RT_TR` |
+| `copy_number` | with `structure=LTR_RT_TR` only | integer (member copies in the array) |
 | `TE_origin` | optional; only `TideCluster_default`/`_short` | a slash classification path, e.g. `Class_I/LTR/Ty1_copia/Ale` |
 | `Parent` | iff Level 2 (`UA_L2_…`) | an existing `UA_L1_<8 digits>` ID |
 
@@ -95,6 +97,16 @@ routes rDNA by `classification`, so `Name` can stay `TRC_<n>` on disk.
 - **TE-derived satellites** carry `TE_origin=<LCA class of the covered
   structural TEs>`; the underlying tier-1 TEs are absent from this file (they
   remain in `DANTE_*.gff3`).
+- **Tandem LTR-RT (`LTR_RT_TR`).** Head-to-tail, same-lineage LTR-RT arrays that
+  share boundary LTRs (`scripts/resolve_ltr_tandems.py`, upstream of the unified
+  annotation) are one **Level-1 container** (`structure=LTR_RT_TR`,
+  `copy_number=N`, `classification` = the shared lineage, no `element_type`) with
+  the member copies as **Level-2 children** (`Parent=<container>`, normal
+  `element_type`). The container is counted once; the members (which legitimately
+  overlap each other at their shared LTRs) are nested detail. All other
+  overlapping tier-1 structural pairs (cross-lineage, cross-tool, partial) are
+  resolved by trimming the shorter and keeping the longest complete, so **no two
+  tier-1 features overlap** in this file.
 
 ## Validation
 
