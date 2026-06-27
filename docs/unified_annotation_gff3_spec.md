@@ -46,6 +46,7 @@ invariant** below, whose breakage silently emptied the per-family BigWig outputs
 | `structure` | tandem LTR-RT **container** only (DANTE_LTR) | `LTR_RT_TR` |
 | `copy_number` | with `structure=LTR_RT_TR` only | integer (member copies in the array) |
 | `TE_origin` | optional; only `TideCluster_default`/`_short` | a slash classification path, e.g. `Class_I/LTR/Ty1_copia/Ale` |
+| `TE_origin_structure` | optional; with `TE_origin` only | `tandem_LTR_RT` — the TE-derived satellite is a tandem of *full* LTR-RTs |
 | `Parent` | iff Level 2 (`UA_L2_…`) | an existing `UA_L1_<8 digits>` ID |
 
 A Level-1 feature (`UA_L1_…`) **must not** carry a `Parent`; a Level-2 feature
@@ -95,8 +96,20 @@ routes rDNA by `classification`, so `Name` can stay `TRC_<n>` on disk.
   18S/ITS/5.8S/IGS/25S substructure is written here; that detail is only on the
   RepeatMasker `rDNA_45S/<subunit>` features.
 - **TE-derived satellites** carry `TE_origin=<LCA class of the covered
-  structural TEs>`; the underlying tier-1 TEs are absent from this file (they
-  remain in `DANTE_*.gff3`).
+  structural TEs>`; the underlying tier-1 TEs (and any tandem members) are absent
+  from this file (they remain in `DANTE_*.gff3`). Two flavours occur:
+  - **Full LTR-RTs in tandem** — the satellite coincides with a tandem LTR-RT
+    array of *complete* elements (it overlaps an `LTR_RT_TR` container). Tagged
+    `TE_origin_structure=tandem_LTR_RT`. This is the satellite-vs-tandem
+    *conflict*: the satellite wins (one annotation for the region), the container
+    and its member copies are dropped, and `TE_origin`/`TE_origin_structure`
+    record the structural origin.
+  - **Tandemised TE-derived sequence (incomplete)** — the satellite is built from
+    degraded/partial TE monomers with no complete elements. Detected only when it
+    still overlaps ≥2 complete same-lineage structural TEs (`TE_origin` set, no
+    `TE_origin_structure`); a purely degraded array with no complete elements is
+    *not* flagged TE-derived here and stays a plain `Satellite` (RepeatMasker
+    similarity is deliberately not used as the trigger — structural only).
 - **Tandem LTR-RT (`LTR_RT_TR`).** Head-to-tail, same-lineage LTR-RT arrays that
   share boundary LTRs (`scripts/resolve_ltr_tandems.py`, upstream of the unified
   annotation) are one **Level-1 container** (`structure=LTR_RT_TR`,

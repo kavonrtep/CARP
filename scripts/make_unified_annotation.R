@@ -110,7 +110,7 @@ safe_import <- function(path) {
 # All other tool-specific columns are dropped before combining to avoid
 # CharacterList vs character schema incompatibilities that cause NSBS errors.
 .META_COLS <- c("ID", "Name", "classification", "source_tier",
-                "source_tool", "element_type", "TE_origin",
+                "source_tool", "element_type", "TE_origin", "TE_origin_structure",
                 "structure", "copy_number")
 
 # Subset a GRanges to a set of sequence names.
@@ -635,9 +635,21 @@ process_batch <- function(seqs, data, min_len) {
   trc_origin_def <- if (length(t3_def) > 0 && length(t1) > 0) identify_te_derived_trcs(t3_def, t1) else character(0)
   trc_origin_sho <- if (length(t3_sho) > 0 && length(t1) > 0) identify_te_derived_trcs(t3_sho, t1) else character(0)
   if (length(trc_origin_def) + length(trc_origin_sho) > 0) {
+    # A TE-derived satellite that overlaps a tandem LTR-RT container is the
+    # "full LTR-RT in tandems" sub-type (complete LTR-RTs sharing LTRs); one over
+    # scattered complete TEs is the general (often degraded) TE-derived case.
+    containers_t1 <- if (!is.null(t1$structure))
+      t1[!is.na(t1$structure) & t1$structure == "LTR_RT_TR"] else GRanges()
     tag_te <- function(gr, omap) {
       if (length(gr) == 0) return(gr)
-      gr$TE_origin <- unname(omap[as.character(gr$Name)])  # NA where not TE-derived
+      gr$TE_origin <- unname(omap[as.character(gr$Name)])   # NA where not TE-derived
+      sv <- rep(NA_character_, length(gr))
+      if (length(containers_t1) > 0) {
+        on_cont <- !is.na(gr$TE_origin) &
+          overlapsAny(gr, containers_t1, ignore.strand = TRUE)
+        sv[on_cont] <- "tandem_LTR_RT"
+      }
+      gr$TE_origin_structure <- sv
       gr
     }
     t3_def <- tag_te(t3_def, trc_origin_def)
@@ -647,14 +659,19 @@ process_batch <- function(seqs, data, min_len) {
     te_sat <- suppressWarnings(c(t3_def[def_te], t3_sho[sho_te]))
     t3_def <- t3_def[!def_te]
     t3_sho <- t3_sho[!sho_te]
-    # Structural tiers lose their portion under the TE-derived satellites.
+    # Structural tiers — AND tandem member copies — lose their portion under the
+    # TE-derived satellites (the satellite wins; TE_origin records the family).
+    # Dropping members here is essential: otherwise a member whose container is
+    # trimmed away orphans (its parent is gone), producing a malformed feature.
     te_sat_r <- reduce(granges(te_sat), ignore.strand = TRUE)
     t1 <- trim_to_nonoverlap(t1, te_sat_r, min_len)
     t2 <- trim_to_nonoverlap(t2, te_sat_r, min_len)
+    if (length(t1_members) > 0)
+      t1_members <- t1_members[!overlapsAny(t1_members, te_sat_r, ignore.strand = TRUE)]
     t1_ltr <- if (length(t1) > 0) t1[t1$source_tool == "DANTE_LTR"] else GRanges()
-    log_msg(sprintf("  %s  pre-pass: %d TE-derived TRC(s) → te_sat=%d feats; t1→%d t2→%d",
+    log_msg(sprintf("  %s  pre-pass: %d TE-derived TRC(s) → te_sat=%d feats; t1→%d t2→%d t1_members→%d",
                     batch_label, length(trc_origin_def) + length(trc_origin_sho),
-                    length(te_sat), length(t1), length(t2)))
+                    length(te_sat), length(t1), length(t2), length(t1_members)))
   }
 
   # Generic tier-1 structural-overlap fallback (always): no two tier-1 elements
@@ -869,16 +886,6 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
         get_parent_id(level2[!is_ltr], level1))
     }
     level2$Parent <- parent_ids
-    # Remove Level 2 features with no parent found (can't be nested)
-    orphans <- is.na(level2$Parent)
-    if (any(orphans)) {
-      message("  Promoting ", sum(orphans), " Level 2 orphans to Level 1")
-      orphan_feats <- level2[orphans]
-      orphan_feats$Parent <- NULL
-      orphan_feats$temp_parent_tool <- NULL
-      level1 <- c(level1, orphan_feats)
-      level2 <- level2[!orphans]
-    }
     level2$temp_parent_tool <- NULL
     level2$type   <- ifelse(
       grepl("^Satellite|^Simple_repeat|^Low_complexity|^rDNA|^Unknown",
@@ -886,6 +893,22 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
       "repeat_region", "transposable_element"
     )
     level2$source <- level2$source_tool
+    # Promote any Level-2 feature whose parent wasn't found to Level 1 (it can't
+    # nest). type/source are already set above and we re-ID to a fresh UA_L1_, so
+    # the promoted record is a valid Level-1 feature — not a parentless UA_L2_
+    # with type/source='.' (the malformed-orphan bug). With members dropped under
+    # TE-derived satellites this path is now rare, but stays correct if hit.
+    orphans <- is.na(level2$Parent)
+    if (any(orphans)) {
+      message("  Promoting ", sum(orphans), " Level 2 orphans to Level 1")
+      orphan_feats <- level2[orphans]
+      orphan_feats$Parent <- NULL
+      orphan_feats$ID <- paste0("UA_L1_",
+                                formatC(length(level1) + seq_along(orphan_feats),
+                                        width = 8, flag = "0"))
+      level1 <- suppressWarnings(c(level1, orphan_feats))
+      level2 <- level2[!orphans]
+    }
   }
 
   # ── Clean up temp columns from Level 1 ───────────────────────────────────

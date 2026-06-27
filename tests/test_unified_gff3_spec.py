@@ -53,7 +53,7 @@ GOOD = [
     feat("OZ1", "TideCluster_default", "repeat_region", 41000, 50000, ".",
          ID="UA_L1_00000008", Name="TRC_13", classification="Satellite/TideCluster/TRC_13",
          source_tier="3", source_tool="TideCluster_default",
-         TE_origin="Class_I/LTR/Ty1_copia/Ale"),
+         TE_origin="Class_I/LTR/Ty1_copia/Ale", TE_origin_structure="tandem_LTR_RT"),
     feat("OZ1", "TideCluster_short", "repeat_region", 51000, 52000, ".",
          ID="UA_L1_00000009", Name="TRC_5", classification="Satellite/TideCluster/TRC_5",
          source_tier="3", source_tool="TideCluster_short"),
@@ -171,6 +171,10 @@ BAD_CASES = [
      _set(0, "copy_number", "3"), "copy_number requires"),
     ("tandem member missing element_type",
      _del(17, "element_type"), "missing element_type"),
+    ("TE_origin_structure without TE_origin",
+     _set(5, "TE_origin_structure", "tandem_LTR_RT"), "requires TE_origin"),
+    ("bad TE_origin_structure value",
+     _set(7, "TE_origin_structure", "FOO"), "not in"),
 ]
 
 

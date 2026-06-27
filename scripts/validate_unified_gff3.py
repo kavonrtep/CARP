@@ -48,6 +48,7 @@ REQUIRED_ATTRS = ("ID", "Name", "classification", "source_tier", "source_tool")
 ELEMENT_TYPE_VALUES = {"complete", "partial"}
 ELEMENT_TYPE_TOOL = "DANTE_LTR"          # element_type on DANTE_LTR individual elements
 TE_ORIGIN_TOOLS = {"TideCluster_default", "TideCluster_short"}  # only TE-derived satellites carry it
+TE_ORIGIN_STRUCTURE_VALUES = {"tandem_LTR_RT"}  # TE-derived-satellite sub-type (full LTR-RTs in tandem)
 STRUCTURE_VALUES = {"LTR_RT_TR"}         # tandem LTR-RT container marker (DANTE_LTR only)
 
 
@@ -169,6 +170,13 @@ def validate(path):
                 v.append(f"L{lineno}: TE_origin only allowed on {sorted(TE_ORIGIN_TOOLS)}, not {tool}")
             if "/" not in a["TE_origin"]:
                 v.append(f"L{lineno}: TE_origin '{a['TE_origin']}' is not a slash classification path")
+        # TE_origin_structure marks the TE-derived-satellite sub-type; requires TE_origin
+        if "TE_origin_structure" in a:
+            if "TE_origin" not in a:
+                v.append(f"L{lineno}: TE_origin_structure requires TE_origin")
+            if a["TE_origin_structure"] not in TE_ORIGIN_STRUCTURE_VALUES:
+                v.append(f"L{lineno}: TE_origin_structure '{a['TE_origin_structure']}' "
+                         f"not in {sorted(TE_ORIGIN_STRUCTURE_VALUES)}")
 
         # Parent <-> level
         if level == "2" and "Parent" not in a:
