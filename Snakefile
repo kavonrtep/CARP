@@ -734,19 +734,20 @@ rule dante_ltr:
 
 rule resolve_ltr_tandems:
     """
-    Collapse tandem LTR-RT (LTR_RT_TR) arrays in the DANTE_LTR annotation into a
-    single container element with the member copies kept as children, so the
-    unified annotation represents head-to-tail shared-LTR arrays once instead of
-    double-annotating the shared LTRs (Macko-Podgorni et al., Mobile DNA 2025).
-    Non-tandem elements pass through unchanged; a genome with no tandems yields a
-    file identical to the input. ONLY make_unified_annotation consumes this — the
-    LTR library (make_library_of_ltrs) and masking tracks keep using the per-copy
-    DANTE_LTR.gff3. See scripts/resolve_ltr_tandems.py.
+    Detect tandem LTR-RT (LTR_RT_TR) arrays — head-to-tail same-lineage LTR-RTs
+    sharing a boundary LTR (Macko-Podgorni et al., Mobile DNA 2025) — and write a
+    SMALL side file of just the derived containers (one per array, with the member
+    element IDs). DANTE_LTR.gff3 is read-only and UNTOUCHED, so the LTR library,
+    masking track, repeat report and dante_line keep seeing every individual
+    element. make_unified_annotation reads DANTE_LTR.gff3 + this side file and
+    emits one Level-1 container per array with the member copies nested as Level-2
+    children. A genome with no tandems yields a header-only (empty) file.
+    See scripts/resolve_ltr_tandems.py.
     """
     input:
         gff=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3"
     output:
-        gff=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR_tandem_resolved.gff3"
+        gff=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR_tandems.gff3"
     log:
         stdout=F"{config['output_dir']}/DANTE_LTR/resolve_ltr_tandems.log",
         stderr=F"{config['output_dir']}/DANTE_LTR/resolve_ltr_tandems.err"
@@ -1450,7 +1451,8 @@ rule make_unified_annotation:
     similarity-based ones (RepeatMasker). See annotation_rules.md for full tier hierarchy.
     """
     input:
-        ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR_tandem_resolved.gff3",
+        ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
+        ltr_tandems=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR_tandems.gff3",
         tir=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_combined.gff3",
         line=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
         dante=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
@@ -1481,6 +1483,7 @@ rule make_unified_annotation:
         export PATH=$scripts_dir:$PATH
         make_unified_annotation.R \
             --ltr      {input.ltr} \
+            --ltr_tandems {input.ltr_tandems} \
             --tir      {input.tir} \
             --line     {input.line} \
             --dante    {input.dante} \

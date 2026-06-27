@@ -60,14 +60,18 @@ exposes the tandem structure explicitly for downstream tools.
 
 ## Interim workaround (this pipeline)
 
-Until DANTE_LTR supports this natively, we post-process its GFF3 with
-`scripts/resolve_ltr_tandems.py` (a new rule between `dante_ltr` and the unified
-annotation): it applies exactly the detection/representation above and feeds the
-container+children to the unified annotation, which counts the array once and
-nests the members. On the Boechera region this turns the 4 overlapping elements
-into 1 container + 4 nested members (overlap eliminated); on a genome with no
-tandems the output is identical to the input. Validation on a complete assembly
-(for copy-number range, cross-lineage edge cases, degenerate `LTR-RT-related`
+Until DANTE_LTR supports this natively, the `resolve_ltr_tandems` rule (between
+`dante_ltr` and the unified annotation, `scripts/resolve_ltr_tandems.py`) applies
+the detection above and writes a **small companion file**,
+`DANTE_LTR/DANTE_LTR_tandems.gff3`, holding only the derived containers (each
+listing its member element IDs). **`DANTE_LTR.gff3` is left untouched**, so the
+LTR library, masking track, repeat report and `dante_line` keep seeing every
+individual element exactly as DANTE_LTR emitted them. `make_unified_annotation.R`
+reads both files, counts each array once as a container, and nests the member
+copies as Level-2 children. On the Boechera region this turns the 4 overlapping
+elements into 1 container + 4 nested members (overlap eliminated); a genome with
+no tandems yields an empty companion file. Validation on a complete assembly
+(copy-number range, cross-lineage edge cases, degenerate `LTR-RT-related`
 members) is planned.
 
 ## Validation suggested for any DANTE_LTR change

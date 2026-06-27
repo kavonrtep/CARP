@@ -49,6 +49,8 @@ toc <- function(tic_state, detail = NULL) {
 
 option_list <- list(
   make_option("--ltr",              type="character", help="DANTE_LTR GFF3"),
+  make_option("--ltr_tandems",      type="character", default=NULL,
+              help="DANTE_LTR_tandems.gff3 (tandem LTR-RT containers; optional)"),
   make_option("--tir",              type="character", help="DANTE_TIR GFF3"),
   make_option("--line",             type="character", help="DANTE_LINE GFF3"),
   make_option("--dante",            type="character", help="DANTE filtered domains GFF3"),
@@ -135,7 +137,14 @@ subset_seqs <- function(gr, seqs) {
 
 # ── 2. Per-tool loading functions ─────────────────────────────────────────────
 
-load_tier1_ltr <- function(path) {
+# DANTE_LTR.gff3 is read untouched (all individual elements). Tandem LTR-RT
+# (LTR_RT_TR) arrays come from the small companion file written by
+# resolve_ltr_tandems.py: one container per array carrying `members=` (the member
+# element IDs). We split the individual elements into members (IDs listed in a
+# container) vs standalone; containers + standalone are Level-1 tier-1, and the
+# member copies become Level-2 children nested under their container (parent
+# resolved by overlap in finalise_output).
+load_tier1_ltr <- function(path, tandems_path = NULL) {
   message("Loading DANTE_LTR: ", path)
   raw <- safe_import(path)
   if (length(raw) == 0)
@@ -144,37 +153,47 @@ load_tier1_ltr <- function(path) {
   all_te   <- raw[raw$type == "transposable_element"]
   children <- raw[raw$type %in% c("protein_domain", "long_terminal_repeat",
                                    "target_site_duplication", "primer_binding_site")]
-  # resolve_ltr_tandems.py marks tandem LTR-RT (LTR_RT_TR) arrays: a container
-  # feature (no Parent, structure=LTR_RT_TR) plus its member copies (Parent set).
-  # Containers + standalone elements are Level-1 tier-1; member copies become
-  # Level-2 children nested under their container.
-  has_parent <- if (!is.null(all_te$Parent)) {
-    p <- all_te$Parent
-    if (is(p, "CharacterList")) lengths(p) > 0 else !is.na(p)
-  } else rep(FALSE, length(all_te))
-  top     <- all_te[!has_parent]
-  members <- all_te[has_parent]
 
-  meta_te <- function(gr) {
+  # ── tandem containers (small side file) ────────────────────────────────────
+  containers <- GRanges()
+  member_ids <- character(0)
+  if (!is.null(tandems_path)) {
+    tand <- safe_import(tandems_path)
+    if (length(tand) > 0) {
+      tand <- tand[tand$type == "transposable_element"]
+      # rtracklayer parses the comma-separated members= attribute into a
+      # CharacterList; flatten to the set of member element IDs either way.
+      m <- tand$members
+      member_ids <- if (is.null(m)) character(0)
+                    else if (is(m, "CharacterList")) unique(unlist(m))
+                    else unique(unlist(strsplit(as.character(m), ",", fixed = TRUE)))
+      ccls <- canonicalise(tand$Final_Classification, source = "DANTE_LTR")
+      cn   <- if (!is.null(tand$copy_number)) as.character(tand$copy_number)
+              else rep(NA_character_, length(tand))
+      containers <- set_meta(tand, ccls, ccls, 1L, "DANTE_LTR")
+      containers$members      <- NULL   # CharacterList attr — used above, drop before c()
+      containers$element_type <- NA_character_
+      containers$structure    <- "LTR_RT_TR"
+      containers$copy_number  <- cn
+    }
+  }
+
+  is_member  <- as.character(all_te$ID) %in% member_ids
+  members    <- all_te[is_member]
+  standalone <- all_te[!is_member]
+
+  meta_el <- function(gr) {   # individual elements (standalone or tandem members)
     if (length(gr) == 0) return(gr)
-    cls  <- canonicalise(gr$Final_Classification, source = "DANTE_LTR")
-    strv <- if (!is.null(gr$structure)) as.character(gr$structure)
-            else rep(NA_character_, length(gr))
-    is_container <- !is.na(strv) & strv == "LTR_RT_TR"
-    cn   <- if (!is.null(gr$copy_number)) as.character(gr$copy_number)
-            else rep(NA_character_, length(gr))
-    gr   <- set_meta(gr, cls, cls, 1L, "DANTE_LTR")
-    # element_type tags individual elements (complete/partial); tandem containers
-    # carry structure=LTR_RT_TR + copy_number instead.
-    et <- ifelse(grepl("^TE_partial_", gr$ID, perl = TRUE), "partial", "complete")
-    et[is_container] <- NA_character_
-    gr$element_type <- et
-    gr$structure    <- ifelse(is_container, "LTR_RT_TR", NA_character_)
-    gr$copy_number  <- ifelse(is_container, cn, NA_character_)
+    cls <- canonicalise(gr$Final_Classification, source = "DANTE_LTR")
+    gr  <- set_meta(gr, cls, cls, 1L, "DANTE_LTR")
+    gr$element_type <- ifelse(grepl("^TE_partial_", gr$ID, perl = TRUE), "partial", "complete")
+    gr$structure    <- NA_character_
+    gr$copy_number  <- NA_character_
     gr
   }
-  top     <- meta_te(top)
-  members <- meta_te(members)
+  standalone <- meta_el(standalone)
+  members    <- meta_el(members)
+  top        <- suppressWarnings(c(standalone, containers))
 
   # Strip verbose alignment attributes to reduce memory
   verbose_attrs <- c("DB_Seq", "Region_Seq", "Query_Seq", "Best_Hit_DB_Pos",
@@ -182,10 +201,9 @@ load_tier1_ltr <- function(path) {
                      "upstream_domain", "downstream_domain", "domain_order")
   for (a in verbose_attrs) mcols(children)[[a]] <- NULL
 
-  n_cont <- if (length(top) > 0) sum(!is.na(top$structure)) else 0L
-  message("  ", length(top), " top-level LTR features (", n_cont,
-          " tandem LTR_RT_TR container(s)); ", length(members),
-          " tandem member copies -> Level 2")
+  message("  ", length(standalone), " standalone + ", length(containers),
+          " tandem LTR_RT_TR container(s); ", length(members),
+          " member copies -> Level 2")
   list(top = top, children = children, members = members)
 }
 
@@ -1026,7 +1044,7 @@ log_msg("=== make_unified_annotation.R ===")
 # Load all tiers
 log_msg("── Loading inputs ─────────────────────────────────────────────")
 t_load <- tic("loading all tiers")
-ltr_data  <- timed("load DANTE_LTR",   load_tier1_ltr(opt$ltr))
+ltr_data  <- timed("load DANTE_LTR",   load_tier1_ltr(opt$ltr, opt$ltr_tandems))
 tir_data  <- timed("load DANTE_TIR",   load_tier1_tir(opt$tir))
 line_data <- timed("load DANTE_LINE",  load_tier1_line(opt$line))
 
