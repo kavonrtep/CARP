@@ -5,11 +5,14 @@ DANTE_LTR emits *overlapping* intact `transposable_element` features when
 same-lineage LTR-RTs are arranged head-to-tail sharing an LTR
 (`LTR-INT-LTR-INT-LTR`; Macko-Podgórni et al., Mobile DNA 2025 — "tandem LTR-RT"
 / LTR_RT_TR). Left as-is, the shared LTRs are double-annotated in the unified
-annotation. This script detects such tandems and rewrites them as a single
-**container** `transposable_element` (`structure=LTR_RT_TR`, `copy_number=N`)
-spanning the array, with the member copies kept as **children**
-(`Parent=<container>`, `tandem_member=true`). Everything else — non-tandem
-elements, partials, all LTR/domain children — passes through unchanged.
+annotation. This script detects such tandems and writes a **small side file**
+containing only the derived **container** features — one per array
+(`structure=LTR_RT_TR`, `copy_number=N`, `members=<member element IDs>`, spanning
+the array). It does **not** modify DANTE_LTR.gff3: the input is read-only, so the
+LTR library / masking track / report keep seeing every individual element exactly
+as DANTE_LTR emitted them. make_unified_annotation.R reads both files — it splits
+DANTE_LTR.gff3's elements into members (IDs listed here) vs standalone, then
+emits one Level-1 container with the member copies nested as Level-2 children.
 
 Detection: a maximal chain of consecutive **same-lineage, same-strand** complete
 elements where each adjacent pair's terminal LTRs coincide — element A's
@@ -20,7 +23,7 @@ and self-limits array length, so there is no arbitrary kb locus cap. Generic
 cross-tool / non-tandem tier-1 overlap resolution is done downstream in
 make_unified_annotation.R, not here.
 
-Usage:  resolve_ltr_tandems.py -i DANTE_LTR.gff3 -o DANTE_LTR_tandem_resolved.gff3
+Usage:  resolve_ltr_tandems.py -i DANTE_LTR.gff3 -o DANTE_LTR_tandems.gff3
 """
 import argparse
 import sys
@@ -125,51 +128,33 @@ def main(argv=None):
     for lst in by_seq.values():
         chains.extend(detect_tandems(lst, ltrs, args.min_ltr_recip))
 
-    member_ids = {m["attrs"]["ID"] for ch in chains for m in ch}
-    # container per chain
+    # One container record per chain. This file holds ONLY the derived containers
+    # (the array span + the member element IDs); DANTE_LTR.gff3 is left untouched,
+    # so the LTR library / masking / report keep seeing every individual element.
+    # make_unified_annotation.R reads both: it splits DANTE_LTR.gff3's elements
+    # into members (IDs listed here) vs standalone, and nests members under the
+    # container.
+    n_members = 0
     containers = []
-    member_parent = {}
     for n, ch in enumerate(chains, 1):
-        cid = f"LTR_RT_TR_{n:05d}"
         lin = ch[0]["attrs"].get("Final_Classification", "")
         s, e = min(m["start"] for m in ch), max(m["end"] for m in ch)
-        col9 = (f"ID={cid};Name={lin};Final_Classification={lin};"
-                f"structure=LTR_RT_TR;copy_number={len(ch)};"
-                f"members={','.join(m['attrs']['ID'] for m in ch)}")
-        containers.append({"seqid": ch[0]["seqid"], "source": ch[0]["source"],
-                           "start": s, "end": e, "strand": ch[0]["strand"], "col9": col9})
-        for m in ch:
-            member_parent[m["attrs"]["ID"]] = cid
-
-    # ── write ────────────────────────────────────────────────────────────────
-    out = []
-    for c in containers:
-        out.append((c["seqid"], c["start"], 0,
-                    render(c["seqid"], c["source"], "transposable_element",
-                           c["start"], c["end"], ".", c["strand"], ".", c["col9"])))
-    for r in recs:
-        rid = r["attrs"].get("ID")
-        if r["type"] == "transposable_element" and rid in member_ids:
-            col9 = r["col9"].rstrip(";") + f";Parent={member_parent[rid]};tandem_member=true"
-        else:
-            col9 = r["col9"]
-        out.append((r["seqid"], r["start"], 1,
-                    render(r["seqid"], r["source"], r["type"], r["start"], r["end"],
-                           r["score"], r["strand"], r["phase"], col9)))
-    out.sort(key=lambda x: (x[0], x[1], x[2]))
+        mids = [m["attrs"]["ID"] for m in ch]
+        n_members += len(mids)
+        col9 = (f"ID=LTR_RT_TR_{n:05d};Name={lin};Final_Classification={lin};"
+                f"structure=LTR_RT_TR;copy_number={len(ch)};members={','.join(mids)}")
+        containers.append((ch[0]["seqid"], s, e, ch[0]["strand"], ch[0]["source"], col9))
+    containers.sort(key=lambda c: (c[0], c[1]))
 
     with open(args.output, "w") as fh:
-        if not header or not header[0].startswith("##gff-version"):
-            fh.write("##gff-version 3\n")
-        for h in header:
-            fh.write(h + "\n")
-        for _, _, _, line in out:
-            fh.write(line + "\n")
+        fh.write("##gff-version 3\n")
+        for seqid, s, e, strand, source, col9 in containers:
+            fh.write(render(seqid, source, "transposable_element",
+                            s, e, ".", strand, ".", col9) + "\n")
 
-    n_members = len(member_ids)
-    print(f"resolve_ltr_tandems: {len(chains)} tandem LTR-RT array(s) "
-          f"({n_members} member copies) collapsed into containers; "
-          f"{len(tes) - n_members} non-tandem element(s) unchanged.", file=sys.stderr)
+    print(f"resolve_ltr_tandems: {len(chains)} tandem LTR-RT (LTR_RT_TR) "
+          f"array(s) covering {n_members} member copies; wrote containers-only "
+          f"{args.output} (DANTE_LTR.gff3 untouched).", file=sys.stderr)
     return 0
 
 
