@@ -331,15 +331,17 @@ HTML reports:
 
 ### Density BigWig tracks
 
-All `*.bw` outputs are per-window **density** tracks with identical value semantics, ready for genome browsers (JBrowse, IGV, UCSC). **Every annotation-derived density track is built from `Repeat_Annotation_Unified.gff3`** (the tier-resolved, non-overlapping master annotation); the only exception is the structural TideCluster tracks, which are intentionally built from the TideCluster clustering alone (see below).
+All `*.bw` outputs are per-window **density** tracks with identical value semantics, ready for genome browsers (JBrowse, IGV, UCSC). **Every annotation-derived density track is built from `Repeat_Annotation_Unified.gff3`** (the tier-resolved master annotation); the only exception is the structural TideCluster tracks, which are intentionally built from the TideCluster clustering alone (see below).
 
-- **Value** = fraction of the window covered by that track's features (`0`–`1`), computed as mean per-base coverage per bin and then smoothed with a 10-bin moving average. (Where a track's features overlap each other the value can exceed 1; for the non-overlapping Unified annotation it stays within `[0, 1]`.)
+- **Value** = fraction of the window covered by that track's features (`0`–`1`), computed as mean per-base coverage per bin and then smoothed with a 10-bin moving average. Overlapping features are merged into a **strand-agnostic union** before coverage, so the value is **always within `[0, 1]`** — even though the Unified annotation deliberately tolerates overlap (a Level-1 `Simple_repeat`/`Low_complexity` lying over a TE, and nested Level-2 children such as tandem-array members inside an `LTR_RT_TR` container or simple repeats inside a satellite). Without the union these overlaps stacked the coverage above 1 (up to ~3.5× on dense centromeric/tandem regions).
 - **Window size**: `_10k` files use 1 kb bins (~10 kb effective smoothing window); `_100k` files use 10 kb bins (~100 kb effective window).
 - **Encoding (sparse)**: tracks are written run-length-merged — consecutive windows with an *exactly equal* value (including zero runs) are collapsed into one variable-width interval. This is lossless (non-zero values are unchanged at every position) and needs no consumer change; it makes satellite/per-family tracks dramatically smaller.
 
 #### The track families
 - **Total** — `Repeat_density/Repeat_density_total_{10k,100k}.bw`: all repeats genome-wide (Unified).
 - **Per class / superfamily** — `Repeat_density_by_class_bigwig/{10k,100k}/…`: one track per class, plus the `All_Ty1_Copia`, `All_Ty3_Gypsy`, and `Class_II.Subclass_1.TIR` rollups (Unified).
+
+  > **Partition vs. roll-up (do not double-count).** The by-class set mixes two kinds of track. The **exact-classification tracks** (`Class_I.LTR.Ty1_copia.Ale`, `Tandem_repeats`, `rDNA_45S`, `Simple_repeat`, `Low_complexity`, `Unknown`, …) are a **disjoint partition** — each feature appears in exactly one, at its leaf classification — so they sum (approximately, modulo smoothing) to the **Total** track. The **roll-up tracks** — `All_Ty1_Copia`, `All_Ty3_Gypsy`, `Class_II.Subclass_1.TIR`, and `Mobile_elements` — are cumulative supersets that deliberately **overlap** the partition. For a stacked/summed view use the partition tracks; use the roll-ups as ready-made aggregates — but never sum a roll-up together with the leaf tracks it contains.
 
 #### Tandem-repeat tracks — which one to use
 
@@ -416,6 +418,18 @@ identical to what the release workflow would publish.
 
 
 ## Changelog:
+- v 1.0.0rc3 -
+  - Density BigWig tracks no longer exceed 1.0: overlapping features are merged into a **strand-agnostic union** before coverage (`calculate_density.R` / `calculate_density_batch.R`). The Unified annotation tolerates overlap (L1 `Simple_repeat`/`Low_complexity` over a TE; nested L2 children), which previously stacked the total track to ~3.5× and per-class tracks to ~2.2×; every density track is now a true union fraction in `[0, 1]`. Validated across three full assemblies (Boechera, Dunaliella, *A. thaliana* Col-CC T2T)
+  - **Tandem LTR-RT (`LTR_RT_TR`)**: head-to-tail, same-lineage LTR-RT arrays that share boundary LTRs are collapsed to one Level-1 container with the member copies as Level-2 children (`scripts/resolve_ltr_tandems.py`), so a shared-LTR array is annotated once instead of double-counting the overlapping LTRs. Containers are also written to a new top-level `DANTE_LTR_tandems.gff3` (header-only when none; logical name `dante_ltr_tandems_gff3`). See [`docs/dante_ltr_tandem_feature_request.md`](docs/dante_ltr_tandem_feature_request.md)
+  - **TE-derived satellite conflict** resolved: where a TideCluster satellite is a tandem of complete LTR-RTs, the satellite wins the region and is tagged `TE_origin` (plus `TE_origin_structure=tandem_LTR_RT` for the full-LTR-RT case), and the underlying structural elements/members are trimmed out of the unified file — eliminating the double annotation. The unified-GFF3 drift guard and spec were extended to cover the new attributes
+- v 1.0.0rc2 -
+  - Output contract for `Repeat_Annotation_Unified.gff3` written down ([`docs/unified_annotation_gff3_spec.md`](docs/unified_annotation_gff3_spec.md)) and enforced by an executable drift guard (`scripts/validate_unified_gff3.py` + `tests/test_unified_gff3_spec.py`, run in CI and the release gate)
+  - Fixed a satellite `Name` regression that silently emptied the per-family BigWig outputs — every TideCluster satellite `Name` stays the bare `TRC_<n>` (downstream apps and `split_gff_by_name.R --name-prefix TRC_` key on it); rDNA is routed by `classification` instead
+  - New `/release` skill: one-command version bump + cheap-CI gate + tag
+- v 1.0.0rc1 -
+  - **TideCluster upgraded to 1.16.0**, adding three default-on behaviours the unified annotation consumes: array-level **rDNA identification** (`rDNA_45S`/`rDNA_5S`, labelled clearly as rDNA while still counted as a tandem family), cross-TRC overlap resolution, and a chunked/pooled `tc_reannotate` RepeatMasker (fixes `-pa`-with-custom-`-lib` under-parallelism). New config knobs `tidecluster_detect_rdna` / `tidecluster_rdna_library` / `tidecluster_keep_trc_overlaps` / `tidecluster_chunk_size`
+  - Unified annotation now **resolves TR-from-TE overlaps**: a tandem array built from multiple same-family structural TEs is reported once as the satellite with a `TE_origin` tag rather than double-annotated; a non-fatal `Repeat_Annotation_Unified.overlaps.tsv` reports any residual Level-1 overlaps
+  - Major performance/memory work: fixed a `reduce_library` merge OOM (~296 GB RSS → bounded), parallelised the density batch / DANTE_TIR fallback / `reduce_library` BLAST+CAP3, and packed small scaffolds into shared RepeatMasker chunks
 - v 0.9.0rc10 -
   - New **second-round containment reduction** of the RepeatMasker library (`reduce_library_containment`, default True, independent of `reduce_library`). After the per-class CAP3/mmseqs reduction, a `reduce_library_containment` rule drops short repeat fragments fully contained in a longer element of the **same class** (greedy blastn self-comparison, `scripts/containment_reduce_library.py`); RepeatMasker masks their genomic copies via the container, so masking **and** classification are preserved. Validated masked-bp-lossless with RepeatMasker on the Pisum pangenome over two genome regions (−0.09…−0.12%) while cutting ~22% of library bp and ~30% of RepeatMasker wall-time. Thresholds via `containment_min_identity` (80) / `containment_min_coverage` (0.90); set `reduce_library_containment: False` to feed RepeatMasker the full per-class-reduced library
 - v 0.9.0rc9 -

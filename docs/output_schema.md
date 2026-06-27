@@ -36,6 +36,23 @@ Replaces the pre-rc6 layout (see v1). GFF3 paths and the
 `Repeat_Annotation_NoSat_split_by_class_gff3/` directory name are unchanged for
 backward compatibility.
 
+**Density value semantics (contract).** Every `*.bw` value is the *fraction of
+the window covered* by that track's features, in `[0, 1]` (mean per-base
+coverage per bin, 10-bin moving-average smoothed). Overlapping features are
+merged into a strand-agnostic union before coverage, so a value never exceeds 1
+even though the Unified annotation tolerates overlap (L1 `Simple_repeat`/
+`Low_complexity` over a TE; nested L2 children). *(Fixed post-1.0.0rc2 — values
+previously stacked above 1 in dense tandem/centromeric regions; additive, no
+layout change, still `schema_version: "2"`.)*
+
+**By-class set = partition + roll-ups (consumers: do not double-count).** The
+`Repeat_density_by_class_bigwig/` exact-classification tracks are a **disjoint
+partition** (each feature counted once at its leaf classification) and sum to
+the total track. Alongside them are **cumulative roll-up** tracks that overlap
+the partition: `All_Ty1_Copia`, `All_Ty3_Gypsy`, `Class_II.Subclass_1.TIR`, and
+`Mobile_elements`. Use the partition for a summed/stacked view; use the roll-ups
+as ready-made aggregates — never sum a roll-up together with its leaf tracks.
+
 ## v1 — pre-rc6 (≤ 0.9.0rc5), historical
 
 - RM-only whole-genome total `RepeatMasker/Repeat_Annotation_NoSat_{10k,100k}.bw`
