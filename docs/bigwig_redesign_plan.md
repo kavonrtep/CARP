@@ -92,8 +92,16 @@ consumers (JBrowse, etc.).
 ```
 
 All density values: fraction of window covered (0–1), 10-bin moving-average
-smoothed, run-length-merged. `coverage()` of non-overlapping Unified features
-⇒ value ∈ [0,1].
+smoothed, run-length-merged.
+
+> **Correction (post-1.0.0rc2).** This plan assumed `coverage()` of "non-overlapping
+> Unified features ⇒ value ∈ [0,1]". The Unified annotation is **not** fully
+> non-overlapping — it tolerates L1 `Simple_repeat`/`Low_complexity` over a TE and
+> nested L2 children (`LTR_RT_TR` members, simple repeats inside a satellite) — so
+> raw `coverage()` stacked the value above 1 (~3.5× on the total track). The `[0,1]`
+> guarantee now comes from an explicit `reduce(g, ignore.strand=TRUE)` union in
+> `calculate_density.R` / `calculate_density_batch.R`, not from the annotation's
+> shape.
 
 ### Per-family pairing (the key new capability)
 For each tandem family `TRC_<n>`:
