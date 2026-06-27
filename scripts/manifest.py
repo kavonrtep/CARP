@@ -61,6 +61,10 @@ OUTPUTS = {
     # ── per-tool / per-class GFF3s ───────────────────────────────────
     "dante_filtered_gff3":          "DANTE_filtered.gff3",
     "dante_ltr_gff3":               "DANTE_LTR.gff3",
+    # Tandem LTR-RT (LTR_RT_TR) containers — one per head-to-tail shared-LTR
+    # array, each listing its member element IDs. Always present; header-only
+    # when no tandems are detected. See docs/dante_ltr_tandem_feature_request.md.
+    "dante_ltr_tandems_gff3":       "DANTE_LTR_tandems.gff3",
     "dante_tir_gff3":               "DANTE_TIR.gff3",
     "mobile_elements_gff3":         "Mobile_elements_RepeatMasker.gff3",
     "tandem_tidecluster_gff3":      "Tandem_repeats_TideCluster.gff3",

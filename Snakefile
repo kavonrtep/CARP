@@ -1638,6 +1638,7 @@ rule add_top_level_outputs:
     input:
         dante=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
         dante_ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
+        dante_ltr_tandems=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR_tandems.gff3",
         dante_tir=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_combined.gff3",
         sat_tc=F"{config['output_dir']}/TideCluster/default/TideCluster_clustering.gff3",
         sat_rm=F"{config['output_dir']}/TideCluster/default/RM_on_TideCluster_Library.gff3",
@@ -1651,6 +1652,7 @@ rule add_top_level_outputs:
     output:
         dante=F"{config['output_dir']}/DANTE_filtered.gff3",
         dante_ltr=F"{config['output_dir']}/DANTE_LTR.gff3",
+        dante_ltr_tandems=F"{config['output_dir']}/DANTE_LTR_tandems.gff3",
         dante_tir=F"{config['output_dir']}/DANTE_TIR.gff3",
         sat_tc=F"{config['output_dir']}/Tandem_repeats_TideCluster.gff3",
         sat_rm=F"{config['output_dir']}/Tandem_repeats_RepeatMasker.gff3",
@@ -1670,6 +1672,7 @@ rule add_top_level_outputs:
         # make symbolic links to all the outputs
         ln -fs -r {input.dante} {output.dante}
         ln -fs -r {input.dante_ltr} {output.dante_ltr}
+        ln -fs -r {input.dante_ltr_tandems} {output.dante_ltr_tandems}
         ln -fs -r {input.dante_tir} {output.dante_tir}
         ln -fs -r {input.sat_tc} {output.sat_tc}
         ln -fs -r {input.sat_rm} {output.sat_rm}

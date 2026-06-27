@@ -53,3 +53,11 @@ No `carp_manifest.json` was emitted in v1.
 is additive (a new file at the output root) and did **not** bump the schema —
 the rc6 layout it describes is unchanged. The first manifest therefore reports
 `schema_version: "2"`.
+
+**Note:** the tandem LTR-RT feature (post-1.0.0rc2) adds one new declared output,
+`DANTE_LTR_tandems.gff3` (logical name `dante_ltr_tandems_gff3`) — a top-level
+file of LTR_RT_TR container features, one per head-to-tail shared-LTR array, each
+listing its member element IDs. **Always present; header-only when no tandems are
+detected**, so consumers can open it unconditionally. Additive (a new logical
+name; no existing output renamed/moved), so it does **not** bump the schema —
+still `schema_version: "2"`.
