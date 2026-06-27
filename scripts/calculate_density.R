@@ -64,7 +64,7 @@ option_list <- list(
   make_option(c("-w", "--window"), type="integer", default=1000000, help="Window size"),
   make_option(c("-o", "--output"), type="character", default=NULL, help="Output BigWig file"),
   make_option(c("-f", "--format"), type="character", default="gff3", help="Input format (gff3 or bed)"),
-  make_option(c("-m", "--merge"), type="logical", action="store_true", default=FALSE, help="Merge overlapping regions"),
+  make_option(c("-m", "--merge"), type="logical", action="store_true", default=FALSE, help="[deprecated/no-op] overlaps are now ALWAYS merged into a union before density (kept for backward-compatible invocation)"),
   make_option(c("-g", "--genome"), type="character", default=NULL, help="Genome file in fasta format")
 
 
@@ -91,9 +91,17 @@ if (length(g)==0){
   quit()
 }
 
-if (opt$merge){
-  g <- reduce(g)
-}
+# Density tracks are UNION coverage: every base is either repeat-covered or
+# not, so a score must never exceed 1.0. The unified annotation deliberately
+# tolerates overlap — L1 Simple_repeat / Low_complexity sitting on top of a TE,
+# and ALL L2 nested children (tandem-array members inside an LTR_RT_TR
+# container, simple repeats nested in a satellite). Feeding those straight to
+# coverage() counts stacking depth (>1) and pushed the total track to ~3.5x.
+# reduce() to a non-overlapping union first. ignore.strand=TRUE is essential: a
+# '*'-strand simple repeat must merge with the +/- element it overlaps. The
+# legacy --merge flag is now implied (always on) and kept only so existing
+# invocations that pass it keep working.
+g <- reduce(g, ignore.strand = TRUE)
 print(opt)
 chr_size_all <- readRDS(opt$genome)
 
