@@ -46,6 +46,12 @@ smooth_score2 <- function(x, N_for_mean = 10){
 # The output header consequently carries only the occupied seqlevels (BigWig
 # export drops dataless seqlevels anyway), which is the intended behaviour.
 density_per_family <- function(g, chr_size_all, step, N_for_mean = 10){
+  # Union coverage (see calculate_density.R): collapse overlaps so the score is
+  # a fraction in [0,1]. A per-class file can hold an L1 LTR_RT_TR container
+  # plus its L2 member copies (same class), which overlap; without reduce()
+  # those regions would score >1. ignore.strand=TRUE so opposite-strand /
+  # '*'-strand overlaps also merge.
+  g <- reduce(g, ignore.strand = TRUE)
   occ <- seqlevels(g)
   not_used <- setdiff(names(chr_size_all), occ)
   chr_in_order <- chr_size_all[c(occ, not_used)]   # occupied first, as the original
