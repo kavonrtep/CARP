@@ -21,13 +21,13 @@ assembly, then merges everything into a single, non-overlapping annotation.
 
 | Tool | Role in CARP |
 |------|--------------|
-| **DANTE** | Annotates conserved transposon protein domains against REXdb; foundation for the DANTE_* tools |
-| **DANTE_LTR** | Reconstructs intact LTR retrotransposons from DANTE domains |
-| **DANTE_TIR** | Calls TIR DNA transposons from DANTE transposase domains |
-| **DANTE_LINE** | Calls LINE elements (experimental) |
-| **TideCluster** | Detects tandem repeats in two passes (default + short monomer) and flags 45S/5S rDNA arrays |
-| **RepeatMasker** | Similarity masking of the genome with the CARP-built repeat library |
-| **REXdb** | Viridiplantae protein-domain reference database backing the DANTE family |
+| [**DANTE**](https://github.com/kavonrtep/dante) | Annotates conserved transposon protein domains against REXdb; foundation for the DANTE_* tools |
+| [**DANTE_LTR**](https://github.com/kavonrtep/dante_ltr) | Reconstructs intact LTR retrotransposons from DANTE domains |
+| [**DANTE_TIR**](https://github.com/kavonrtep/dante_tir) | Calls TIR DNA transposons from DANTE transposase domains |
+| [**DANTE_LINE**](https://github.com/kavonrtep/dante_line) | Calls LINE elements (experimental) |
+| [**TideCluster**](https://github.com/kavonrtep/TideCluster) | Detects tandem repeats in two passes (default + short monomer) and flags 45S/5S rDNA arrays |
+| [**RepeatMasker**](https://www.repeatmasker.org/) | Similarity masking of the genome with the CARP-built repeat library |
+| [**REXdb**](https://github.com/repeatexplorer/rexdb) | Viridiplantae protein-domain reference database backing the DANTE family |
 
 ## Requirements
 
