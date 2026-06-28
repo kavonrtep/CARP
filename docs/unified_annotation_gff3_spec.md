@@ -94,7 +94,17 @@ routes rDNA by `classification`, so `Name` can stay `TRC_<n>` on disk.
   tandem family (they appear in the per-family split under their `TRC_<n>`
   Name) **and** rDNA (counted in the rDNA class via classification). No internal
   18S/ITS/5.8S/IGS/25S substructure is written here; that detail is only on the
-  RepeatMasker `rDNA_45S/<subunit>` features.
+  RepeatMasker `rDNA_45S/<subunit>` features. The rDNA call is taken from
+  TideCluster's **authoritative** per-TRC table `<prefix>_rdna.tsv` (columns
+  `TRC`/`rDNA_type`/`coverage`, written by `identify_rdna`), keyed by TRC id and
+  applied to **all** TideCluster tiers — tier-3 clustering **and tier-4
+  RM-on-TideCluster** (`TideCluster_RM`), which reannotates with the *default*
+  dimer library and so shares the default run's TRC namespace. This is why a
+  tier-4 array that the structural clustering did not cover is still labelled
+  `rDNA_45S|5S` rather than `Satellite/TideCluster/<TRC>`. The clustering GFF3's
+  per-feature `rDNA_type` attribute is a fallback used only when the TSV is
+  unavailable (`--no_rdna`, detection failure, or older TideCluster); the
+  RM-on-TideCluster GFF3 never carries `rDNA_type`.
 - **TE-derived satellites** carry `TE_origin=<LCA class of the covered
   structural TEs>`; the underlying tier-1 TEs (and any tandem members) are absent
   from this file (they remain in `DANTE_*.gff3`). Two flavours occur:

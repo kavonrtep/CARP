@@ -1467,6 +1467,14 @@ rule make_unified_annotation:
     output:
         gff=F"{config['output_dir']}/Repeat_Annotation_Unified.gff3",
         overlaps=F"{config['output_dir']}/Repeat_Annotation_Unified.overlaps.tsv"
+    params:
+        # TideCluster's authoritative per-TRC rDNA calls (45S/5S). Passed as
+        # params, not inputs: they are written alongside the clustering GFF3 by
+        # the same upstream rule (so ordering is guaranteed via tc_default/
+        # tc_short), but are absent when tidecluster_detect_rdna is false — the
+        # R script guards with file.exists and falls back to the rDNA_type attr.
+        tc_rdna_default=F"{config['output_dir']}/TideCluster/default/TideCluster_rdna.tsv",
+        tc_rdna_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_rdna.tsv"
     log:
         stdout=F"{config['output_dir']}/Repeat_Annotation_Unified.log",
         stderr=F"{config['output_dir']}/Repeat_Annotation_Unified.err"
@@ -1490,6 +1498,8 @@ rule make_unified_annotation:
             --tc_default {input.tc_default} \
             --tc_short   {input.tc_short} \
             --tc_rm      {input.tc_rm} \
+            --tc_rdna_default {params.tc_rdna_default} \
+            --tc_rdna_short   {params.tc_rdna_short} \
             --rm       {input.rm} \
             --th_default {input.th_default} \
             --th_short   {input.th_short} \

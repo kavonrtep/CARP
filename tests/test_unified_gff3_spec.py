@@ -92,6 +92,13 @@ GOOD = [
          classification="Class_I/LTR/Ty3_gypsy/chromovirus/Tekay",
          source_tier="1", source_tool="DANTE_LTR", element_type="complete",
          Parent="UA_L1_00000016"),
+    # Tier-4 (RM-on-TideCluster) rDNA array: keeps bare Name=TRC_<n>, classified
+    # rDNA from TideCluster's authoritative <prefix>_rdna.tsv (not the GFF3
+    # rDNA_type attribute, which tier 4 never carries). Guards that the contract
+    # keeps accepting tier-4 rDNA — index 18.  -- the make_unified rDNA fix --
+    feat("OZ1", "TideCluster_RM", "repeat_region", 120000, 121000, "+",
+         ID="UA_L1_00000017", Name="TRC_2", classification="rDNA_45S",
+         source_tier="4", source_tool="TideCluster_RM"),
 ]
 
 

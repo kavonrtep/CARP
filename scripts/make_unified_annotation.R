@@ -57,6 +57,10 @@ option_list <- list(
   make_option("--tc_default",       type="character", help="TideCluster default GFF3"),
   make_option("--tc_short",         type="character", help="TideCluster short monomer GFF3"),
   make_option("--tc_rm",            type="character", help="RM on TideCluster library GFF3"),
+  make_option("--tc_rdna_default",  type="character", default=NULL,
+              help="TideCluster default rDNA TSV (TRC/rDNA_type/coverage; authoritative rDNA-TRC calls; optional)"),
+  make_option("--tc_rdna_short",    type="character", default=NULL,
+              help="TideCluster short-monomer rDNA TSV (authoritative rDNA-TRC calls; optional)"),
   make_option("--rm",               type="character", help="RepeatMasker+DANTE merged GFF3"),
   make_option("--th_default",       type="character", help="TideHunter default residuals GFF3"),
   make_option("--th_short",         type="character", help="TideHunter short residuals GFF3"),
@@ -252,25 +256,65 @@ load_tier2_dante <- function(path) {
   raw
 }
 
-# Map a TideCluster clustering / RM-on-TC feature to (Name, classification, TRC).
-# TideCluster >=1.16.0 flags rDNA TRCs with `rDNA_type=45S|5S` in the clustering
-# GFF3; we surface those as array-level rDNA_45S / rDNA_5S (no internal
+# Authoritative TRC -> rDNA-class map from TideCluster's `<prefix>_rdna.tsv`
+# (columns TRC / rDNA_type / coverage), written by identify_rdna() in tc_utils.py.
+# This is TideCluster's definitive per-TRC rDNA call and is what we trust. It is
+# strictly more complete than the clustering GFF3's `rDNA_type` attribute: a TRC
+# can be called rDNA from its consensus dimer yet carry no rDNA_type-tagged
+# feature in the clustering GFF3, and the RM-on-TideCluster GFF3 (tier 4) carries
+# no `rDNA_type` at all — so without this map every tier-4 rDNA array would be
+# mislabelled `Satellite/TideCluster/<TRC>`. Returns a named character vector
+# TRC_<n> -> "rDNA_45S"/"rDNA_5S"; empty when the file is absent/unreadable
+# (e.g. `--no_rdna`, detection failed, or older TideCluster), in which case
+# normalise_tc_satellite falls back to the per-feature `rDNA_type` attribute.
+load_rdna_map <- function(path) {
+  if (is.null(path) || !file.exists(path) || file.size(path) == 0)
+    return(character(0))
+  tab <- tryCatch(
+    read.table(path, header = TRUE, sep = "\t", stringsAsFactors = FALSE,
+               colClasses = "character", quote = "", comment.char = ""),
+    error = function(e) {
+      message("  Warning: could not read rDNA TSV ", basename(path), ": ",
+              conditionMessage(e))
+      NULL
+    })
+  if (is.null(tab) || nrow(tab) == 0 ||
+      !all(c("TRC", "rDNA_type") %in% names(tab)))
+    return(character(0))
+  rtype <- toupper(trimws(tab$rDNA_type))
+  cls   <- ifelse(rtype == "45S", "rDNA_45S",
+           ifelse(rtype == "5S",  "rDNA_5S", NA_character_))
+  keep  <- !is.na(cls)
+  m <- setNames(cls[keep], trimws(tab$TRC[keep]))
+  m[!duplicated(names(m))]
+}
+
+# Map a TideCluster clustering / RM-on-TC feature to (Name, classification).
+# rDNA arrays (45S/5S) are surfaced as array-level rDNA_45S / rDNA_5S (no internal
 # 18S/ITS/5.8S/IGS/25S substructure, matching TideCluster's design), which routes
 # them to the rDNA class downstream (calculate_statistics_and_make_groups.R keys
-# on `^rDNA`) and keeps them out of the Tandem_repeats aggregation. The
-# originating TRC id is preserved in a `TRC` attribute for traceability (NA on
-# non-rDNA features → omitted on export). All other TRCs keep the
-# Satellite/TideCluster/<TRC> classification unchanged.
-normalise_tc_satellite <- function(gr, tier, tool) {
+# on `^rDNA`) and keeps them out of the Tandem_repeats aggregation. The rDNA call
+# comes from the authoritative `rdna_map` (TideCluster's `<prefix>_rdna.tsv`),
+# applied identically to tier-3 clustering and tier-4 RM-on-TC features by TRC id
+# (RM-on-TC reannotates with the *default* dimer library, so it shares the default
+# run's TRC namespace). The per-feature `rDNA_type` attribute is a fallback for
+# when the TSV is unavailable. All other TRCs keep Satellite/TideCluster/<TRC>.
+normalise_tc_satellite <- function(gr, tier, tool, rdna_map = character(0)) {
   if (length(gr) == 0) return(gr)
   gr$type <- "repeat_region"
   trc   <- as.character(gr$Name)
-  rtype <- if (!is.null(gr$rDNA_type)) as.character(gr$rDNA_type) else rep(NA_character_, length(gr))
-  is45  <- !is.na(rtype) & rtype == "45S"
-  is5   <- !is.na(rtype) & rtype == "5S"
   cls   <- paste0("Satellite/TideCluster/", trc)
-  cls[is45] <- "rDNA_45S"
-  cls[is5]  <- "rDNA_5S"
+  # Authoritative rDNA call, keyed by TRC id.
+  if (length(rdna_map)) {
+    hit <- trc %in% names(rdna_map)
+    cls[hit] <- unname(rdna_map[trc[hit]])
+  }
+  # Fallback to the per-feature rDNA_type attribute only where the map didn't
+  # already resolve the TRC (TSV absent / older TideCluster / --no_rdna).
+  rtype <- if (!is.null(gr$rDNA_type)) as.character(gr$rDNA_type) else rep(NA_character_, length(gr))
+  unresolved <- !grepl("^rDNA_", cls)
+  cls[unresolved & !is.na(rtype) & rtype == "45S"] <- "rDNA_45S"
+  cls[unresolved & !is.na(rtype) & rtype == "5S"]  <- "rDNA_5S"
   # Name ALWAYS keeps the bare TRC id (TRC_<n>) — downstream apps and
   # split_gff_by_name.R (--name-prefix TRC_) key on it, so it must stay byte-stable
   # across versions for every satellite (rDNA included). The rDNA / TE-derived
@@ -282,13 +326,15 @@ normalise_tc_satellite <- function(gr, tier, tool) {
   gr
 }
 
-load_tier3_tidecluster <- function(path_default, path_short) {
+load_tier3_tidecluster <- function(path_default, path_short,
+                                   rdna_default = character(0),
+                                   rdna_short   = character(0)) {
   message("Loading TideCluster default: ", path_default)
   def <- safe_import(path_default)
   message("Loading TideCluster short monomer: ", path_short)
   sho <- safe_import(path_short)
-  d <- normalise_tc_satellite(def, 3L, "TideCluster_default")
-  s <- normalise_tc_satellite(sho, 3L, "TideCluster_short")
+  d <- normalise_tc_satellite(def, 3L, "TideCluster_default", rdna_default)
+  s <- normalise_tc_satellite(sho, 3L, "TideCluster_short",   rdna_short)
   message("  ", if (length(d)) sum(grepl("^rDNA_", d$classification)) else 0,
           " default + ",
           if (length(s)) sum(grepl("^rDNA_", s$classification)) else 0,
@@ -296,12 +342,14 @@ load_tier3_tidecluster <- function(path_default, path_short) {
   list(default = d, short = s)
 }
 
-load_tier4_tc_rm <- function(path) {
+load_tier4_tc_rm <- function(path, rdna_default = character(0)) {
   message("Loading RM on TideCluster library: ", path)
   raw <- safe_import(path)
   if (length(raw) == 0) return(GRanges())
 
-  raw <- normalise_tc_satellite(raw, 4L, "TideCluster_RM")
+  # RM-on-TC reannotates with the *default* dimer library, so its TRC namespace
+  # is the default clustering run's — use the default rDNA map here.
+  raw <- normalise_tc_satellite(raw, 4L, "TideCluster_RM", rdna_default)
   message("  ", length(raw), " RM-on-TideCluster features")
   raw
 }
@@ -1077,12 +1125,21 @@ log_msg("Tier 1 total: ", length(t1), " top-level features")
 t2 <- timed("load DANTE filtered (Tier 2)", load_tier2_dante(opt$dante))
 log_msg("Tier 2 total: ", length(t2), " features")
 
+# Authoritative rDNA-TRC calls from TideCluster's <prefix>_rdna.tsv (default and
+# short runs). Applied to tier-3 and tier-4 alike; empty maps fall back to the
+# per-feature rDNA_type attribute inside normalise_tc_satellite().
+rdna_default <- load_rdna_map(opt$tc_rdna_default)
+rdna_short   <- load_rdna_map(opt$tc_rdna_short)
+log_msg("Authoritative rDNA TRCs: ", length(rdna_default), " default + ",
+        length(rdna_short), " short")
+
 tc_data <- timed("load TideCluster (Tier 3)",
-                 load_tier3_tidecluster(opt$tc_default, opt$tc_short))
+                 load_tier3_tidecluster(opt$tc_default, opt$tc_short,
+                                        rdna_default, rdna_short))
 log_msg("Tier 3 total: ", length(tc_data$default), " default + ",
         length(tc_data$short), " short monomer features")
 
-t4 <- timed("load RM-on-TC (Tier 4)", load_tier4_tc_rm(opt$tc_rm))
+t4 <- timed("load RM-on-TC (Tier 4)", load_tier4_tc_rm(opt$tc_rm, rdna_default))
 log_msg("Tier 4 total: ", length(t4), " features")
 
 rm_data <- timed("load RepeatMasker+DANTE (Tier 5)", load_tier5_rm(opt$rm))
