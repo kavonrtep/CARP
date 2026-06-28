@@ -1,462 +1,226 @@
-
 <img src="figs/CARP.png" alt="CARP logo" width="400"/>
 
-The Comprehensive Annotation of Repeats Pipeline (CARP) is a
-workflow that
-integrates multiple specialized tools to identify and classify various types of repetitive
-elements in genomic sequences. 
+The **Comprehensive Annotation of Repeats Pipeline (CARP)** integrates several
+specialised tools to identify and classify the repetitive elements of a genome
+assembly, then merges everything into a single, non-overlapping annotation.
 
-- The pipeline uses DANTE/DANTE_LTR to identify intact
-LTR retrotransposons.
-- DANTE_TIR is used to identify DNA transposons
-- DANTE_LINE is used to identify LINE elements.
-- TideCluster is employed to identify tandem repeats, with separate processes
-for default-length and short monomer repeats.
-- The pipeline then creates custom libraries of repeat sequences, including those from LTR
-retrotransposons and Tandem repeats. This library can be supplements with user-provided
-custom repeat databases.
-- After building these repeat libraries, the pipeline uses RepeatMasker to annotate the
-genome comprehensively. 
-- The workflow produces detailed GFF3 annotation files for
-different repeat classes (mobile elements, simple repeats, low complexity regions, rDNA),
-density visualizations as bigWig files, and summary statistics and plots.
+- **DANTE / DANTE_LTR** — intact LTR retrotransposons
+- **DANTE_TIR** — TIR DNA transposons
+- **DANTE_LINE** — LINE elements (experimental)
+- **TideCluster** — tandem repeats / satellites and rDNA arrays
+- A custom repeat **library** is built from the discovered elements (optionally
+  extended with user databases) and used by **RepeatMasker** for genome-wide
+  similarity masking
+- Outputs: a unified GFF3 annotation, per-class GFF3 files, density tracks
+  (BigWig), summary statistics, and HTML reports
 
-**Limitations:** - The pipeline was developed for annotation of *plant* genomes. Don't use it for animal genomes.
+> **Limitation:** CARP was developed for **plant** genomes. Do not use it on
+> animal genomes.
+
+## Tools
+
+| Tool | Role in CARP |
+|------|--------------|
+| **DANTE** | Annotates conserved transposon protein domains against REXdb; foundation for the DANTE_* tools |
+| **DANTE_LTR** | Reconstructs intact LTR retrotransposons from DANTE domains |
+| **DANTE_TIR** | Calls TIR DNA transposons from DANTE transposase domains |
+| **DANTE_LINE** | Calls LINE elements (experimental) |
+| **TideCluster** | Detects tandem repeats in two passes (default + short monomer) and flags 45S/5S rDNA arrays |
+| **RepeatMasker** | Similarity masking of the genome with the CARP-built repeat library |
+| **REXdb** | Viridiplantae protein-domain reference database backing the DANTE family |
 
 ## Requirements
 
-**Container runtime.** Either [Apptainer](https://apptainer.org/) (≥ 1.0,
-recommended) or [Singularity](https://sylabs.io/singularity/) (≥ 3.7,
-needed for `oras://` pulls from GHCR). The CI release workflow builds
-and tests with Apptainer 1.3.5; both runtimes share the same CLI, so
-either works at run time.
+- **Container runtime:** [Apptainer](https://apptainer.org/) ≥ 1.0 (recommended)
+  or [Singularity](https://sylabs.io/singularity/) ≥ 3.7 (needed for `oras://`
+  pulls). The two share the same CLI; either works at run time.
+- **Host OS:** Linux x86_64. The image ships GNU/Linux binaries; macOS and
+  Windows can run it only inside a Linux VM.
 
-If neither is installed system-wide, conda is the easiest route:
+If no runtime is installed system-wide, install one with conda:
 
 ```bash
-# Apptainer (preferred):
 conda create -n apptainer -c conda-forge "apptainer>=1.0"
 conda activate apptainer
-
-# Singularity (alternative):
-conda create -n singularity3 -c conda-forge "singularity>=3.7"
-conda activate singularity3
 ```
 
-**Host OS.** Linux x86_64. The container ships GNU/Linux binaries
-(BLAST+, RepeatMasker, mmseqs2, …); macOS and Windows hosts can run
-the image only through a Linux VM.
+## Install
 
-## Quick Start
-Each tagged release publishes a Singularity / Apptainer image to GHCR as
-an ORAS/OCI artefact and attaches the same `.sif` to a GitHub Release.
-Pull the image with whichever route is convenient:
+Each tagged release publishes the same image to GHCR (as an ORAS/OCI artefact)
+and to a GitHub Release. Pull whichever is convenient:
 
 ```bash
-# From GHCR (recommended; works for both apptainer and singularity 3.7+):
-apptainer pull oras://ghcr.io/kavonrtep/carp/sif:0.9.0rc3
+# From GHCR (recommended):
+apptainer pull oras://ghcr.io/kavonrtep/carp/sif:1.0.0rc3
 # or always-latest:
 apptainer pull oras://ghcr.io/kavonrtep/carp/sif:latest
 
-# Alternative: download the .sif attached to a GitHub Release
+# Alternative: the .sif attached to a GitHub Release
 # https://github.com/kavonrtep/assembly_repeat_annotation_pipeline/releases
 ```
 
-Tags follow PEP 440 unprefixed (`0.9.0rc3`, `1.0.0`). The `latest` tag
-on GHCR tracks the most recent successful release. Both paths receive
-the *same* image — release publication is gated by an in-container
-fixture run, so a tag that exists on either source has passed the
-medium fixture end-to-end.
+Tags follow PEP 440 unprefixed (`1.0.0rc3`, `1.0.0`). Both sources receive the
+*same* image; publication is gated by an in-container fixture run, so any
+published tag has passed the test fixture end-to-end.
 
-Format of `config.yaml` file is as follows:
+## Usage
+
+### 1. Write a `config.yaml`
 
 ```yaml
-genome_fasta: data/CEN6_ver_220406_part.fasta
-output_dir: output
-custom_library: data/pisum_custom_library.fasta
-tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
-# posible values are : sensitive, default, quick,
-# if missing, default is used
-repeatmasker_sensitivity: default
-# perform library size reduction, possible values are True, False, if missinf True is used
-reduce_library: True
-# Optional: include DANTE_TIR_FALLBACK reps in the RepeatMasker library
-# (default: false). When true, fallback survivors are re-clustered, a
-# Multiplicity floor is applied (inherits dante_tir_min_multiplicity by
-# default), and a strict class-aware blastn filter against the LTR /
-# DANTE_TIR primary / LINE / custom libraries drops any rep whose hits
-# include a subject of incompatible classification (siblings such as
-# CACTA-vs-hAT count as incompatible). Audit log is written to
-# DANTE_TIR/fallback_library_dropped.tsv. See config_full.yaml for the
-# full set of knobs.
-include_dante_tir_fallback_in_library: false
+genome_fasta: data/genome.fasta        # required: assembly to annotate
+output_dir: output                     # required: results directory
+custom_library: data/custom_lib.fasta  # optional: extra repeat library
+tandem_repeat_library: data/TR_lib.fasta  # optional: tandem-repeat reference
+repeatmasker_sensitivity: default      # rush | default | quick
+reduce_library: True                   # deduplicate the RepeatMasker library
 ```
 
-The pipeline allows providing the custom repeat library by specifying
-the `custom_library` parameter. This parameter is optional.
-This library is used by RepeatMasker for similarity-based annotation. The sequences must
-be in FASTA format with sequence IDs in the format `>repeatname#class/subclass`. The
-classification categories used by the pipeline are listed below.
+See **[Configuration parameters](#configuration-parameters)** for the full list.
 
-The mobile-element hierarchy below is taken verbatim from REXdb Viridiplantae
-v4.0 (https://github.com/repeatexplorer/rexdb), which is the protein-domain
-reference used by DANTE / DANTE_LTR. Satellite, Simple_repeat, Low_complexity,
-Unknown and the rDNA classes are produced by RepeatMasker / custom libraries,
-not REXdb.
+### 2. Library formats (optional inputs)
+
+Both libraries are FASTA. Sequence IDs encode the classification:
 
 ```text
-Class_I/DIRS
-Class_I/LINE
-Class_I/LTR/Ty1_copia
-Class_I/LTR/Ty1_copia/Ale
-Class_I/LTR/Ty1_copia/Alesia
-Class_I/LTR/Ty1_copia/Alexandra
-Class_I/LTR/Ty1_copia/Angela
-Class_I/LTR/Ty1_copia/Bianca
-Class_I/LTR/Ty1_copia/Bryana
-Class_I/LTR/Ty1_copia/Bryco
-Class_I/LTR/Ty1_copia/Ferco
-Class_I/LTR/Ty1_copia/Gymco-I
-Class_I/LTR/Ty1_copia/Gymco-II
-Class_I/LTR/Ty1_copia/Gymco-III
-Class_I/LTR/Ty1_copia/Gymco-IV
-Class_I/LTR/Ty1_copia/Ikeros
-Class_I/LTR/Ty1_copia/Ivana
-Class_I/LTR/Ty1_copia/Lyco
-Class_I/LTR/Ty1_copia/Osser
-Class_I/LTR/Ty1_copia/SIRE
-Class_I/LTR/Ty1_copia/TAR
-Class_I/LTR/Ty1_copia/Tork
-Class_I/LTR/Ty1_copia/Ty1-outgroup
-Class_I/LTR/Ty3_gypsy/chromovirus
-Class_I/LTR/Ty3_gypsy/chromovirus/Chlamyvir
-Class_I/LTR/Ty3_gypsy/chromovirus/chromo-outgroup
-Class_I/LTR/Ty3_gypsy/chromovirus/chromo-unclass
-Class_I/LTR/Ty3_gypsy/chromovirus/CRM
-Class_I/LTR/Ty3_gypsy/chromovirus/Ferney
-Class_I/LTR/Ty3_gypsy/chromovirus/Galadriel
-Class_I/LTR/Ty3_gypsy/chromovirus/Reina
-Class_I/LTR/Ty3_gypsy/chromovirus/Tcn1
-Class_I/LTR/Ty3_gypsy/chromovirus/Tekay
-Class_I/LTR/Ty3_gypsy/non-chromovirus/non-chromo-outgroup
-Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Athila
-Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Ogre
-Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Retand
-Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatI
-Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatII
-Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatIII
-Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tatius
-Class_I/LTR/Ty3_gypsy/non-chromovirus/Phygy
-Class_I/LTR/Ty3_gypsy/non-chromovirus/Selgy
-Class_I/pararetrovirus
-Class_I/Penelope
-Class_I/SINE
-Class_II/Subclass_1/TIR/EnSpm_CACTA
-Class_II/Subclass_1/TIR/hAT
-Class_II/Subclass_1/TIR/Kolobok
-Class_II/Subclass_1/TIR/Merlin
-Class_II/Subclass_1/TIR/MITE
-Class_II/Subclass_1/TIR/MITE/Stowaway
-Class_II/Subclass_1/TIR/MuDR_Mutator
-Class_II/Subclass_1/TIR/Novosib
-Class_II/Subclass_1/TIR/P
-Class_II/Subclass_1/TIR/PIF_Harbinger
-Class_II/Subclass_1/TIR/PiggyBac
-Class_II/Subclass_1/TIR/Sola1
-Class_II/Subclass_1/TIR/Sola2
-Class_II/Subclass_1/TIR/Tc1_Mariner
-Class_II/Subclass_2/Helitron
-rDNA_45S/18S
-rDNA_45S/25S
-rDNA_45S/5.8S
-rDNA_45S/IGS
-rDNA_45S/ITS1
-rDNA_45S/ITS2
-rDNA_5S/5S
+# custom_library — RepeatMasker convention  >name#class/subclass
+>myCopia_1#Class_I/LTR/Ty1_copia/Ale
+
+# tandem_repeat_library — used by TideCluster to name tandem families
+>PisTR-B#Satellite
 ```
 
-The authoritative, machine-readable list (including intermediate nodes
-emitted when a tool cannot resolve a full lineage) lives in
-[`classification_vocabulary.yaml`](classification_vocabulary.yaml). All
-translation between tool-native encodings and canonical slash form is
-performed by `scripts/classification.py` (Python) and
-`scripts/classification.R` (R); the vocabulary file is the single source
-of truth. To add a new classification, append it to the `classifications`
-list in that file — no code changes required.
+Use the canonical slash-separated classification scheme listed under
+[Annotation categories](#annotation-categories).
 
-An important feature of pipeline is the filtering process where
-`Class_II/Subclass_1` repeats from the custom library are used to screen the LTR
-retrotransposon library created by DANTE_LTR. This critical step identifies potentially
-problematic Class_I sequences - if a `Class_I` sequence shows similarity to
-`Class_II/Subclass_1` elements, it likely represents an LTR retrotransposon that contains
-inserted DNA transposons. Such composite elements are removed from the library to prevent
-incorrect or ambiguous annotations when RepeatMasker is applied later in the pipeline.
-
-File `tandem_repeat_library` (optional) is used by TideCluster to annotate discovered tandem repeats based
-on the similarity. Format is the same as the above repeat database. E.g. 
-`>sequence_id/Satellite/PisTR-B`
-
-To run an annotation pipeline, execute the following command (replace
-`<TAG>` with the version you pulled, e.g. `0.9.0rc3`):
+### 3. Run
 
 ```bash
-apptainer run -B /path/to/data -B $PWD carp_<TAG>.sif -c config.yaml -t 20
-# or, equivalently with singularity:
-singularity run -B /path/to/data -B $PWD carp_<TAG>.sif -c config.yaml -t 20
-```
-Parameter `-t` specifies the number of threads to use. The `-B` flag
-binds host directories into the container so it can see your input and
-output files; without it the run will fail at the first read. The
-`config.yaml` file must live under one of the bound paths — in the
-example above the current directory `$PWD` covers it.
-
-
-## Running pipeline on metacentrum
-Use [./scripts/annotate_repeats_metacentrum.sh](./scripts/annotate_repeats_metacentrum.sh) script to run the pipeline on metacentrum. Adjust paths to the input files , output directory and singularity image. 
-
-
-
-## Output structure
-
-The pipeline generates a structured output directory with the following key files and subdirectories:
-
-### Top-level Output Files (Symlinks)
-
-Main annotation files for easy access:
-- `DANTE_filtered.gff3` - Filtered DANTE protein domain annotations
-- `DANTE_LTR.gff3` - Complete LTR retrotransposons identified by DANTE_LTR
-- `DANTE_TIR.gff3` - DNA transposons with Terminal Inverted Repeats
-- `Tandem_repeats_TideCluster.gff3` - Tandem repeats detected by TideCluster
-- `Tandem_repeats_TideCluster_annotated.gff3` - Annotated tandem repeats (if custom library provided)
-- `Tandem_repeats_RepeatMasker.gff3` - RepeatMasker annotation of tandem repeat library
-- `Mobile_elements_RepeatMasker.gff3` - Mobile elements (Class_I and Class_II transposons)
-- `Simple_repeats_RepeatMasker.gff3` - Simple/low complexity repeats
-- `Low_complexity_RepeatMasker.gff3` - Low complexity regions
-- `rDNA_RepeatMasker.gff3` - Ribosomal DNA annotations
-- `All_Ty1_Copia_RepeatMasker.gff3` - All Ty1/Copia LTR retrotransposons
-- `All_Ty3_Gypsy_RepeatMasker.gff3` - All Ty3/Gypsy LTR retrotransposons
-
-Summary files:
-- `summary_statistics.csv` - Genome-wide repeat statistics by classification
-- `summary_plots.pdf` - Visualization of repeat content and distribution
-- `all_repeats_for_masking.bed` - Merged coordinates of all repeats (BED format)
-- `gaps_10plus.bed` - Assembly gaps (N regions ≥10 bp)
-
-Metadata files (written by `run_pipeline.py`):
-- `carp_manifest.json` - Machine-readable output contract: `schema_version` plus a map of stable logical names → output paths, so downstream consumers (e.g. a genome-browser portal) resolve files by name instead of guessing the layout. Written on every run (success or fail; `exit_status` reflects which). See [`docs/output_schema.md`](docs/output_schema.md)
-- `run_provenance.json` - Pipeline version, git SHA, config, and per-environment tool versions for the run
-
-HTML reports:
-- `TideCluster_report.html` - Interactive report for tandem repeat analysis
-- `DANTE_LTR_report.html` - Summary of LTR retrotransposon findings
-
-### Subdirectory Structure
-
-**DANTE/** - Protein domain-based repeat detection
-- `DANTE.gff3` - Raw DANTE domain annotations
-- `DANTE_filtered.gff3` - Filtered domain annotations
-- `DANTE_filtered.fasta` - Protein sequences for filtered domains
-
-**DANTE_LTR/** - Complete LTR retrotransposon detection
-- `DANTE_LTR.gff3` - Complete LTR-RT annotations with both LTRs
-- `DANTE_LTR_summary.html` - Summary report with statistics and visualizations
-- `LTR_RTs_library.fasta` - Representative LTR-RT sequences for RepeatMasker
-- `library/` - Detailed clustering and library construction results
-
-**DANTE_TIR/** - DNA transposon with TIR detection
-- `DANTE_TIR_final.gff3` - Final TIR transposon annotations (primary only)
-- `DANTE_TIR_final.fasta` - Primary TIR transposon sequences
-- `DANTE_TIR_combined.gff3` - Primary + non-overlapping fallback (top-level `DANTE_TIR.gff3` symlinks here)
-- `DANTE_TIR_fallback_filtered.fasta` - Non-overlapping fallback element sequences
-- `TIR_classification_summary.txt` - Classification statistics
-- `all_representative_elements_combined.fasta` - Primary-only library used by RepeatMasker (post-clustering, post-Multiplicity-filter)
-- `fallback_library.fasta` - Optional fallback-derived library (empty unless `include_dante_tir_fallback_in_library: true`); kept reps appended to `Libraries/combined_library.fasta`
-- `fallback_library_dropped.tsv` - Audit log: every fallback cluster rep with status (`kept`/`dropped`) and the conflicting subject(s) when class-aware blastn filter rejected it
-
-**DANTE_LINE/** - LINE element detection - this is experimental and may not work well for all genomes
-- `DANTE_LINE.gff3` - LINE element annotations
-- `LINE_rep_lib.fasta` - LINE representative library for RepeatMasker
-- `LINE_regions.fasta` - Extracted LINE sequences
-- `LINE_regions_extended.fasta` - Extended LINE regions for analysis
-
-**TideCluster/** - Tandem repeat detection
-- `default/` - Standard parameter run (40-5000 bp monomers)
-  - `TideCluster_clustering.gff3` - Clustered tandem repeat families
-  - `TideCluster_tidehunter.gff3` - Raw TideHunter detections
-  - `TideCluster_annotation.gff3` - Annotated based on custom library (if provided)
-  - `TideCluster_index.html` - Interactive HTML report
-  - `TideCluster_consensus_dimer_library.fasta` - Consensus sequences
-  - `TideCluster_clustering_split_files/` - Split GFF3 files, one per cluster (`TRC_<n>`). These feed the structural per-family density BigWigs (written to the top-level `Tandem_repeats_TideCluster_split_by_family_bigwig/`, see "Density BigWig tracks" below)
-  - `RM_on_TideCluster_Library.gff3` - RepeatMasker annotation using tandem repeat library
-- `short_monomer/` - Short monomer run (10-39 bp)
-  - Similar structure to `default/` directory
-- `TideCluster_clustering_default_and_short_merged.gff3` - Merged results from both runs
-
-**Libraries/** - Custom repeat libraries
-- `combined_library.fasta` - Full library with complete names. Composition: `LTR_RTs_library_clean.fasta` + (custom library if any) + `all_representative_elements_combined.fasta` (primary TIR) + `fallback_library.fasta` (only when `include_dante_tir_fallback_in_library: true`) + `LINE_rep_lib.fasta` + rDNA library
-- `combined_library_short_names.fasta` - Library with shortened IDs
-- `combined_library_reduced.fasta` - Size-reduced library (if `reduce_library: True`)
-- `LTR_RTs_library_clean.fasta` - LTR library filtered for Class_II contamination. The fallback library is intentionally NOT used as a filter input — see CLAUDE.md "DANTE_TIR Fallback Workflow" for rationale
-- `class_ii_library.fasta` - Class_II/Subclass_1 elements for filtering (primary TIR + custom Class_II only; fallback excluded by design)
-
-**RepeatMasker/** - Similarity-based annotation
-- `RM_on_combined_library.out` - RepeatMasker standard output
-- `RM_on_combined_library.gff3` - RepeatMasker annotations in GFF3
-- `RM_on_combined_library_plus_DANTE.gff3` - Merged RepeatMasker and DANTE annotations
-- `Repeat_Annotation_NoSat.gff3` - RepeatMasker annotation excluding tandem repeats. Used **only** for the masking BED (`all_repeats_for_masking.bed`); it is **not** the source of `summary_statistics.csv` or of any density BigWig (those come from `Repeat_Annotation_Unified.gff3` — see "Density BigWig tracks" below)
-
-**Repeat_density/** - Genome-wide total density (Unified)
-- `Repeat_density_total_10k.bw` and `Repeat_density_total_100k.bw` - density of **all** repeats from `Repeat_Annotation_Unified.gff3` (includes tandems). Replaces the former RM-only `RepeatMasker/Repeat_Annotation_NoSat_*.bw`
-
-**Repeat_Annotation_NoSat_split_by_class_gff3/** - Classification-specific annotations
-- Individual GFF3 files for each major repeat class
-- Used for generating class-specific density tracks
-- Despite the directory name (kept for backward compatibility with consumers that hard-coded the path), the contained GFFs are now derived from `Repeat_Annotation_Unified.gff3`, so DANTE-direct calls participate in the per-class totals
-- A `Tandem_repeats.gff3` here aggregates TideCluster default + short clusters, TideHunter short tandems, and any RepeatMasker `Satellite/*` calls
-- A `Class_II.Subclass_1.TIR.gff3` rollup aggregates all TIR superfamilies (the union of `Class_II/Subclass_1/TIR…` features), so TIR gets one density row alongside the Copia/Gypsy rollups
-
-**Repeat_density_by_class_bigwig/** - Per-class density visualizations
-- BigWig files for each repeat class/superfamily at 10kb and 100kb windows, derived from `Repeat_Annotation_Unified.gff3`
-- Includes class/superfamily rollups: `All_Ty1_Copia_*.bw`, `All_Ty3_Gypsy_*.bw`, and `Class_II.Subclass_1.TIR_*.bw` (TIR-level rollup across all TIR superfamilies)
-- The `Tandem_repeats_*.bw` track here is the **aggregate** tandem density (see "Density BigWig tracks" below)
-- Suitable for genome browsers (IGV, UCSC, JBrowse)
-
-**Tandem-repeat density (top level)**
-- `Tandem_repeats_TideCluster_10k.bw` / `_100k.bw` - structural TideCluster total (all clusters combined)
-- `Tandem_repeats_TideCluster_split_by_family_bigwig/{10k,100k}/TRC_<n>_*.bw` - **structural** per-family density (TideCluster clustering only)
-- `Tandem_repeats_unified_split_by_family_bigwig/{10k,100k}/TRC_<n>_*.bw` - **unified** per-family density (from `Repeat_Annotation_Unified.gff3`; structural ∪ similarity, tier-resolved)
-- `Tandem_repeats_unified_split_by_family_gff3/TRC_<n>.gff3` - the per-family GFF3s the unified per-family BigWigs are built from
-
-`summary_statistics.csv` is computed from `Repeat_Annotation_Unified.gff3`. Beginning with this release, the historical `Satellites` row is replaced by `Tandem_repeats` (covers TideCluster + TideHunter + RepeatMasker `Satellite/*` calls); per-class numbers also rise to reflect DANTE-direct annotations that previously went unreported.
-
-### Density BigWig tracks
-
-All `*.bw` outputs are per-window **density** tracks with identical value semantics, ready for genome browsers (JBrowse, IGV, UCSC). **Every annotation-derived density track is built from `Repeat_Annotation_Unified.gff3`** (the tier-resolved master annotation); the only exception is the structural TideCluster tracks, which are intentionally built from the TideCluster clustering alone (see below).
-
-- **Value** = fraction of the window covered by that track's features (`0`–`1`), computed as mean per-base coverage per bin and then smoothed with a 10-bin moving average. Overlapping features are merged into a **strand-agnostic union** before coverage, so the value is **always within `[0, 1]`** — even though the Unified annotation deliberately tolerates overlap (a Level-1 `Simple_repeat`/`Low_complexity` lying over a TE, and nested Level-2 children such as tandem-array members inside an `LTR_RT_TR` container or simple repeats inside a satellite). Without the union these overlaps stacked the coverage above 1 (up to ~3.5× on dense centromeric/tandem regions).
-- **Window size**: `_10k` files use 1 kb bins (~10 kb effective smoothing window); `_100k` files use 10 kb bins (~100 kb effective window).
-- **Encoding (sparse)**: tracks are written run-length-merged — consecutive windows with an *exactly equal* value (including zero runs) are collapsed into one variable-width interval. This is lossless (non-zero values are unchanged at every position) and needs no consumer change; it makes satellite/per-family tracks dramatically smaller.
-
-#### The track families
-- **Total** — `Repeat_density/Repeat_density_total_{10k,100k}.bw`: all repeats genome-wide (Unified).
-- **Per class / superfamily** — `Repeat_density_by_class_bigwig/{10k,100k}/…`: one track per class, plus the `All_Ty1_Copia`, `All_Ty3_Gypsy`, and `Class_II.Subclass_1.TIR` rollups (Unified).
-
-  > **Partition vs. roll-up (do not double-count).** The by-class set mixes two kinds of track. The **exact-classification tracks** (`Class_I.LTR.Ty1_copia.Ale`, `Tandem_repeats`, `rDNA_45S`, `Simple_repeat`, `Low_complexity`, `Unknown`, …) are a **disjoint partition** — each feature appears in exactly one, at its leaf classification — so they sum (approximately, modulo smoothing) to the **Total** track. The **roll-up tracks** — `All_Ty1_Copia`, `All_Ty3_Gypsy`, `Class_II.Subclass_1.TIR`, and `Mobile_elements` — are cumulative supersets that deliberately **overlap** the partition. For a stacked/summed view use the partition tracks; use the roll-ups as ready-made aggregates — but never sum a roll-up together with the leaf tracks it contains.
-
-#### Tandem-repeat tracks — which one to use
-
-Tandem repeats get an aggregate track plus **two per-family views** (structural and unified). They are **not** interchangeable:
-
-| Track | Detection basis | Scope | Per-family? |
-|---|---|---|---|
-| `Repeat_density_by_class_bigwig/{10k,100k}/Tandem_repeats_*.bw` | Unified (structural ∪ similarity, tier-resolved) | aggregate of all families | no |
-| `Tandem_repeats_unified_split_by_family_bigwig/{10k,100k}/TRC_<n>_*.bw` | Unified `Name=TRC_<n>` (structural ∪ similarity, tier-resolved) | one track per family | yes |
-| `Tandem_repeats_TideCluster_split_by_family_bigwig/{10k,100k}/TRC_<n>_*.bw` | structural only (TideCluster clustering) | one track per family | yes |
-| `Tandem_repeats_TideCluster_{10k,100k}.bw` | structural only (TideCluster clustering) | aggregate of all families | no |
-
-Everything Unified-derived is **tier-resolved**: `Repeat_Annotation_Unified.gff3` is non-overlapping by priority — structure-based mobile elements (LTR/TIR/LINE/DANTE) outrank tandem layers, and within tandem the TideCluster structural calls outrank the RepeatMasker remasking. Any tandem territory overlapping a higher-priority element is **reassigned to that element** rather than counted as tandem.
-
-Guidance for downstream consumers:
-
-- For the **authoritative "where are the tandem repeats" view**, use the Unified tracks — the aggregate `Tandem_repeats_*.bw` for genome-wide totals, or the unified per-family tracks for one family.
-- For each `TRC_<n>` you get **two per-family tracks**: the *unified* one (authoritative, tier-resolved) and the *structural* one (TideCluster clustering only). Relative to structural, unified **adds** the RepeatMasker-remasking territory for that family and **removes** any stretch reassigned to an overlapping higher-priority element — so unified is usually the larger of the two, but can be smaller where a family overlaps a mobile element. Pair them to see how much of a family is captured structurally vs. added by similarity remasking. (When the RM-on-TideCluster pass is empty and nothing overlaps, the two are identical.)
-- Per-family tandem tracks cover only `TRC_<n>`-named families; RM `Satellite/Unknown` and TideHunter residuals contribute to the aggregate but have no family track.
-
-#### Migration — BigWig paths changed (0.9.0rc6)
-
-BigWig outputs were renamed/relocated and re-sourced from Unified. GFF3 paths are unchanged. Repoint any genome-browser (JBrowse, etc.) tracks:
-
-| Old (≤ 0.9.0rc5) | New (≥ 0.9.0rc6) | Note |
-|---|---|---|
-| `RepeatMasker/Repeat_Annotation_NoSat_{10k,100k}.bw` | `Repeat_density/Repeat_density_total_{10k,100k}.bw` | source: RM-only-no-tandems → **Unified (all repeats)** |
-| `Repeat_Annotation_NoSat_split_by_class_bigwig/` | `Repeat_density_by_class_bigwig/` | values unchanged (already Unified) |
-| `TideCluster/default/TideCluster_clustering_{10k,100k}.bw` | `Tandem_repeats_TideCluster_{10k,100k}.bw` | values unchanged (structural TC) |
-| `TideCluster/default/TideCluster_clustering_split_files_bigwig/` | `Tandem_repeats_TideCluster_split_by_family_bigwig/` | values unchanged (structural TC) |
-| `Tandem_repeats_RepeatMasker_split_files_bigwig/` (rc-only) | `Tandem_repeats_unified_split_by_family_bigwig/` | source: raw RM-on-TC → **Unified `TRC_<n>`** |
-
-## Workflow diagram
-
-A high-level schematic of the analysis stages lives at
-[`figs/workflow_overview.svg`](figs/workflow_overview.svg) (and `.png`). Its
-structure is derived **live from the Snakefile** — `scripts/make_workflow_diagram.py`
-runs `snakemake --rulegraph`, groups the rules into analysis stages, transitively
-reduces the dependency graph, and labels each stage with an SVG tooltip listing
-its rules and their docstrings. Regenerate after changing the workflow:
-
-```bash
-scripts/make_workflow_diagram.py            # writes figs/workflow_overview.{dot,svg,png}
+apptainer run -B /path/to/data -B $PWD carp_1.0.0rc3.sif -c config.yaml -t 20
+# equivalently with singularity:
+singularity run -B /path/to/data -B $PWD carp_1.0.0rc3.sif -c config.yaml -t 20
 ```
 
-Requires `snakemake` and Graphviz `dot` on PATH. The script fails loudly if a new
-rule is not assigned to a stage, so the figure cannot silently drift.
+- `-t` sets the thread count.
+- `-B` binds host directories into the container so it can read inputs and write
+  outputs. The `config.yaml` and every path it references must live under a
+  bound path (above, `$PWD` covers the current directory).
 
-## Build the container
+On Metacentrum, use
+[`scripts/annotate_repeats_metacentrum.sh`](scripts/annotate_repeats_metacentrum.sh)
+and adjust the input/output/image paths.
 
-Release builds are produced by GitHub Actions
-([`.github/workflows/release.yml`](.github/workflows/release.yml))
-on every tag push that matches the unprefixed PEP 440 pattern
-(`0.9.0rc3`, `1.0.0`, …). The workflow runs unit tests, builds the
-SIF from the `Singularity` recipe, exercises the medium fixture
-**inside** the freshly-built container, then — only on a green
-test-in-container — pushes the image to GHCR and creates a GitHub
-Release that triggers the Zenodo snapshot. There is no manual step;
-to ship a release, bump `version.py` and push a matching tag.
+## Configuration parameters
 
-For local development you can rebuild the same image with:
+Everyday knobs (full reference, including library-reduction, DANTE_TIR-fallback,
+and TideCluster tuning, in **[docs/configuration.md](docs/configuration.md)**):
 
-```bash
-TAG=$(python version.py)                          # e.g. 0.9.0rc3
-sudo apptainer build images/carp_${TAG}.sif Singularity
-```
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `genome_fasta` | — (required) | Genome assembly FASTA to annotate |
+| `output_dir` | — (required) | Output directory |
+| `custom_library` | none | Extra repeat library merged into the RepeatMasker library |
+| `tandem_repeat_library` | none | Reference used by TideCluster to name tandem families |
+| `repeatmasker_sensitivity` | `default` | RepeatMasker mode: `rush`, `default`, or `quick` |
+| `reduce_library` | `True` | Deduplicate the RepeatMasker library (smaller, faster) |
 
-The version that gets stamped into the image is read from
-`version.py`; CI's `version.yml` workflow enforces that pushed tags
-match `version.py` exactly, so the build above produces a SIF
-identical to what the release workflow would publish.
+The pipeline also screens the LTR library against `Class_II/Subclass_1` elements
+from the custom library: a `Class_I` sequence that resembles a DNA transposon is
+likely a composite element and is removed to avoid mis-annotation.
 
+## Main output — `Repeat_Annotation_Unified.gff3`
 
+The primary deliverable: an **authoritative, non-overlapping** GFF3 that merges
+every tool's calls and resolves conflicts by **tier priority** — a higher-tier
+call wins contested territory, so each base is annotated once (the only
+tolerated overlaps are nested children and `Simple_repeat`/`Low_complexity` over
+a TE).
 
+**Feature levels.** Features are **Level 1** (top-level) or **Level 2** (nested
+children carrying a `Parent`, e.g. member copies inside a tandem LTR-RT array).
 
-## Changelog:
-- v 1.0.0rc3 -
-  - Density BigWig tracks no longer exceed 1.0: overlapping features are merged into a **strand-agnostic union** before coverage (`calculate_density.R` / `calculate_density_batch.R`). The Unified annotation tolerates overlap (L1 `Simple_repeat`/`Low_complexity` over a TE; nested L2 children), which previously stacked the total track to ~3.5× and per-class tracks to ~2.2×; every density track is now a true union fraction in `[0, 1]`. Validated across three full assemblies (Boechera, Dunaliella, *A. thaliana* Col-CC T2T)
-  - **Tandem LTR-RT (`LTR_RT_TR`)**: head-to-tail, same-lineage LTR-RT arrays that share boundary LTRs are collapsed to one Level-1 container with the member copies as Level-2 children (`scripts/resolve_ltr_tandems.py`), so a shared-LTR array is annotated once instead of double-counting the overlapping LTRs. Containers are also written to a new top-level `DANTE_LTR_tandems.gff3` (header-only when none; logical name `dante_ltr_tandems_gff3`). See [`docs/dante_ltr_tandem_feature_request.md`](docs/dante_ltr_tandem_feature_request.md)
-  - **TE-derived satellite conflict** resolved: where a TideCluster satellite is a tandem of complete LTR-RTs, the satellite wins the region and is tagged `TE_origin` (plus `TE_origin_structure=tandem_LTR_RT` for the full-LTR-RT case), and the underlying structural elements/members are trimmed out of the unified file — eliminating the double annotation. The unified-GFF3 drift guard and spec were extended to cover the new attributes
-- v 1.0.0rc2 -
-  - Output contract for `Repeat_Annotation_Unified.gff3` written down ([`docs/unified_annotation_gff3_spec.md`](docs/unified_annotation_gff3_spec.md)) and enforced by an executable drift guard (`scripts/validate_unified_gff3.py` + `tests/test_unified_gff3_spec.py`, run in CI and the release gate)
-  - Fixed a satellite `Name` regression that silently emptied the per-family BigWig outputs — every TideCluster satellite `Name` stays the bare `TRC_<n>` (downstream apps and `split_gff_by_name.R --name-prefix TRC_` key on it); rDNA is routed by `classification` instead
-  - New `/release` skill: one-command version bump + cheap-CI gate + tag
-- v 1.0.0rc1 -
-  - **TideCluster upgraded to 1.16.0**, adding three default-on behaviours the unified annotation consumes: array-level **rDNA identification** (`rDNA_45S`/`rDNA_5S`, labelled clearly as rDNA while still counted as a tandem family), cross-TRC overlap resolution, and a chunked/pooled `tc_reannotate` RepeatMasker (fixes `-pa`-with-custom-`-lib` under-parallelism). New config knobs `tidecluster_detect_rdna` / `tidecluster_rdna_library` / `tidecluster_keep_trc_overlaps` / `tidecluster_chunk_size`
-  - Unified annotation now **resolves TR-from-TE overlaps**: a tandem array built from multiple same-family structural TEs is reported once as the satellite with a `TE_origin` tag rather than double-annotated; a non-fatal `Repeat_Annotation_Unified.overlaps.tsv` reports any residual Level-1 overlaps
-  - Major performance/memory work: fixed a `reduce_library` merge OOM (~296 GB RSS → bounded), parallelised the density batch / DANTE_TIR fallback / `reduce_library` BLAST+CAP3, and packed small scaffolds into shared RepeatMasker chunks
-- v 0.9.0rc10 -
-  - New **second-round containment reduction** of the RepeatMasker library (`reduce_library_containment`, default True, independent of `reduce_library`). After the per-class CAP3/mmseqs reduction, a `reduce_library_containment` rule drops short repeat fragments fully contained in a longer element of the **same class** (greedy blastn self-comparison, `scripts/containment_reduce_library.py`); RepeatMasker masks their genomic copies via the container, so masking **and** classification are preserved. Validated masked-bp-lossless with RepeatMasker on the Pisum pangenome over two genome regions (−0.09…−0.12%) while cutting ~22% of library bp and ~30% of RepeatMasker wall-time. Thresholds via `containment_min_identity` (80) / `containment_min_coverage` (0.90); set `reduce_library_containment: False` to feed RepeatMasker the full per-class-reduced library
-- v 0.9.0rc9 -
-  - Fixed a hard pipeline failure in `tidecluster_reannotate`: the TideCluster dimer-library reducer (`reduce_dimer_library.py`) ran `mmseqs easy-search` with the default nucleotide k-mer (15), which **segfaults on short tandem monomers** (the query is the first-half monomer, down to ~21 bp). Pinned `-k 7`; groups with monomers below the prefilter floor are skipped and any residual `mmseqs` error retries single-threaded then keeps the group unreduced — so the reducer can no longer abort a run
-  - Dimer reduction made lossless on more families: replaced single-linkage clustering with greedy/star clustering (each dropped dimer aligns directly to a kept representative) plus a length guard (nested/harmonic periods no longer collapse onto the longest rep). Validated masked-bp-lossless on tiny_pea (−0.02%) and GCA_041296365.1. Known limitation: large satellite families (dimer ≳ a few kb) can still under-mask because RepeatMasker needs the full consensus diversity — set `reduce_tidecluster_library: False` to mask with the full dimer library
-- v 0.9.0rc8 -
-  - Per-family / by-class density BigWigs build ~140× faster on assemblies with many scaffolds: `calculate_density_batch.R` now parallelises across families (`-t`, wired to `workflow.cores`) and computes density only on the scaffolds each family occupies instead of re-binning the whole genome per family. Track values are byte-identical to rc7; empty scaffolds are no longer written to the BigWig header (occupied-only). On a 2 Gbp / 1888-scaffold assembly with 477 tandem families the step drops from ~6.5 h to ~3 min
-  - CI now asserts `carp_manifest.json` matches the produced output tree — every declared logical-name→path must exist after a run (`scripts/assert_manifest_outputs.py`, run on the release-gate fixture) — so the manifest can no longer drift out of sync with the pipeline's outputs
-- v 0.9.0rc7 -
-  - Emit `carp_manifest.json` at the output root (machine-readable output contract: `schema_version` + logical-name→path map; written by `run_pipeline.py` on success and failure). See [`docs/output_schema.md`](docs/output_schema.md)
-  - Faster `tidecluster_reannotate`: rotation-invariant reduction of the TideCluster consensus dimer library (aligns each monomer against the already-doubled dimers, collapsing redundant phase variants per TRC). Decoupled from `reduce_library` via the new `reduce_tidecluster_library` option (default True). Lossless for masking (validated; masked bp unchanged within ±0.15%), library ~5–20× smaller, remasking ~1.5–5× faster
-  - `summary_plots.pdf` hardened: empty repeat categories render a placeholder panel instead of crashing; any render failure (e.g. data too large) falls back to a one-page placeholder PDF so the rule never fails
-  - Snakefile-derived workflow schematic ([`figs/workflow_overview.svg`](figs/workflow_overview.svg), regenerated by `scripts/make_workflow_diagram.py`)
-- v 0.9.0rc6 - Density BigWigs reworked: all annotation-derived tracks now sourced from `Repeat_Annotation_Unified.gff3`; BigWig outputs renamed/relocated (breaking — see "Migration" in Output structure); genome-wide total now includes tandems (`Repeat_density/Repeat_density_total_*.bw`); per-family tandem tracks come in two flavours per `TRC_<n>` (structural TideCluster + Unified union); fixed crash on empty `RM_on_TideCluster_Library.gff3`
-- v 0.9.0rc5 - Density BigWigs written run-length-merged (sparse, lossless, much smaller); new `Class_II.Subclass_1.TIR` density rollup; new per-family BigWigs for the RepeatMasker tandem pass (superseded by rc6)
-- v 0.8.0 - Bug fix in DANTE_LINE, filtering of tandem repeats from DANTE_LINE added
-- v 0.7.4 - TideCluster updated to v. 1.8.0  with --long option added to detect tandem repeats with monomer up to 25kb. Bugfix in subtracting tandem repeats from dispersed repeats.
-- v 0.7.2 DANTE_LINE added,
-- v 0.7.1 DANTE_TIR added
-- v 0.6.7 more efficient calculation of bigwig files
-- v 0.6.6 DANTE_LTR updated to 0.6.0.4, tidecluster updated to 1.6
-- v 0.6.5 bugfix  in gff3 merging
-- v 0.6.4 dante_ltr runs on smaller chunks (50000000) -> better memory usage
-- v 0.6.3 dante update to 0.2.5 - bugfix
-- v 0.6.2 bugfix in bigwig calculation
-- v 0.6.1 DANTE_LTR update to 0.4.0.3 (bugfix)
-- v 0.6.0 - REXdb Viridiplante v4.0, library size reduction added, RepeatMasker parallelization added, missing full LTR-RT handling added
-- v 0.5.2 - RepeatMasker sensitivity can be set
-- v 0.5.1 - graphical output to PDF added
-- 
+**Column 3 (`type`)** is `repeat_region` when the classification starts with
+`Satellite`, `Simple_repeat`, `Low_complexity`, `rDNA`, or `Unknown`; otherwise
+`transposable_element`.
+
+**Key attributes (column 9):**
+
+| Attribute | Meaning |
+|-----------|---------|
+| `ID` | Unique id; `UA_L1_…` (Level 1) or `UA_L2_…` (Level 2) |
+| `Name` | Classification path, or the bare `TRC_<n>` for a tandem family |
+| `classification` | Slash-separated label (drives `type`) |
+| `source_tool` / `source_tier` | Which tool produced the call and its priority |
+| `element_type` | `complete` or `partial` (DANTE_LTR elements) |
+| `structure` / `copy_number` | `LTR_RT_TR` tandem LTR-RT container and its copy count |
+| `TE_origin` / `TE_origin_structure` | A satellite that is actually a tandem of TEs |
+| `Parent` | Links a Level-2 child to its Level-1 container |
+
+**Tier priority (high → low):**
+
+1. Structural TEs — DANTE_LTR, DANTE_TIR, DANTE_LINE
+2. DANTE protein domains
+3. TideCluster tandem clusters (default + short)
+4. RepeatMasker on the TideCluster library
+5. RepeatMasker similarity (TEs, simple/low complexity, rDNA subunits)
+6. TideHunter residual tandems
+
+Full field-by-field contract:
+[docs/unified_annotation_gff3_spec.md](docs/unified_annotation_gff3_spec.md).
+
+### Annotation categories
+
+Top-level buckets in the annotation:
+
+- **Mobile elements** (`transposable_element`)
+  - **Class I** (retrotransposons): `LTR/Ty1_copia`, `LTR/Ty3_gypsy`, `LINE`,
+    `SINE`, `DIRS`, `Penelope`, `pararetrovirus`
+  - **Class II** (DNA transposons): `Subclass_1/TIR` (`EnSpm_CACTA`, `hAT`,
+    `MuDR_Mutator`, `PIF_Harbinger`, `Tc1_Mariner`, `MITE`, …),
+    `Subclass_2/Helitron`
+- **Tandem repeats / Satellite** — TideCluster families (`Name=TRC_<n>`)
+- **rDNA** — `rDNA_45S`, `rDNA_5S`
+- **Simple_repeat**, **Low_complexity**, **Unknown**
+
+The mobile-element hierarchy comes from
+[REXdb Viridiplantae v4.0](https://github.com/repeatexplorer/rexdb); satellite,
+rDNA, simple/low-complexity, and unknown classes come from RepeatMasker /
+TideCluster. The complete, machine-readable leaf list (and tool-native aliases)
+is the single source of truth in
+[`classification_vocabulary.yaml`](classification_vocabulary.yaml); the full
+expanded hierarchy is also in
+[docs/output_reference.md](docs/output_reference.md).
+
+## Other top-level outputs
+
+A short selection (full directory tree in
+**[docs/output_reference.md](docs/output_reference.md)**):
+
+| Output | Description |
+|--------|-------------|
+| `Repeat_Annotation_Unified.gff3` | Main annotation (above) |
+| `DANTE_filtered.gff3`, `DANTE_LTR.gff3`, `DANTE_TIR.gff3`, `DANTE_LINE.gff3` | Per-tool annotations |
+| `Mobile_elements_*.gff3`, `Tandem_repeats_*.gff3`, `rDNA_*.gff3`, `Simple_repeats_*.gff3`, `Low_complexity_*.gff3` | Per-class splits |
+| `summary_statistics.csv`, `summary_plots.pdf` | Genome-wide statistics and plots |
+| `Repeat_density/`, `Repeat_density_by_class_bigwig/` | Density tracks (BigWig) for genome browsers |
+| `all_repeats_for_masking.bed`, `gaps_10plus.bed` | Masking coordinates and assembly gaps |
+| `carp_manifest.json`, `run_provenance.json` | Machine-readable output map and run provenance |
+| `TideCluster_report.html`, `DANTE_LTR_report.html` | Interactive reports |
+
+A high-level workflow schematic is in
+[`figs/workflow_overview.svg`](figs/workflow_overview.svg).
+
+## Documentation
+
+- [docs/output_reference.md](docs/output_reference.md) — complete output tree and
+  density-track reference
+- [docs/configuration.md](docs/configuration.md) — every configuration parameter
+- [docs/unified_annotation_gff3_spec.md](docs/unified_annotation_gff3_spec.md) —
+  `Repeat_Annotation_Unified.gff3` field contract
+- [docs/development.md](docs/development.md) — building the container, releasing,
+  regenerating the workflow diagram
+- [CHANGELOG.md](CHANGELOG.md) — release history
+
+## License
+
+See [LICENSE](LICENSE).
