@@ -132,15 +132,20 @@ classifications:
   - Class_II/Subclass_2/Helitron
 
   # rDNA --------------------------------------------------------------------
-  - rDNA_45S
-  - rDNA_45S/18S
-  - rDNA_45S/25S
-  - rDNA_45S/5.8S
-  - rDNA_45S/IGS
-  - rDNA_45S/ITS1
-  - rDNA_45S/ITS2
-  - rDNA_5S
-  - rDNA_5S/5S
+  # rDNA is a parent class; 45S and 5S are sub-arrays, each with subunits.
+  # Schema v3 (was flat rDNA_45S / rDNA_5S top-level): 45S/5S are now nested
+  # under a single rDNA parent so the report groups them. This renames the
+  # rDNA per-class GFF3/BigWig outputs — see docs/output_schema.md.
+  - rDNA
+  - rDNA/45S_rDNA
+  - rDNA/45S_rDNA/18S
+  - rDNA/45S_rDNA/25S
+  - rDNA/45S_rDNA/5.8S
+  - rDNA/45S_rDNA/IGS
+  - rDNA/45S_rDNA/ITS1
+  - rDNA/45S_rDNA/ITS2
+  - rDNA/5S_rDNA
+  - rDNA/5S_rDNA/5S
 
 # ---------------------------------------------------------------------------
 # Leaf-name aliases

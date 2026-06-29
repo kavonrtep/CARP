@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+- **rDNA classification restructured (breaking; output schema v3).** The flat
+  top-level classes `rDNA_45S` / `rDNA_5S` are now nested under a single `rDNA`
+  parent — `rDNA/45S_rDNA`, `rDNA/45S_rDNA/{18S,25S,5.8S,IGS,ITS1,ITS2}`,
+  `rDNA/5S_rDNA`, `rDNA/5S_rDNA/5S` (`classification_vocabulary.yaml` +
+  `data/rdna_library.fasta` headers + the TideCluster rDNA map in
+  `make_unified_annotation.R`). This **renames the per-class rDNA GFF3/BigWig
+  files** (`rDNA_45S.* → rDNA.45S_rDNA.*`, etc.); the `rDNA` **rollups**
+  (`rDNA_RepeatMasker.gff3`, `rDNA_{10k,100k}.bw`) and the REQUIRED outputs keep
+  their names. No backward-compat symlinks; the manifest `schema_version` bump to
+  `3` is the migration signal. Consumers that resolve by manifest logical name
+  are unaffected; those globbing `rDNA_45S*` filenames must update. See
+  [`docs/output_schema.md`](docs/output_schema.md).
+- **HTML report:** classification table and pie now use a **fixed category
+  order** (Class_I, Class_II, rDNA, Tandem_repeats, Simple_repeat,
+  Low_complexity, Unknown) instead of ordering by content; the pie is
+  **genome-relative** (inner ring = Repeats vs grey Non-repetitive, so every
+  percentage matches the table); overview cards show **LTR-RT / DNA transposons /
+  LINE as % of genome** and the "Sequences in charts" card was removed.
+- **Fixed tier-4 rDNA mislabelling in the unified annotation:** rDNA arrays
+  annotated only via the RM-on-TideCluster pass were labelled
+  `Satellite/TideCluster/TRC_<n>` instead of rDNA; the authoritative TideCluster
+  `<prefix>_rdna.tsv` now drives rDNA labelling across all TideCluster tiers.
+
 ## 1.0.0rc3
 - Density BigWig tracks no longer exceed 1.0: overlapping features are merged into a **strand-agnostic union** before coverage (`calculate_density.R` / `calculate_density_batch.R`). The Unified annotation tolerates overlap (L1 `Simple_repeat`/`Low_complexity` over a TE; nested L2 children), which previously stacked the total track to ~3.5× and per-class tracks to ~2.2×; every density track is now a true union fraction in `[0, 1]`. Validated across three full assemblies (Boechera, Dunaliella, *A. thaliana* Col-CC T2T).
 - **Tandem LTR-RT (`LTR_RT_TR`)**: head-to-tail, same-lineage LTR-RT arrays that share boundary LTRs are collapsed to one Level-1 container with the member copies as Level-2 children (`scripts/resolve_ltr_tandems.py`), so a shared-LTR array is annotated once instead of double-counting the overlapping LTRs. Containers are also written to a new top-level `DANTE_LTR_tandems.gff3` (header-only when none; logical name `dante_ltr_tandems_gff3`). See [`docs/dante_ltr_tandem_feature_request.md`](dante_ltr_tandem_feature_request.md).

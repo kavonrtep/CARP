@@ -179,7 +179,7 @@ Top-level buckets in the annotation:
     `MuDR_Mutator`, `PIF_Harbinger`, `Tc1_Mariner`, `MITE`, …),
     `Subclass_2/Helitron`
 - **Tandem repeats / Satellite** — TideCluster families (`Name=TRC_<n>`)
-- **rDNA** — `rDNA_45S`, `rDNA_5S`
+- **rDNA** — `rDNA/45S_rDNA`, `rDNA/5S_rDNA` (with nested subunits)
 - **Simple_repeat**, **Low_complexity**, **Unknown**
 
 The mobile-element hierarchy comes from

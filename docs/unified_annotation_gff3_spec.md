@@ -77,31 +77,31 @@ A Level-1 feature (`UA_L1_…`) **must not** carry a `Parent`; a Level-2 feature
 | Feature kind | `Name` | `classification` |
 |--------------|--------|------------------|
 | DANTE_LTR / TIR / LINE / DANTE (tier 1–2) | = classification path | canonical `Class_I…` / `Class_II…` |
-| RepeatMasker (tier 5) | = classification (RM name) | e.g. `Class_…`, `Simple_repeat(AT)n`, `Low_complexity`, `rDNA_45S/18S`, `Satellite/…`, `Unknown` |
-| **TideCluster_default / _short / _RM (tier 3–4)** | **`TRC_<n>` (bare)** | `Satellite/TideCluster/TRC_<n>`, or `rDNA_45S` / `rDNA_5S` for rDNA arrays |
+| RepeatMasker (tier 5) | = classification (RM name) | e.g. `Class_…`, `Simple_repeat(AT)n`, `Low_complexity`, `rDNA/45S_rDNA/18S`, `Satellite/…`, `Unknown` |
+| **TideCluster_default / _short / _RM (tier 3–4)** | **`TRC_<n>` (bare)** | `Satellite/TideCluster/TRC_<n>`, or `rDNA/45S_rDNA` / `rDNA/5S_rDNA` for rDNA arrays |
 | TideHunter (tier 6) | `Satellite/Unknown` | `Satellite/Unknown` |
 
 **Invariant (do not break):** every `TideCluster_*` satellite — *including* rDNA
 arrays and TE-derived ones — keeps `Name = TRC_<n>`. The rDNA distinction lives
-in `classification` (`rDNA_45S|5S`), not in `Name`; the TE-derived distinction
+in `classification` (`rDNA/45S_rDNA|rDNA/5S_rDNA`), not in `Name`; the TE-derived distinction
 lives in the `TE_origin` attribute. `split_gff_by_name.R --name-prefix TRC_` and
 external consumers select families by this `Name`. `calculate_statistics_…R`
 routes rDNA by `classification`, so `Name` can stay `TRC_<n>` on disk.
 
 ## Special semantics
 
-- **rDNA arrays** (`TideCluster_*`, `classification=rDNA_45S|5S`) are both a
+- **rDNA arrays** (`TideCluster_*`, `classification=rDNA/45S_rDNA|rDNA/5S_rDNA`) are both a
   tandem family (they appear in the per-family split under their `TRC_<n>`
   Name) **and** rDNA (counted in the rDNA class via classification). No internal
   18S/ITS/5.8S/IGS/25S substructure is written here; that detail is only on the
-  RepeatMasker `rDNA_45S/<subunit>` features. The rDNA call is taken from
+  RepeatMasker `rDNA/45S_rDNA/<subunit>` features. The rDNA call is taken from
   TideCluster's **authoritative** per-TRC table `<prefix>_rdna.tsv` (columns
   `TRC`/`rDNA_type`/`coverage`, written by `identify_rdna`), keyed by TRC id and
   applied to **all** TideCluster tiers — tier-3 clustering **and tier-4
   RM-on-TideCluster** (`TideCluster_RM`), which reannotates with the *default*
   dimer library and so shares the default run's TRC namespace. This is why a
   tier-4 array that the structural clustering did not cover is still labelled
-  `rDNA_45S|5S` rather than `Satellite/TideCluster/<TRC>`. The clustering GFF3's
+  `rDNA/45S_rDNA|rDNA/5S_rDNA` rather than `Satellite/TideCluster/<TRC>`. The clustering GFF3's
   per-feature `rDNA_type` attribute is a fallback used only when the TSV is
   unavailable (`--no_rdna`, detection failure, or older TideCluster); the
   RM-on-TideCluster GFF3 never carries `rDNA_type`.
