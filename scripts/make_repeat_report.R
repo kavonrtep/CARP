@@ -179,6 +179,30 @@ apply_seq_thresholds <- function(genome_info, min_len_chart, min_len_tracks, max
 CATEGORY_ORDER <- c("Class_I", "Class_II", "rDNA", "rDNA_45S", "rDNA_5S",
                     "Tandem_repeats", "Simple_repeat", "Low_complexity", "Unknown")
 
+# For the report's table and pie ONLY, collapse rDNA sub-array subunits
+# (18S/25S/5.8S/ITS/IGS/5S) into their parent family (rDNA/45S_rDNA,
+# rDNA/5S_rDNA). The subunits are structural parts of one rDNA monomer, not
+# sub-families, so the composition view stops at the family level (like not
+# breaking Ty1_copia into "LTR"/"GAG"/... parts). Total bp is preserved; the
+# data outputs (GFF3s, density BigWigs) keep the full subunit detail.
+collapse_rdna_subunits <- function(comp) {
+  if (nrow(comp) == 0) return(comp)
+  for (fam in c("rDNA/45S_rDNA", "rDNA/5S_rDNA")) {
+    desc <- startsWith(comp$type, paste0(fam, "/"))
+    if (!any(desc)) next
+    add_bp  <- sum(comp$bp[desc]);  add_pct <- sum(comp$pct[desc])
+    comp <- comp[!desc, , drop = FALSE]                     # drop subunit rows
+    if (fam %in% comp$type) {                               # fold into the family row
+      comp$bp[comp$type == fam]  <- comp$bp[comp$type == fam]  + add_bp
+      comp$pct[comp$type == fam] <- comp$pct[comp$type == fam] + add_pct
+    } else {                                                # family only existed as a prefix
+      comp <- rbind(comp, data.frame(type = fam, bp = add_bp, pct = add_pct,
+                                     stringsAsFactors = FALSE))
+    }
+  }
+  comp
+}
+
 # ── C2. Build sunburst hierarchy from composition CSV ─────────────────────
 # Genome-relative: the first ring reads Repeats vs Non-repetitive, so every
 # %entry equals % of genome and matches the classification table. With
@@ -1058,11 +1082,9 @@ html_comp_table <- function(tree_df) {
     if (rtype == "total") {
       disp <- sprintf('<b>%s</b> <span class="row-tag row-total">Total</span>', label)
     } else if (rtype == "unspecified") {
-      # A parent's own bp not attributed to a finer child = "Unclassified".
-      # Exception: rDNA own-bp is the array-level call (TideCluster) that simply
-      # was not resolved to a subunit — label it "array (no subunit)" instead.
-      tag <- if (startsWith(as.character(r["path"]), "rDNA")) "array (no subunit)" else "Unclassified"
-      disp <- sprintf('<i>%s</i> <span class="row-tag row-unspec">%s</span>', label, tag)
+      # A parent's own bp not attributed to a finer child. (rDNA is collapsed to
+      # family level upstream, so no rDNA "array" rows reach here.)
+      disp <- sprintf('<i>%s</i> <span class="row-tag row-unspec">Unclassified</span>', label)
     } else {
       disp <- label
     }
@@ -1330,8 +1352,8 @@ h3{color:#34495e;font-size:0.95em;margin:14px 0 8px}
     <h3>Full classification table</h3>
     <p class="caption" style="margin-bottom:8px">Bold rows show subtree totals.
     <i>Unclassified</i> rows are elements assigned to a class but not resolved to a
-    finer level; for rDNA, <i>array (no subunit)</i> marks array-level detections
-    not resolved to a subunit.
+    finer level. rDNA is shown at the array level (45S / 5S); subunit detail
+    (18S, 25S, …) is kept in the GFF3 / density outputs but not broken out here.
     Complete&nbsp;TEs column: intact elements from DANTE_LTR / DANTE_TIR.</p>
     %s
   </div>
@@ -1532,8 +1554,10 @@ main <- function() {
 
   # ── Build Plotly charts ────────────────────────────────────────────────
   message("Generating Plotly JSON...")
-  sb_data        <- build_sunburst_data(comp, genome_size = genome_size)
-  tree_df        <- build_comp_tree(comp, ltr_stats, tir_stats, line_stats,
+  # Table + pie collapse rDNA to family level (subunits hidden in the report only).
+  comp_report    <- collapse_rdna_subunits(comp)
+  sb_data        <- build_sunburst_data(comp_report, genome_size = genome_size)
+  tree_df        <- build_comp_tree(comp_report, ltr_stats, tir_stats, line_stats,
                                      genome_size = genome_size)
   sunburst_chart <- json_sunburst(sb_data)
 

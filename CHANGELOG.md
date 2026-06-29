@@ -18,7 +18,13 @@
   Low_complexity, Unknown) instead of ordering by content; the pie is
   **genome-relative** (inner ring = Repeats vs grey Non-repetitive, so every
   percentage matches the table); overview cards show **LTR-RT / DNA transposons /
-  LINE as % of genome** and the "Sequences in charts" card was removed.
+  LINE as % of genome** and the "Sequences in charts" card was removed. The
+  table+pie show **rDNA at the array level** (45S / 5S; subunit detail kept in
+  the GFF3/density outputs but not broken out). The "Unspecified" row tag was
+  renamed **"Unclassified"**. The per-sequence repeat-content panel now draws
+  **two reference lines** (shown-sequence average + whole-genome average) with a
+  note on how many contigs/bp are omitted from the bars. Fixed an off-by-one that
+  dropped the last chromosome separator line in `summary_plots.pdf`.
 - **Fixed tier-4 rDNA mislabelling in the unified annotation:** rDNA arrays
   annotated only via the RM-on-TideCluster pass were labelled
   `Satellite/TideCluster/TRC_<n>` instead of rDNA; the authoritative TideCluster
