@@ -110,10 +110,12 @@ plot_tracks <- function(main_tracks, SL,
     segments(0, i * 1.1 * ymax , sum(SL), i*1.1 * ymax, col = "grey")
   }
 
-  # vertical lines
-  # no lines if length os SL is 1
+  # vertical lines separating sequences. Internal boundaries sit at
+  # SN_offsets[2..n] (the cumulative ends of sequences 1..n-1); SN_offsets[1]=0
+  # is the left edge. The previous 1:(n-1) loop drew the edge and missed the
+  # last boundary — for n=2 sequences the only separator was missing entirely.
   if (length(SL) > 1){
-    for (i in 1:(length(SL)-1)){
+    for (i in 2:length(SL)){
       segments(SN_offsets[i], 0, SN_offsets[i], length(main_tracks)*1.1, col = "grey")
     }
   }

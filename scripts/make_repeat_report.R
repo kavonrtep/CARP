@@ -640,7 +640,7 @@ json_sunburst <- function(sb) {
 
 # ── D2. Per-sequence stacked composition bar ──────────────────────────────
 json_composition_bar <- function(cov_mat, seq_info, n_other, other_total_bp,
-                                  genome_avg_frac) {
+                                  genome_avg_frac, genome_size = NULL) {
   cats      <- colnames(cov_mat)
   seq_names <- rownames(cov_mat)
   total_rep <- rowSums(cov_mat)
@@ -648,10 +648,16 @@ json_composition_bar <- function(cov_mat, seq_info, n_other, other_total_bp,
   cov_mat   <- cov_mat[ord, , drop = FALSE]
   seq_names <- seq_names[ord]
 
-  seq_len_mb <- seq_info$length[match(seq_names, seq_info$seqname)] / 1e6
+  seq_len    <- seq_info$length[match(seq_names, seq_info$seqname)]
+  seq_len_mb <- seq_len / 1e6
   y_labels   <- sprintf("%s (%.1f Mb)", seq_names, seq_len_mb)
 
-  max_x <- max(total_rep, genome_avg_frac, 0.05) * 1.08
+  # Length-weighted mean repeat content of the SHOWN sequences — the honest
+  # reference for the displayed bars. It differs from the whole-genome average
+  # when omitted (sub-threshold) contigs have a different repeat content.
+  shown_avg <- if (sum(seq_len) > 0) sum(total_rep * seq_len) / sum(seq_len) else 0
+
+  max_x <- max(total_rep, genome_avg_frac, shown_avg, 0.05) * 1.10
 
   traces <- lapply(seq_along(cats), function(i) {
     cat <- cats[i]
@@ -679,28 +685,48 @@ json_composition_bar <- function(cov_mat, seq_info, n_other, other_total_bp,
     )
   }
 
-  # Genome-average vertical line as a shape
-  shapes <- list(list(
-    type = "line",
-    x0 = genome_avg_frac, x1 = genome_avg_frac,
-    y0 = 0, y1 = 1,
-    yref = "paper",
-    line = list(color = "#333333", width = 1.5, dash = "dash")
-  ))
+  # Two reference lines: shown-sequence average (solid green) and whole-genome
+  # average (dashed grey). They diverge when omitted contigs differ in content.
+  shapes <- list(
+    list(type = "line", x0 = shown_avg, x1 = shown_avg, y0 = 0, y1 = 1,
+         yref = "paper", line = list(color = "#1a9850", width = 1.5)),
+    list(type = "line", x0 = genome_avg_frac, x1 = genome_avg_frac, y0 = 0, y1 = 1,
+         yref = "paper", line = list(color = "#333333", width = 1.5, dash = "dash"))
+  )
 
-  annotations <- list(list(
-    x = genome_avg_frac, y = 1,
-    xref = "x", yref = "paper",
-    text = sprintf("genome avg %.1f%%", genome_avg_frac * 100),
-    showarrow = FALSE,
-    xanchor = "left",
-    font = list(size = 10, color = "#333333")
-  ))
+  annotations <- list(
+    list(x = shown_avg, y = 1.02, xref = "x", yref = "paper",
+         text = sprintf("shown avg %.1f%%", shown_avg * 100),
+         showarrow = FALSE, xanchor = "left",
+         font = list(size = 10, color = "#1a9850")),
+    list(x = genome_avg_frac, y = 1.08, xref = "x", yref = "paper",
+         text = sprintf("genome avg %.1f%%", genome_avg_frac * 100),
+         showarrow = FALSE, xanchor = "left",
+         font = list(size = 10, color = "#333333"))
+  )
+
+  # Top note: how many contigs (and how much sequence) are omitted from the bars
+  # but still counted in the whole-genome average — explains any gap between the
+  # two reference lines.
+  if (n_other > 0) {
+    omit_pct <- if (!is.null(genome_size) && genome_size > 0)
+      other_total_bp / genome_size * 100 else NA_real_
+    omit_txt <- if (is.na(omit_pct))
+      sprintf("%d contig(s), %.0f Mb below the chart threshold omitted from the bars (still in the genome average)",
+              n_other, other_total_bp / 1e6)
+    else
+      sprintf("%d contig(s), %.0f Mb (%.1f%% of assembly) below the chart threshold omitted from the bars (still in the genome average)",
+              n_other, other_total_bp / 1e6, omit_pct)
+    annotations[[length(annotations) + 1]] <- list(
+      x = 0, y = 1.14, xref = "paper", yref = "paper", text = omit_txt,
+      showarrow = FALSE, xanchor = "left",
+      font = list(size = 10, color = "#888888"))
+  }
 
   layout <- list(
     barmode     = "stack",
-    height      = max(300, length(seq_names) * 22 + 80),
-    margin      = list(l = 200, r = 20, t = 30, b = 60),
+    height      = max(300, length(seq_names) * 22 + 110),
+    margin      = list(l = 200, r = 20, t = 70, b = 60),
     xaxis       = list(title = "Fraction of sequence", range = c(0, max_x)),
     yaxis       = list(title = "", automargin = TRUE),
     legend      = list(orientation = "h", y = -0.15),
@@ -1032,7 +1058,11 @@ html_comp_table <- function(tree_df) {
     if (rtype == "total") {
       disp <- sprintf('<b>%s</b> <span class="row-tag row-total">Total</span>', label)
     } else if (rtype == "unspecified") {
-      disp <- sprintf('<i>%s</i> <span class="row-tag row-unspec">Unspecified</span>', label)
+      # A parent's own bp not attributed to a finer child = "Unclassified".
+      # Exception: rDNA own-bp is the array-level call (TideCluster) that simply
+      # was not resolved to a subunit — label it "array (no subunit)" instead.
+      tag <- if (startsWith(as.character(r["path"]), "rDNA")) "array (no subunit)" else "Unclassified"
+      disp <- sprintf('<i>%s</i> <span class="row-tag row-unspec">%s</span>', label, tag)
     } else {
       disp <- label
     }
@@ -1299,7 +1329,9 @@ h3{color:#34495e;font-size:0.95em;margin:14px 0 8px}
   <div>
     <h3>Full classification table</h3>
     <p class="caption" style="margin-bottom:8px">Bold rows show subtree totals.
-    <i>Unspecified</i> rows are elements not classified to a finer level.
+    <i>Unclassified</i> rows are elements assigned to a class but not resolved to a
+    finer level; for rDNA, <i>array (no subunit)</i> marks array-level detections
+    not resolved to a subunit.
     Complete&nbsp;TEs column: intact elements from DANTE_LTR / DANTE_TIR.</p>
     %s
   </div>
@@ -1507,7 +1539,7 @@ main <- function() {
 
   comp_bar_chart <- if (nrow(cov_mat) > 0)
     json_composition_bar(cov_mat, genome_info, seq_thresh$n_other,
-                          seq_thresh$other_bp, genome_avg_frac)
+                          seq_thresh$other_bp, genome_avg_frac, genome_size)
   else NULL
 
   message("Building density panel 1 (top-level categories)...")
