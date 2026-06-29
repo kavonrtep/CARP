@@ -171,8 +171,20 @@ apply_seq_thresholds <- function(genome_info, min_len_chart, min_len_tracks, max
   )
 }
 
+# Fixed top-level category order for the classification table and the sunburst
+# (we no longer reorder categories by content, which was confusing). Anything
+# not listed is appended after these, ordered by size. rDNA_45S/rDNA_5S are kept
+# for the pre-rDNA-restructure layout; once rDNA is nested they collapse to the
+# single "rDNA" top node.
+CATEGORY_ORDER <- c("Class_I", "Class_II", "rDNA", "rDNA_45S", "rDNA_5S",
+                    "Tandem_repeats", "Simple_repeat", "Low_complexity", "Unknown")
+
 # ── C2. Build sunburst hierarchy from composition CSV ─────────────────────
-build_sunburst_data <- function(comp) {
+# Genome-relative: the first ring reads Repeats vs Non-repetitive, so every
+# %entry equals % of genome and matches the classification table. With
+# branchvalues="remainder" the "Repeats" container's own value is 0 and its
+# children sum to the repeat total; "Non-repetitive" carries genome - repeats.
+build_sunburst_data <- function(comp, genome_size = NULL) {
   pal <- c(
     "Class_I"       = "#4575b4",
     "Class_II"      = "#d73027",
@@ -208,19 +220,40 @@ build_sunburst_data <- function(comp) {
   all_pct <- c(csv_pct, rep(0, length(synthetic_ids)))
 
   labels  <- sapply(strsplit(all_ids, "/"), function(x) x[length(x)])
+  # Single-component categories are re-parented under the synthetic "Repeats"
+  # node so the inner ring is Repeats vs Non-repetitive.
   parents <- sapply(all_ids, function(id) {
     p <- strsplit(id, "/")[[1]]
-    if (length(p) == 1) "root" else paste(p[-length(p)], collapse = "/")
+    if (length(p) == 1) "Repeats" else paste(p[-length(p)], collapse = "/")
   })
   colors  <- sapply(all_ids, get_color)
 
+  # Fixed top-level order (Change 1): categories directly under "Repeats" are
+  # ordered by CATEGORY_ORDER; deeper nodes keep size-descending order. sort is
+  # disabled in json_sunburst so plotly honours this input order.
+  is_top   <- parents == "Repeats"
+  top_rank <- ifelse(is_top, match(labels, CATEGORY_ORDER), Inf)
+  top_rank[is_top & is.na(top_rank)] <- Inf
+  ord <- order(top_rank, -all_bp)
+  all_ids <- all_ids[ord]; all_bp <- all_bp[ord]; all_pct <- all_pct[ord]
+  labels  <- labels[ord];  parents <- parents[ord]; colors <- colors[ord]
+
+  total_repeat_bp <- sum(as.numeric(csv_bp))
+  if (is.null(genome_size)) genome_size <- total_repeat_bp
+  nonrep_bp  <- max(0, genome_size - total_repeat_bp)
+  rep_pct    <- if (genome_size > 0) total_repeat_bp / genome_size * 100 else 0
+  nonrep_pct <- if (genome_size > 0) nonrep_bp / genome_size * 100 else 0
+
   list(
-    ids     = c("root", all_ids),
-    labels  = c("All repeats", labels),
-    parents = c("", parents),
-    values  = c(0, all_bp),
-    text    = c("", ifelse(all_pct > 0, sprintf("%.3f%%", all_pct), "")),
-    colors  = c("#cccccc", colors)
+    ids     = c("root", "Repeats", "Non-repetitive", all_ids),
+    labels  = c("Genome", "Repeats", "Non-repetitive", labels),
+    parents = c("", "root", "root", parents),
+    values  = c(0, 0, nonrep_bp, all_bp),
+    text    = c("",
+                sprintf("%.3f%%", rep_pct),
+                sprintf("%.3f%%", nonrep_pct),
+                ifelse(all_pct > 0, sprintf("%.3f%%", all_pct), "")),
+    colors  = c("#ffffff", "#737373", "#e0e0e0", colors)
   )
 }
 
@@ -336,9 +369,11 @@ build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL,
     }
   }
 
-  # Find top-level nodes (no parent in all_ids)
+  # Find top-level nodes (no parent in all_ids). Fixed category order
+  # (CATEGORY_ORDER); anything unlisted is appended, ordered by size.
   top_nodes <- all_ids[is.na(parent_of)]
-  top_nodes <- top_nodes[order(-subtree_bp_cache[top_nodes])]
+  top_nodes <- top_nodes[order(match(top_nodes, CATEGORY_ORDER),
+                               -subtree_bp_cache[top_nodes])]
   for (id in top_nodes) dfs(id, 0L)
 
   do.call(rbind, lapply(rows, as.data.frame, stringsAsFactors = FALSE))
@@ -593,7 +628,8 @@ json_sunburst <- function(sb) {
     customdata    = sb$text,
     textinfo      = "label+percent entry",
     marker        = list(colors = sb$colors),
-    maxdepth      = 3
+    sort          = FALSE,
+    maxdepth      = 4
   )
   layout <- list(
     margin = list(t = 10, l = 10, r = 10, b = 10),
@@ -928,16 +964,22 @@ plotly_div <- function(div_id, chart) {
 }
 
 # ── E3. Summary cards ──────────────────────────────────────────────────────
-html_cards <- function(genome_info, comp, ltr_stats, tir_stats, line_stats,
-                        seq_thresholds) {
-  genome_size_mb    <- sum(as.numeric(genome_info$length)) / 1e6
-  total_repeat_pct  <- sum(comp$bp) / sum(as.numeric(genome_info$length)) * 100
+html_cards <- function(genome_info, comp) {
+  genome_size       <- sum(as.numeric(genome_info$length))
+  genome_size_mb    <- genome_size / 1e6
+  total_repeat_pct  <- sum(comp$bp) / genome_size * 100
   n_seqs  <- nrow(genome_info)
-  n_shown <- length(seq_thresholds$chart_seqs)
 
-  ltr_count  <- if (!is.null(ltr_stats) && nrow(ltr_stats) > 0) sum(ltr_stats$count) else "N/A"
-  tir_count  <- if (!is.null(tir_stats) && nrow(tir_stats) > 0) sum(tir_stats$count) else "N/A"
-  line_count <- line_stats$regions %||% "N/A"
+  # % of genome covered by all features whose classification is `path` or sits
+  # under it (subtree sum) — same basis as the classification table.
+  subtree_pct <- function(path) {
+    sel <- comp$type == path | startsWith(comp$type, paste0(path, "/"))
+    if (!any(sel)) return(0)
+    sum(comp$bp[sel]) / genome_size * 100
+  }
+  ltr_pct  <- subtree_pct("Class_I/LTR")
+  dna_pct  <- subtree_pct("Class_II")
+  line_pct <- subtree_pct("Class_I/LINE")
 
   sprintf('
 <div class="cards">
@@ -949,33 +991,27 @@ html_cards <- function(genome_info, comp, ltr_stats, tir_stats, line_stats,
   <div class="card">
     <div class="card-label">Repeat content</div>
     <div class="card-value">%.1f%%</div>
-    <div class="card-sub">similarity-based</div>
+    <div class="card-sub">of genome</div>
   </div>
   <div class="card">
     <div class="card-label">LTR retrotransposons</div>
-    <div class="card-value">%s</div>
-    <div class="card-sub">structure-based (DANTE_LTR)</div>
+    <div class="card-value">%.1f%%</div>
+    <div class="card-sub">of genome</div>
   </div>
   <div class="card">
-    <div class="card-label">TIR elements</div>
-    <div class="card-value">%s</div>
-    <div class="card-sub">structure-based (DANTE_TIR)</div>
+    <div class="card-label">DNA transposons</div>
+    <div class="card-value">%.1f%%</div>
+    <div class="card-sub">of genome</div>
   </div>
   <div class="card">
     <div class="card-label">LINE elements</div>
-    <div class="card-value">%s</div>
-    <div class="card-sub">structure-based (DANTE_LINE)</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Sequences in charts</div>
-    <div class="card-value">%d / %d</div>
-    <div class="card-sub">&ge; %.0f kb shown individually</div>
+    <div class="card-value">%.1f%%</div>
+    <div class="card-sub">of genome</div>
   </div>
 </div>',
     genome_size_mb, n_seqs,
     total_repeat_pct,
-    ltr_count, tir_count, line_count,
-    n_shown, n_seqs, opt$min_len_chart / 1000
+    ltr_pct, dna_pct, line_pct
   )
 }
 
@@ -1464,7 +1500,7 @@ main <- function() {
 
   # ── Build Plotly charts ────────────────────────────────────────────────
   message("Generating Plotly JSON...")
-  sb_data        <- build_sunburst_data(comp)
+  sb_data        <- build_sunburst_data(comp, genome_size = genome_size)
   tree_df        <- build_comp_tree(comp, ltr_stats, tir_stats, line_stats,
                                      genome_size = genome_size)
   sunburst_chart <- json_sunburst(sb_data)
@@ -1490,8 +1526,7 @@ main <- function() {
   message("Loading Plotly.js...")
   plotly_js <- load_plotly_js(outdir)
 
-  cards_html       <- html_cards(genome_info, comp, ltr_stats, tir_stats,
-                                   line_stats, seq_thresh)
+  cards_html       <- html_cards(genome_info, comp)
   comp_table_html  <- html_comp_table(tree_df)
   dante_summ_html  <- html_dante_summary(ltr_stats, tir_stats, line_stats, outdir)
   sat_table_html   <- html_sat_table(sat_data, genome_size)
