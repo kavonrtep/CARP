@@ -201,13 +201,16 @@ Class_II/Subclass_1/TIR/Sola1
 Class_II/Subclass_1/TIR/Sola2
 Class_II/Subclass_1/TIR/Tc1_Mariner
 Class_II/Subclass_2/Helitron
-rDNA_45S/18S
-rDNA_45S/25S
-rDNA_45S/5.8S
-rDNA_45S/IGS
-rDNA_45S/ITS1
-rDNA_45S/ITS2
-rDNA_5S/5S
+rDNA
+rDNA/45S_rDNA
+rDNA/45S_rDNA/18S
+rDNA/45S_rDNA/25S
+rDNA/45S_rDNA/5.8S
+rDNA/45S_rDNA/IGS
+rDNA/45S_rDNA/ITS1
+rDNA/45S_rDNA/ITS2
+rDNA/5S_rDNA
+rDNA/5S_rDNA/5S
 ```
 
 ## Density BigWig tracks
@@ -239,7 +242,7 @@ clustering alone.
   `Class_II.Subclass_1.TIR` rollups (Unified).
 
 > **Partition vs. roll-up (do not double-count).** The **exact-classification
-> tracks** (`Class_I.LTR.Ty1_copia.Ale`, `Tandem_repeats`, `rDNA_45S`,
+> tracks** (`Class_I.LTR.Ty1_copia.Ale`, `Tandem_repeats`, `rDNA.45S_rDNA`,
 > `Simple_repeat`, `Low_complexity`, `Unknown`, …) are a **disjoint partition** —
 > each feature appears in exactly one, at its leaf classification — so they sum
 > (approximately, modulo smoothing) to the **Total** track. The **roll-up

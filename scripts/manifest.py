@@ -38,8 +38,12 @@ MANIFEST_VERSION = 1
 
 # OUTPUT-CONTRACT version. Bump ONLY on a breaking change to the layout or
 # contents of consumed outputs — NOT on every CARP release. Changelog:
-# docs/output_schema.md. (v2 == the rc6 Repeat_density_* layout.)
-OUTPUT_SCHEMA_VERSION = "2"
+# docs/output_schema.md. (v2 == the rc6 Repeat_density_* layout; v3 == rDNA
+# nested under a single rDNA parent — rDNA_45S/rDNA_5S → rDNA/45S_rDNA /
+# rDNA/5S_rDNA — which renames the rDNA per-class GFF3/BigWig files. No logical
+# name below points at those leaves, so manifest-aware consumers are unaffected;
+# consumers globbing rDNA_45S*/rDNA_5S* filenames must update. No symlink shim.)
+OUTPUT_SCHEMA_VERSION = "3"
 
 # Stable logical name -> path relative to the output root. Every entry is
 # produced unconditionally by a successful run. Logical names stay constant

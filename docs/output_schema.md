@@ -15,7 +15,40 @@ The manifest is implemented in `scripts/manifest.py`; the authoritative
 `outputs` map lives there (`OUTPUTS`) and `OUTPUT_SCHEMA_VERSION` is the current
 value.
 
-## v2 — CARP 0.9.0rc6 and rc7 (current)
+## v3 — rDNA nested under a single parent (current)
+
+**Breaking change to consumed outputs: the rDNA classification was restructured.**
+The flat top-level classes `rDNA_45S` / `rDNA_5S` are now nested under a single
+`rDNA` parent:
+
+| Old (≤ v2) | New (v3) |
+|---|---|
+| `rDNA_45S` | `rDNA/45S_rDNA` |
+| `rDNA_45S/18S`, `/25S`, `/5.8S`, `/IGS`, `/ITS1`, `/ITS2` | `rDNA/45S_rDNA/18S`, … |
+| `rDNA_5S`, `rDNA_5S/5S` | `rDNA/5S_rDNA`, `rDNA/5S_rDNA/5S` |
+
+This renames the **per-class rDNA outputs** (slash → dot in filenames):
+
+- split GFF3s: `Repeat_Annotation_NoSat_split_by_class_gff3/rDNA_45S.gff3` →
+  `rDNA.45S_rDNA.gff3`, `rDNA_45S.18S.gff3` → `rDNA.45S_rDNA.18S.gff3`, … and
+  `rDNA_5S.5S.gff3` → `rDNA.5S_rDNA.5S.gff3`.
+- per-class BigWigs: `Repeat_density_by_class_bigwig/{10k,100k}/rDNA_45S_10k.bw`
+  → `rDNA.45S_rDNA_10k.bw`, etc.
+
+**Unchanged:** the `rDNA` rollup outputs — `rDNA_RepeatMasker.gff3` (top-level
+feature track), the split `rDNA.gff3`, and the `rDNA_{10k,100k}.bw` rollup
+BigWig — all key on the `^rDNA` prefix, which still matches. The three REQUIRED
+outputs (`genome_cleaned.fasta`, `Repeat_Annotation_Unified.gff3`,
+`summary_statistics.csv`) and the marker dir `Repeat_density_by_class_bigwig/`
+are **not renamed** (their *contents* change: the `classification` values and the
+`summary_statistics.csv` row labels carry the new paths).
+
+**No logical name in `OUTPUTS` points at an rDNA leaf file**, so manifest-aware
+consumers are unaffected; consumers that glob `rDNA_45S*` / `rDNA_5S*` filenames
+must update. **No backward-compat symlinks are emitted** — the schema bump is the
+migration signal.
+
+## v2 — CARP 0.9.0rc6 and rc7
 
 The output **layout** contract is unchanged across rc6 and rc7; rc7 only *adds*
 `carp_manifest.json` itself (additive, no layout change — see the note at the

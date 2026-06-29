@@ -50,9 +50,9 @@ RepeatMasker	Low_complexity	Low_complexity	special class
 RepeatMasker	Simple_repeat	Simple_repeat
 RepeatMasker	Satellite	Satellite	RepeatMasker leaf
 RepeatMasker	Unknown	Unknown
-RepeatMasker	rDNA_45S/IGS	rDNA_45S/IGS	observed in JI2822 real data
-RepeatMasker	rDNA_45S/ITS1	rDNA_45S/ITS1
-RepeatMasker	rDNA_45S/ITS2	rDNA_45S/ITS2
+RepeatMasker	rDNA/45S_rDNA/IGS	rDNA/45S_rDNA/IGS	observed in JI2822 real data
+RepeatMasker	rDNA/45S_rDNA/ITS1	rDNA/45S_rDNA/ITS1
+RepeatMasker	rDNA/45S_rDNA/ITS2	rDNA/45S_rDNA/ITS2
 RepeatMasker	Class_I/pararetrovirus	Class_I/pararetrovirus
 
 # ── TideCluster (custom-library class with similarity suffix) ───────────────
@@ -95,3 +95,5 @@ RepeatMasker	Class_III/foo	!!ERROR	unknown top-level class
 RepeatMasker	Class_I/LTR/Ty5_unknown	!!ERROR	unknown Ty lineage
 DANTE_TIR	Class_II_Subclass_9_TIR_hAT	!!ERROR	unknown Subclass number
 RepeatMasker		!!ERROR	empty string
+RepeatMasker	rDNA/45S_rDNA	rDNA/45S_rDNA	array-level 45S (schema v3 nesting)
+RepeatMasker	rDNA/5S_rDNA/5S	rDNA/5S_rDNA/5S

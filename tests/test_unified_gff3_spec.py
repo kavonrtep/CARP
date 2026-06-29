@@ -48,7 +48,7 @@ GOOD = [
          ID="UA_L1_00000006", Name="TRC_1", classification="Satellite/TideCluster/TRC_1",
          source_tier="3", source_tool="TideCluster_default"),
     feat("OZ1", "TideCluster_default", "repeat_region", 31000, 40000, ".",
-         ID="UA_L1_00000007", Name="TRC_2", classification="rDNA_45S",
+         ID="UA_L1_00000007", Name="TRC_2", classification="rDNA/45S_rDNA",
          source_tier="3", source_tool="TideCluster_default"),
     feat("OZ1", "TideCluster_default", "repeat_region", 41000, 50000, ".",
          ID="UA_L1_00000008", Name="TRC_13", classification="Satellite/TideCluster/TRC_13",
@@ -66,7 +66,7 @@ GOOD = [
          classification="Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Retand",
          source_tier="5", source_tool="RepeatMasker"),
     feat("OZ1", "RepeatMasker", "repeat_region", 62000, 62100, ".",
-         ID="UA_L1_00000012", Name="rDNA_45S/18S", classification="rDNA_45S/18S",
+         ID="UA_L1_00000012", Name="rDNA/45S_rDNA/18S", classification="rDNA/45S_rDNA/18S",
          source_tier="5", source_tool="RepeatMasker"),
     feat("OZ1", "RepeatMasker", "repeat_region", 63000, 63030, ".",
          ID="UA_L1_00000013", Name="Simple_repeat(AT)n", classification="Simple_repeat(AT)n",
@@ -97,7 +97,7 @@ GOOD = [
     # rDNA_type attribute, which tier 4 never carries). Guards that the contract
     # keeps accepting tier-4 rDNA — index 18.  -- the make_unified rDNA fix --
     feat("OZ1", "TideCluster_RM", "repeat_region", 120000, 121000, "+",
-         ID="UA_L1_00000017", Name="TRC_2", classification="rDNA_45S",
+         ID="UA_L1_00000017", Name="TRC_2", classification="rDNA/45S_rDNA",
          source_tier="4", source_tool="TideCluster_RM"),
 ]
 

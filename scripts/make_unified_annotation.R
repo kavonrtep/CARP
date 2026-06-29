@@ -264,7 +264,7 @@ load_tier2_dante <- function(path) {
 # feature in the clustering GFF3, and the RM-on-TideCluster GFF3 (tier 4) carries
 # no `rDNA_type` at all — so without this map every tier-4 rDNA array would be
 # mislabelled `Satellite/TideCluster/<TRC>`. Returns a named character vector
-# TRC_<n> -> "rDNA_45S"/"rDNA_5S"; empty when the file is absent/unreadable
+# TRC_<n> -> "rDNA/45S_rDNA"/"rDNA/5S_rDNA"; empty when the file is absent/unreadable
 # (e.g. `--no_rdna`, detection failed, or older TideCluster), in which case
 # normalise_tc_satellite falls back to the per-feature `rDNA_type` attribute.
 load_rdna_map <- function(path) {
@@ -282,15 +282,15 @@ load_rdna_map <- function(path) {
       !all(c("TRC", "rDNA_type") %in% names(tab)))
     return(character(0))
   rtype <- toupper(trimws(tab$rDNA_type))
-  cls   <- ifelse(rtype == "45S", "rDNA_45S",
-           ifelse(rtype == "5S",  "rDNA_5S", NA_character_))
+  cls   <- ifelse(rtype == "45S", "rDNA/45S_rDNA",
+           ifelse(rtype == "5S",  "rDNA/5S_rDNA", NA_character_))
   keep  <- !is.na(cls)
   m <- setNames(cls[keep], trimws(tab$TRC[keep]))
   m[!duplicated(names(m))]
 }
 
 # Map a TideCluster clustering / RM-on-TC feature to (Name, classification).
-# rDNA arrays (45S/5S) are surfaced as array-level rDNA_45S / rDNA_5S (no internal
+# rDNA arrays (45S/5S) are surfaced as array-level rDNA/45S_rDNA / rDNA/5S_rDNA (no internal
 # 18S/ITS/5.8S/IGS/25S substructure, matching TideCluster's design), which routes
 # them to the rDNA class downstream (calculate_statistics_and_make_groups.R keys
 # on `^rDNA`) and keeps them out of the Tandem_repeats aggregation. The rDNA call
@@ -313,12 +313,12 @@ normalise_tc_satellite <- function(gr, tier, tool, rdna_map = character(0)) {
   # already resolve the TRC (TSV absent / older TideCluster / --no_rdna).
   rtype <- if (!is.null(gr$rDNA_type)) as.character(gr$rDNA_type) else rep(NA_character_, length(gr))
   unresolved <- !grepl("^rDNA_", cls)
-  cls[unresolved & !is.na(rtype) & rtype == "45S"] <- "rDNA_45S"
-  cls[unresolved & !is.na(rtype) & rtype == "5S"]  <- "rDNA_5S"
+  cls[unresolved & !is.na(rtype) & rtype == "45S"] <- "rDNA/45S_rDNA"
+  cls[unresolved & !is.na(rtype) & rtype == "5S"]  <- "rDNA/5S_rDNA"
   # Name ALWAYS keeps the bare TRC id (TRC_<n>) — downstream apps and
   # split_gff_by_name.R (--name-prefix TRC_) key on it, so it must stay byte-stable
   # across versions for every satellite (rDNA included). The rDNA / TE-derived
-  # distinction lives in `classification` (rDNA_45S|5S) and the TE_origin
+  # distinction lives in `classification` (rDNA/45S_rDNA|rDNA/5S_rDNA) and the TE_origin
   # attribute, never in Name. Plain-satellite records are therefore identical to
   # the previous release; rDNA only changes `classification`. The stats splitter
   # routes rDNA by classification (it carries Name=TRC_<n>).
