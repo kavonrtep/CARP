@@ -107,6 +107,7 @@ def _filter_config(config: dict) -> dict:
         "genome_fasta", "output_dir", "custom_library",
         "tandem_repeat_library", "repeatmasker_sensitivity",
         "repeatmasker_culling_limit",
+        "tidecluster_reannotate_culling_limit",
         "reduce_library",
         "dante_tir_min_multiplicity",
         "dante_tir_fallback_min_alignments",
