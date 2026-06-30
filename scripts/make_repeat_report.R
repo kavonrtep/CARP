@@ -562,26 +562,49 @@ build_density_arrays <- function(bw_files, seqnames, seq_lengths_vec, bin_width)
   result
 }
 
-# ── C6. Per-sequence coverage fractions for stacked bar ───────────────────
-compute_per_seq_coverage <- function(bw_files_named, seqnames, seq_lengths_vec) {
-  mat <- matrix(0, nrow = length(seqnames), ncol = length(bw_files_named),
-                dimnames = list(seqnames, names(bw_files_named)))
+# ── C6. Per-sequence repeat composition (from the unified GFF3) ────────────
+# Computed at base precision from the unified annotation's Level-1 features —
+# NOT from the smoothed density BigWigs (whose 10-bin moving average inflates the
+# integral). Each bar segment is the exact union bp of a class on a sequence, so
+# the stack sums to that sequence's true union repeat fraction.
 
-  for (cat in names(bw_files_named)) {
-    paths <- bw_files_named[[cat]]
-    paths <- paths[!is.null(paths) & file.exists(paths)]
-    if (length(paths) == 0) next
-    combined <- rep(0, length(seqnames))
-    names(combined) <- seqnames
-    for (p in paths) {
-      gr <- tryCatch(import(p), error = function(e) NULL)
-      if (is.null(gr) || length(gr) == 0) next
-      by_seq <- tapply(score(gr) * width(gr), as.character(seqnames(gr)), sum, na.rm = TRUE)
-      for (s in intersect(names(by_seq), seqnames)) {
-        combined[s] <- combined[s] + by_seq[s]
-      }
-    }
-    mat[, cat] <- pmin(1, combined / seq_lengths_vec[seqnames])
+# Bar categories, in stacking order. "Other repeats" is the catch-all for classes
+# not named here (DIRS/SINE/Penelope/bare nodes) so every bar sums to the union.
+BAR_CATEGORIES <- c("Ty1/copia", "Ty3/gypsy", "LINE", "Class II", "Pararetrovirus",
+                    "Tandem_repeats", "rDNA", "Simple repeats", "Low complexity",
+                    "Other repeats", "Unknown")
+
+# Map a vector of canonical classifications to bar categories. Patterns are
+# mutually exclusive; default is "Other repeats".
+repeat_category <- function(cls) {
+  out <- rep("Other repeats", length(cls))
+  out[grepl("Ty1_copia", cls)]                 <- "Ty1/copia"
+  out[grepl("Ty3_gypsy", cls)]                 <- "Ty3/gypsy"
+  out[grepl("Class_I/LINE", cls, fixed = TRUE)]<- "LINE"
+  out[grepl("pararetrovirus", cls)]            <- "Pararetrovirus"
+  out[grepl("^Class_II", cls)]                 <- "Class II"
+  out[grepl("^Satellite", cls)]                <- "Tandem_repeats"
+  out[grepl("^rDNA", cls)]                     <- "rDNA"
+  out[grepl("^Simple_repeat", cls)]            <- "Simple repeats"
+  out[grepl("^Low_complexity", cls)]           <- "Low complexity"
+  out[grepl("^Unknown", cls)]                  <- "Unknown"
+  out
+}
+
+# Per-sequence union bp per category from Level-1 features. Returns a matrix
+# [sequence x category] of base pairs (union within each category).
+compute_seq_category_bp <- function(l1, seqnames_all) {
+  mat <- matrix(0, nrow = length(seqnames_all), ncol = length(BAR_CATEGORIES),
+                dimnames = list(seqnames_all, BAR_CATEGORIES))
+  if (length(l1) == 0) return(mat)
+  cat <- repeat_category(as.character(l1$classification))
+  for (cc in BAR_CATEGORIES) {
+    sub <- l1[cat == cc]
+    if (length(sub) == 0) next
+    r      <- reduce(sub, ignore.strand = TRUE)
+    by_seq <- tapply(width(r), as.character(seqnames(r)), sum)
+    idx    <- intersect(names(by_seq), seqnames_all)
+    if (length(idx)) mat[idx, cc] <- by_seq[idx]
   }
   mat
 }
@@ -627,15 +650,15 @@ J <- function(x) toJSON(x, auto_unbox = TRUE, null = "null")
 TRACK_COLORS <- c(
   "Tandem_repeats"  = "#1a9850",
   "Ty1/copia"       = "#4575b4",
-  "Ty3/gypsy"       = "#313695",
+  "Ty3/gypsy"       = "#e08214",
   "LINE"            = "#74add1",
-  "TIR (Class II)"  = "#d73027",
+  "Class II"        = "#d73027",
   "Pararetrovirus"  = "#f46d43",
   "Simple repeats"  = "#878787",
   "Low complexity"  = "#bdbdbd",
   "rDNA"            = "#762a83",
   "Unknown"         = "#d9d9d9",
-  "Other"           = "#ffffbf"
+  "Other repeats"   = "#fee08b"
 )
 
 # ── D1. Sunburst JSON ──────────────────────────────────────────────────────
@@ -667,104 +690,48 @@ json_sunburst <- function(sb) {
 }
 
 # ── D2. Per-sequence stacked composition bar ──────────────────────────────
-json_composition_bar <- function(cov_mat, seq_info, n_other, other_total_bp,
-                                  genome_avg_frac, genome_size = NULL,
-                                  min_len_chart = NULL) {
-  cats      <- colnames(cov_mat)
-  seq_names <- rownames(cov_mat)
-  total_rep <- rowSums(cov_mat)
-  ord       <- order(-total_rep)
-  cov_mat   <- cov_mat[ord, , drop = FALSE]
-  seq_names <- seq_names[ord]
+# Pure renderer. cov_mat: rows already ordered (sequences then an optional
+# "Other" aggregate), columns = BAR_CATEGORIES, values = fraction of the row's
+# length. y_labels: one label per row. genome_avg_frac: the single reference
+# line (= GFF Level-1 union / genome = length-weighted mean of all rows).
+json_composition_bar <- function(cov_mat, y_labels, genome_avg_frac, note_text) {
+  cats   <- colnames(cov_mat)
+  max_x  <- max(rowSums(cov_mat), genome_avg_frac, 0.05) * 1.10
 
-  seq_len    <- seq_info$length[match(seq_names, seq_info$seqname)]
-  seq_len_mb <- seq_len / 1e6
-  y_labels   <- sprintf("%s (%.1f Mb)", seq_names, seq_len_mb)
+  traces <- lapply(cats, function(cat) list(
+    type        = "bar",
+    orientation = "h",
+    name        = cat,
+    # I() forces JSON arrays — with a single row, auto_unbox would otherwise
+    # collapse length-1 x/y to scalars and Plotly draws no bar.
+    x           = I(unname(cov_mat[, cat])),
+    y           = I(y_labels),
+    marker      = list(color = TRACK_COLORS[[cat]] %||% "#aaaaaa"),
+    hovertemplate = paste0(cat, ": %{x:.3f}<extra></extra>")
+  ))
 
-  # Length-weighted mean repeat content of the SHOWN sequences — the honest
-  # reference for the displayed bars. It differs from the whole-genome average
-  # when omitted (sub-threshold) contigs have a different repeat content.
-  shown_avg <- if (sum(seq_len) > 0) sum(total_rep * seq_len) / sum(seq_len) else 0
-
-  max_x <- max(total_rep, genome_avg_frac, shown_avg, 0.05) * 1.10
-
-  traces <- lapply(seq_along(cats), function(i) {
-    cat <- cats[i]
-    list(
-      type        = "bar",
-      orientation = "h",
-      name        = cat,
-      # I() forces JSON arrays — with a single shown sequence, auto_unbox would
-      # otherwise collapse length-1 x/y to scalars and Plotly draws no bar.
-      x           = I(cov_mat[, cat]),
-      y           = I(y_labels),
-      marker      = list(color = TRACK_COLORS[[cat]] %||% "#aaaaaa"),
-      hovertemplate = paste0(cat, ": %{x:.3f}<extra></extra>")
-    )
-  })
-
-  if (n_other > 0) {
-    traces[[length(traces) + 1]] <- list(
-      type        = "bar",
-      orientation = "h",
-      name        = sprintf("Other sequences (%d)", n_other),
-      x           = list(0),
-      y           = list(sprintf("Other (%d seqs, %.0f Mb)",
-                                  n_other, other_total_bp / 1e6)),
-      marker      = list(color = "#eeeeee"),
-      hovertemplate = "Sequences below length threshold<extra></extra>"
-    )
-  }
-
-  # Two reference lines: shown-sequence average (solid green) and whole-genome
-  # average (dashed grey). They diverge when omitted contigs differ in content.
-  shapes <- list(
-    list(type = "line", x0 = shown_avg, x1 = shown_avg, y0 = 0, y1 = 1,
-         yref = "paper", line = list(color = "#1a9850", width = 1.5)),
-    list(type = "line", x0 = genome_avg_frac, x1 = genome_avg_frac, y0 = 0, y1 = 1,
-         yref = "paper", line = list(color = "#333333", width = 1.5, dash = "dash"))
-  )
+  shapes <- list(list(type = "line", x0 = genome_avg_frac, x1 = genome_avg_frac,
+                      y0 = 0, y1 = 1, yref = "paper",
+                      line = list(color = "#333333", width = 1.5, dash = "dash")))
 
   annotations <- list(
-    list(x = shown_avg, y = 1.02, xref = "x", yref = "paper",
-         text = sprintf("shown avg %.1f%%", shown_avg * 100),
-         showarrow = FALSE, xanchor = "left",
-         font = list(size = 10, color = "#1a9850")),
-    list(x = genome_avg_frac, y = 1.08, xref = "x", yref = "paper",
+    list(x = genome_avg_frac, y = 1.03, xref = "x", yref = "paper",
          text = sprintf("genome avg %.1f%%", genome_avg_frac * 100),
          showarrow = FALSE, xanchor = "left",
-         font = list(size = 10, color = "#333333"))
+         font = list(size = 10, color = "#333333")),
+    list(x = 0, y = 1.10, xref = "paper", yref = "paper", text = note_text,
+         showarrow = FALSE, xanchor = "left",
+         font = list(size = 10, color = "#888888"))
   )
-
-  # Top note: how many sequences are shown vs omitted (below the chart length
-  # threshold). Omitted contigs are excluded from the bars but still counted in
-  # the whole-genome average — this explains any gap between the two ref lines.
-  thr_txt <- if (!is.null(min_len_chart) && min_len_chart > 0)
-    sprintf(" (≥ %s)", if (min_len_chart >= 1e6) sprintf("%.0f Mb", min_len_chart / 1e6)
-                            else sprintf("%.0f kb", min_len_chart / 1e3))
-  else ""
-  note_txt <- sprintf("%d sequence(s) shown%s", length(seq_names), thr_txt)
-  if (n_other > 0) {
-    omit_pct <- if (!is.null(genome_size) && genome_size > 0)
-      other_total_bp / genome_size * 100 else NA_real_
-    note_txt <- if (is.na(omit_pct))
-      sprintf("%s; %d smaller contig(s) (%.0f Mb) omitted from the bars (still counted in the genome average)",
-              note_txt, n_other, other_total_bp / 1e6)
-    else
-      sprintf("%s; %d smaller contig(s) (%.0f Mb, %.1f%% of assembly) omitted from the bars (still counted in the genome average)",
-              note_txt, n_other, other_total_bp / 1e6, omit_pct)
-  }
-  annotations[[length(annotations) + 1]] <- list(
-    x = 0, y = 1.14, xref = "paper", yref = "paper", text = note_txt,
-    showarrow = FALSE, xanchor = "left",
-    font = list(size = 10, color = "#888888"))
 
   layout <- list(
     barmode     = "stack",
-    height      = max(300, length(seq_names) * 22 + 110),
-    margin      = list(l = 200, r = 20, t = 70, b = 60),
+    height      = max(300, nrow(cov_mat) * 22 + 95),
+    margin      = list(l = 200, r = 20, t = 55, b = 60),
     xaxis       = list(title = "Fraction of sequence", range = c(0, max_x)),
-    yaxis       = list(title = "", automargin = TRUE),
+    # Pin row order to y_labels (rev: first label at top).
+    yaxis       = list(title = "", automargin = TRUE,
+                       categoryorder = "array", categoryarray = rev(y_labels)),
     legend      = list(orientation = "h", y = -0.15),
     showlegend  = TRUE,
     shapes      = shapes,
@@ -1495,41 +1462,51 @@ main <- function() {
 
   seq_len_named <- setNames(genome_info$length, genome_info$seqname)
 
-  # ── Per-sequence composition ───────────────────────────────────────────
-  message("Computing per-sequence coverage...")
-  rm_bw <- bw_files$rm
+  # ── Per-sequence composition (from the unified GFF3, base precision) ─────
+  message("Computing per-sequence composition from the unified annotation...")
+  unified_l1 <- tryCatch({
+    u <- import(file.path(outdir, "Repeat_Annotation_Unified.gff3"))
+    u[grepl("^UA_L1_", as.character(u$ID))]
+  }, error = function(e) { message("  could not load unified GFF3: ",
+                                   conditionMessage(e)); GRanges() })
 
-  find_bw <- function(name) {
-    m <- rm_bw[name]
-    if (length(m) > 0 && !is.na(m) && file.exists(m)) m else NULL
+  bp_mat <- compute_seq_category_bp(unified_l1, genome_info$seqname)   # [seq x cat] bp
+  # genome-average line = total union / genome (categories are a disjoint L1
+  # partition, so the per-category sum equals the true union).
+  genome_avg_frac <- if (genome_size > 0) sum(bp_mat) / genome_size else 0
+
+  # Bars: one row per shown sequence (length-normalised composition), plus a
+  # single aggregate "Other" bar for all sub-threshold contigs, so the bars
+  # together cover the whole genome and average to the genome line.
+  shown   <- chart_seqs
+  omitted <- setdiff(genome_info$seqname, shown)
+  cov_mat <- matrix(0, 0, length(BAR_CATEGORIES),
+                    dimnames = list(NULL, BAR_CATEGORIES))
+  y_labels <- character(0)
+  if (length(shown) > 0) {
+    fr <- bp_mat[shown, , drop = FALSE] / seq_len_named[shown]
+    ord <- order(-rowSums(fr))                      # most repeat-rich at top
+    fr <- fr[ord, , drop = FALSE]; shown_ord <- shown[ord]
+    cov_mat <- fr
+    y_labels <- sprintf("%s (%.1f Mb)", shown_ord, seq_len_named[shown_ord] / 1e6)
   }
-
-  tir_files <- rm_bw[grepl("^Class_II", names(rm_bw))]
-  tir_files <- tir_files[file.exists(tir_files)]
-
-  bar_bw_map <- list(
-    # Use the by-class PARTITION track (excludes rDNA), not the structural
-    # TideCluster aggregate (tc_agg, which counts rDNA arrays as tandem) — else
-    # the stacked bar double-counts rDNA (once here, once in the rDNA category).
-    "Tandem_repeats"  = find_bw("Tandem_repeats") %||% bw_files$tc_agg,
-    "Ty1/copia"       = find_bw("All_Ty1_Copia"),
-    "Ty3/gypsy"       = find_bw("All_Ty3_Gypsy"),
-    "LINE"            = find_bw("Class_I.LINE"),
-    "TIR (Class II)"  = if (length(tir_files) > 0) tir_files else NULL,
-    "Pararetrovirus"  = find_bw("Class_I.pararetrovirus"),
-    "Simple repeats"  = find_bw("Simple_repeat") %||% find_bw("Simple_repeats"),
-    "Low complexity"  = find_bw("Low_complexity"),
-    "rDNA"            = find_bw("rDNA"),
-    "Unknown"         = find_bw("Unknown")
-  )
-  bar_bw_map <- Filter(Negate(is.null), bar_bw_map)
-
-  cov_mat <- if (length(bar_bw_map) > 0 && length(chart_seqs) > 0)
-    compute_per_seq_coverage(bar_bw_map, chart_seqs, seq_len_named)
-  else
-    matrix(0, 0, 0)
-
-  genome_avg_frac <- sum(comp$bp) / genome_size
+  if (length(omitted) > 0) {
+    other_len <- sum(as.numeric(seq_len_named[omitted]))
+    other_fr  <- if (other_len > 0) colSums(bp_mat[omitted, , drop = FALSE]) / other_len
+                 else rep(0, length(BAR_CATEGORIES))
+    cov_mat   <- rbind(cov_mat, matrix(other_fr, nrow = 1,
+                                       dimnames = list(NULL, BAR_CATEGORIES)))
+    y_labels  <- c(y_labels, sprintf("Other (%d contigs, %.1f Mb)",
+                                     length(omitted), other_len / 1e6))
+  }
+  comp_bar_note <- {
+    thr <- opt$min_len_chart
+    thr_txt <- if (thr >= 1e6) sprintf("%.0f Mb", thr / 1e6) else sprintf("%.0f kb", thr / 1e3)
+    base <- sprintf("%d sequence(s) shown individually (≥ %s)", length(shown), thr_txt)
+    if (length(omitted) > 0)
+      sprintf("%s; %d smaller contig(s) aggregated as 'Other'", base, length(omitted))
+    else base
+  }
 
   # ── Density track plots (3 panels matching summary_plots.pdf) ─────────────
   # Always use 100k resolution for the concatenated density plots.
@@ -1583,9 +1560,7 @@ main <- function() {
   sunburst_chart <- json_sunburst(sb_data)
 
   comp_bar_chart <- if (nrow(cov_mat) > 0)
-    json_composition_bar(cov_mat, genome_info, seq_thresh$n_other,
-                          seq_thresh$other_bp, genome_avg_frac, genome_size,
-                          opt$min_len_chart)
+    json_composition_bar(cov_mat, y_labels, genome_avg_frac, comp_bar_note)
   else NULL
 
   message("Building density panel 1 (top-level categories)...")
