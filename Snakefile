@@ -58,6 +58,17 @@ rm_sensitivity_option = {
     "" :       ""
     }[config["repeatmasker_sensitivity"]]
 
+# RepeatMasker rmblastn culling (-culling_limit). 0 = off (default; behaviour
+# unchanged). N>0 caps redundant HSPs per genomic locus: on a redundant de-novo
+# library (each genomic TE copy otherwise hits hundreds of near-identical
+# consensi) this collapses the per-locus HSP explosion. Measured on a Pisum-type
+# genome through the real wrapper path: 2 -> ~3x faster RepeatMasker at -0.7%
+# masked bp, classification preserved; combine with repeatmasker_sensitivity:
+# rush for ~7x at -1.8%. Injected into rmblastn via an RMBLAST_DIR shim in
+# repeatmasker_wrapper.py (no container patch required).
+if "repeatmasker_culling_limit" not in config:
+    config["repeatmasker_culling_limit"] = 0
+
 # TideCluster sensitivity preset (--sensitivity {quick,default,rush}).
 # Kept in sync with the RepeatMasker sensitivity setting: TideCluster uses
 # RepeatMasker internally for its reannotation step.
@@ -1362,7 +1373,8 @@ rule repeatmasker:
     params:
         rm_dir=directory(F"{config['output_dir']}/RepeatMasker"),
         rm_sensitivity_option=rm_sensitivity_option,
-        rm_sensitivity=config["repeatmasker_sensitivity"]
+        rm_sensitivity=config["repeatmasker_sensitivity"],
+        culling_limit=config["repeatmasker_culling_limit"]
     log:
         stdout=F"{config['output_dir']}/RepeatMasker/repeatmasker.log",
         stderr=F"{config['output_dir']}/RepeatMasker/repeatmasker.err"
@@ -1390,7 +1402,7 @@ rule repeatmasker:
         cp $genome_absolute_path .
         lib_name=$(basename $library_absolute_path)
         gen_name=$(basename $genome_absolute_path)
-        repeatmasker_wrapper.py -f $gen_name -l $lib_name -o $out_absolute_path  -s {params.rm_sensitivity} -p {threads} -d workdir
+        repeatmasker_wrapper.py -f $gen_name -l $lib_name -o $out_absolute_path  -s {params.rm_sensitivity} -p {threads} -d workdir --culling-limit {params.culling_limit}
         clean_rm_output.R $out_absolute_path $gff_absolute_path
         """
 

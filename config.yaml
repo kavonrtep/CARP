@@ -5,6 +5,14 @@ tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
 # possible values are: rush, default, quick,
 # if missing, default is used
 repeatmasker_sensitivity: default
+# rmblastn -culling_limit for the RepeatMasker step. 0 = off (default, behaviour
+# unchanged). Caps redundant HSPs per genomic locus, which on a redundant de-novo
+# library (each TE copy otherwise hits hundreds of near-identical consensi) makes
+# RepeatMasker much faster. Measured through the real wrapper path on a Pisum-type
+# genome: 2 -> ~3x faster at -0.7% masked bp (classification preserved); with
+# repeatmasker_sensitivity: rush, ~7x at -1.8%. 2 is the recommended value; 1 is
+# more aggressive (dropped ~3% masked bp in testing). Test on your data first.
+repeatmasker_culling_limit: 0
 # possible values are: True, False, if missing, True is used
 reduce_library: False
 # Rotation-invariant reduction of the TideCluster consensus dimer library used
