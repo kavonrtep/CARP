@@ -1588,7 +1588,8 @@ main <- function() {
 
   sunburst_div      <- plotly_div("sunburst-plot", sunburst_chart)
   comp_bar_div      <- if (!is.null(comp_bar_chart))
-    paste0("<p class=\"caption\" style=\"margin:0 0 8px\">", comp_bar_note, "</p>",
+    paste0("<p style=\"margin:0 0 8px;color:#000;font-size:0.95em;font-weight:600\">",
+           comp_bar_note, "</p>",
            plotly_div("comp-bar-plot", comp_bar_chart))
   else "<p>No composition bar data.</p>"
   density_top_div     <- if (!is.null(density_top_chart))
