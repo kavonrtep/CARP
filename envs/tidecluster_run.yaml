@@ -23,7 +23,7 @@ channels:
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.16.0
+  - tidecluster=1.16.1
   - bioconductor-rtracklayer
   - r-optparse
   - mmseqs2
