@@ -28,6 +28,14 @@ suppressPackageStartupMessages({
 g <- readDNAStringSet(opt$genome)
 rm <- import(opt$rm)
 
+# Count Level-1 (top-level) features only. Level-2 nested children (LTR_RT_TR
+# member copies, simple repeats nested inside satellites) sit spatially WITHIN
+# their Level-1 parent, so including them double-counts those bp against the
+# parent. Restricting to L1 makes every base count once under its primary class:
+# total coverage is unchanged (L2 ⊆ L1) and the per-class split becomes an exact
+# disjoint partition that sums to the true union.
+if (!is.null(rm$ID))
+  rm <- rm[grepl("^UA_L1_", as.character(rm$ID))]
 
 genome_size <- sum(width(g))
 

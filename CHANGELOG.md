@@ -25,6 +25,18 @@
   **two reference lines** (shown-sequence average + whole-genome average) with a
   note on how many contigs/bp are omitted from the bars. Fixed an off-by-one that
   dropped the last chromosome separator line in `summary_plots.pdf`.
+- **Per-sequence repeat-content panel reworked + Level-1-only statistics.** The
+  per-sequence composition bars are now computed at base precision from the
+  unified GFF3 Level-1 union (not the smoothed density BigWigs, which inflated
+  the totals), so each bar sums to the sequence's true repeat fraction. All
+  sub-threshold contigs are aggregated into one prominent "Other (M contigs,
+  X Mb)" bar, so the bars cover the whole genome; the redundant "shown avg" line
+  is dropped (one "genome avg" line remains). `summary_statistics.csv` and the
+  per-class split now count **Level-1 features only** — Level-2 nested children
+  (LTR_RT_TR member copies, simple repeats nested in satellites) are no longer
+  double-counted, so per-class numbers and the total equal the true union and
+  the per-class partition is exactly disjoint. The Class_II bar/legend label is
+  now just "Class II" (it includes Helitron, not only TIR).
 - **Fixed tier-4 rDNA mislabelling in the unified annotation:** rDNA arrays
   annotated only via the RM-on-TideCluster pass were labelled
   `Satellite/TideCluster/TRC_<n>` instead of rDNA; the authoritative TideCluster
