@@ -221,6 +221,10 @@ build_sunburst_data <- function(comp, genome_size = NULL) {
     "Unknown"       = "#d9d9d9"
   )
   get_color <- function(id) {
+    # Distinct colours for the two LTR superfamilies — otherwise both inherit the
+    # Class_I blue and are indistinguishable in the pie.
+    if (grepl("Ty1_copia", id, fixed = TRUE)) return("#4575b4")  # copia — blue
+    if (grepl("Ty3_gypsy", id, fixed = TRUE)) return("#e08214")  # gypsy — orange
     top <- strsplit(id, "/")[[1]][1]
     col <- pal[top]
     if (is.na(col)) "#aaaaaa" else col
@@ -664,7 +668,8 @@ json_sunburst <- function(sb) {
 
 # ── D2. Per-sequence stacked composition bar ──────────────────────────────
 json_composition_bar <- function(cov_mat, seq_info, n_other, other_total_bp,
-                                  genome_avg_frac, genome_size = NULL) {
+                                  genome_avg_frac, genome_size = NULL,
+                                  min_len_chart = NULL) {
   cats      <- colnames(cov_mat)
   seq_names <- rownames(cov_mat)
   total_rep <- rowSums(cov_mat)
@@ -689,8 +694,10 @@ json_composition_bar <- function(cov_mat, seq_info, n_other, other_total_bp,
       type        = "bar",
       orientation = "h",
       name        = cat,
-      x           = cov_mat[, cat],
-      y           = y_labels,
+      # I() forces JSON arrays — with a single shown sequence, auto_unbox would
+      # otherwise collapse length-1 x/y to scalars and Plotly draws no bar.
+      x           = I(cov_mat[, cat]),
+      y           = I(y_labels),
       marker      = list(color = TRACK_COLORS[[cat]] %||% "#aaaaaa"),
       hovertemplate = paste0(cat, ": %{x:.3f}<extra></extra>")
     )
@@ -729,23 +736,28 @@ json_composition_bar <- function(cov_mat, seq_info, n_other, other_total_bp,
          font = list(size = 10, color = "#333333"))
   )
 
-  # Top note: how many contigs (and how much sequence) are omitted from the bars
-  # but still counted in the whole-genome average — explains any gap between the
-  # two reference lines.
+  # Top note: how many sequences are shown vs omitted (below the chart length
+  # threshold). Omitted contigs are excluded from the bars but still counted in
+  # the whole-genome average — this explains any gap between the two ref lines.
+  thr_txt <- if (!is.null(min_len_chart) && min_len_chart > 0)
+    sprintf(" (≥ %s)", if (min_len_chart >= 1e6) sprintf("%.0f Mb", min_len_chart / 1e6)
+                            else sprintf("%.0f kb", min_len_chart / 1e3))
+  else ""
+  note_txt <- sprintf("%d sequence(s) shown%s", length(seq_names), thr_txt)
   if (n_other > 0) {
     omit_pct <- if (!is.null(genome_size) && genome_size > 0)
       other_total_bp / genome_size * 100 else NA_real_
-    omit_txt <- if (is.na(omit_pct))
-      sprintf("%d contig(s), %.0f Mb below the chart threshold omitted from the bars (still in the genome average)",
-              n_other, other_total_bp / 1e6)
+    note_txt <- if (is.na(omit_pct))
+      sprintf("%s; %d smaller contig(s) (%.0f Mb) omitted from the bars (still counted in the genome average)",
+              note_txt, n_other, other_total_bp / 1e6)
     else
-      sprintf("%d contig(s), %.0f Mb (%.1f%% of assembly) below the chart threshold omitted from the bars (still in the genome average)",
-              n_other, other_total_bp / 1e6, omit_pct)
-    annotations[[length(annotations) + 1]] <- list(
-      x = 0, y = 1.14, xref = "paper", yref = "paper", text = omit_txt,
-      showarrow = FALSE, xanchor = "left",
-      font = list(size = 10, color = "#888888"))
+      sprintf("%s; %d smaller contig(s) (%.0f Mb, %.1f%% of assembly) omitted from the bars (still counted in the genome average)",
+              note_txt, n_other, other_total_bp / 1e6, omit_pct)
   }
+  annotations[[length(annotations) + 1]] <- list(
+    x = 0, y = 1.14, xref = "paper", yref = "paper", text = note_txt,
+    showarrow = FALSE, xanchor = "left",
+    font = list(size = 10, color = "#888888"))
 
   layout <- list(
     barmode     = "stack",
@@ -1030,6 +1042,7 @@ html_cards <- function(genome_info, comp) {
   ltr_pct  <- subtree_pct("Class_I/LTR")
   dna_pct  <- subtree_pct("Class_II")
   line_pct <- subtree_pct("Class_I/LINE")
+  tr_pct   <- subtree_pct("Tandem_repeats")
 
   sprintf('
 <div class="cards">
@@ -1058,10 +1071,15 @@ html_cards <- function(genome_info, comp) {
     <div class="card-value">%.1f%%</div>
     <div class="card-sub">of genome</div>
   </div>
+  <div class="card">
+    <div class="card-label">Tandem repeats</div>
+    <div class="card-value">%.1f%%</div>
+    <div class="card-sub">of genome</div>
+  </div>
 </div>',
     genome_size_mb, n_seqs,
     total_repeat_pct,
-    ltr_pct, dna_pct, line_pct
+    ltr_pct, dna_pct, line_pct, tr_pct
   )
 }
 
@@ -1490,7 +1508,10 @@ main <- function() {
   tir_files <- tir_files[file.exists(tir_files)]
 
   bar_bw_map <- list(
-    "Tandem_repeats"  = bw_files$tc_agg,
+    # Use the by-class PARTITION track (excludes rDNA), not the structural
+    # TideCluster aggregate (tc_agg, which counts rDNA arrays as tandem) — else
+    # the stacked bar double-counts rDNA (once here, once in the rDNA category).
+    "Tandem_repeats"  = find_bw("Tandem_repeats") %||% bw_files$tc_agg,
     "Ty1/copia"       = find_bw("All_Ty1_Copia"),
     "Ty3/gypsy"       = find_bw("All_Ty3_Gypsy"),
     "LINE"            = find_bw("Class_I.LINE"),
@@ -1563,7 +1584,8 @@ main <- function() {
 
   comp_bar_chart <- if (nrow(cov_mat) > 0)
     json_composition_bar(cov_mat, genome_info, seq_thresh$n_other,
-                          seq_thresh$other_bp, genome_avg_frac, genome_size)
+                          seq_thresh$other_bp, genome_avg_frac, genome_size,
+                          opt$min_len_chart)
   else NULL
 
   message("Building density panel 1 (top-level categories)...")
