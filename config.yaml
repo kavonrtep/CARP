@@ -13,6 +13,13 @@ repeatmasker_sensitivity: default
 # repeatmasker_sensitivity: rush, ~7x at -1.8%. 2 is the recommended value; 1 is
 # more aggressive (dropped ~3% masked bp in testing). Test on your data first.
 repeatmasker_culling_limit: 0
+# Same rmblastn culling for the TideCluster reannotation step (independent knob,
+# 0 = off). Tandem arrays are the strongest culling target (a dimer matches the
+# array at every phase -> many overlapping HSPs). Measured on tiny_pea: ~8x
+# faster tc_reannotate at -0.8% masked bp. CAUTION: may under-mask LARGE
+# satellite arrays (megasatellites) - validate masked bp on a big-satellite
+# genome before enabling.
+tidecluster_reannotate_culling_limit: 0
 # possible values are: True, False, if missing, True is used
 reduce_library: False
 # Rotation-invariant reduction of the TideCluster consensus dimer library used

@@ -25,6 +25,21 @@ repeatmasker_sensitivity: default
 # on your own genome before making it the default.
 repeatmasker_culling_limit: 0
 
+# rmblastn -culling_limit for the TideCluster reannotation step
+# (tidecluster_reannotate), independent of repeatmasker_culling_limit above.
+# 0 = off (default). This is the strongest culling target in the pipeline: a
+# consensus dimer aligns to a satellite array at every rotational phase, so a
+# single locus accrues many overlapping HSPs that culling collapses. Measured on
+# tiny_pea (same-machine A/B through the real tc_reannotate.py): culling 2 ->
+# ~8x faster, -0.8% masked bp, shim confirmed on 1382 searches.
+# CAUTION: tc_reannotate already risks under-masking LARGE satellite families
+# (RepeatMasker needs the full consensus diversity to tile megasatellite arrays
+# contiguously; cf. the reduce_tidecluster_library note). Culling collapses
+# overlapping HSPs, which may worsen that on genomes with big satellites - so
+# validate masked bp on such a genome before enabling. Same RMBLAST_DIR shim
+# mechanism (no RepeatMasker/container patch). Recommended test value 2.
+tidecluster_reannotate_culling_limit: 0
+
 # Library size reduction (mmseqs/cap3 dedup). True or False; default True.
 reduce_library: True
 

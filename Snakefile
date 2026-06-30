@@ -69,6 +69,18 @@ rm_sensitivity_option = {
 if "repeatmasker_culling_limit" not in config:
     config["repeatmasker_culling_limit"] = 0
 
+# Same rmblastn culling for TideCluster's internal RepeatMasker in the
+# tidecluster_reannotate rule (independent knob, default 0 = off). Tandem-array
+# reannotation is the strongest culling target: a dimer consensus matches a
+# satellite array at every rotational phase, producing many overlapping HSPs per
+# locus that culling collapses. Measured on tiny_pea: ~8x faster tc_reannotate at
+# -0.8% masked bp. CAUTION: tc_reannotate already risks under-masking LARGE
+# satellite families (RepeatMasker needs full consensus diversity to tile
+# megasatellite arrays); culling may worsen that on big-satellite genomes, so
+# validate masked bp there before enabling. Default 0 keeps behaviour unchanged.
+if "tidecluster_reannotate_culling_limit" not in config:
+    config["tidecluster_reannotate_culling_limit"] = 0
+
 # TideCluster sensitivity preset (--sensitivity {quick,default,rush}).
 # Kept in sync with the RepeatMasker sensitivity setting: TideCluster uses
 # RepeatMasker internally for its reannotation step.
@@ -963,7 +975,8 @@ rule tidecluster_reannotate:
         outdir=directory(F"{config['output_dir']}/TideCluster"),
         tc_sensitivity=tc_sensitivity,
         reduce_dimer=config["reduce_tidecluster_library"],
-        chunk_size=config["tidecluster_chunk_size"]
+        chunk_size=config["tidecluster_chunk_size"],
+        culling_limit=config["tidecluster_reannotate_culling_limit"]
     log:
         stdout=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.log",
         stderr=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.err"
@@ -1003,8 +1016,18 @@ rule tidecluster_reannotate:
         gff_absolute_path=$(realpath {output.gff3})
         cd {params.outdir}
         cp $dl_absolute_path .
+        # Optional rmblastn culling for TideCluster's internal RepeatMasker.
+        # The shim makes rmblastn append -culling_limit N (no RM patch); tandem
+        # arrays produce many phase-redundant HSPs per locus that culling
+        # collapses. 0 -> shim helper prints nothing, RMBLAST_DIR stays unset.
+        shim=$(rmblast_culling_shim.py -n {params.culling_limit} -d "$PWD" || true)
+        if [ -n "$shim" ]; then
+            export RMBLAST_DIR="$shim"
+            echo "tc_reannotate culling: -culling_limit {params.culling_limit} (RMBLAST_DIR=$shim)"
+        fi
         tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path -c {threads} --sensitivity {params.tc_sensitivity} --chunk_size {params.chunk_size}
         rm $dl_basename
+        [ -n "${{shim:-}}" ] && rm -rf "$shim" || true
         """
 
 rule merge_tidecluster_default_and_short:
