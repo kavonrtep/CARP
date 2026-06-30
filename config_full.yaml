@@ -6,6 +6,25 @@ tandem_repeat_library: data/FabTR_all_sequences_210901.db.RM_format.fasta
 # RepeatMasker sensitivity. One of: rush, default, quick. Defaults to default.
 repeatmasker_sensitivity: default
 
+# rmblastn -culling_limit for the RepeatMasker step. 0 = off (default; behaviour
+# unchanged). N>0 caps the number of redundant HSPs kept per genomic locus.
+# Rationale: a de-novo repeat library carries many near-identical consensi per
+# family, so each genomic TE copy aligns to hundreds of them -> a per-locus HSP
+# explosion (~800k HSPs / 3 Mb measured) that dominates rmblastn extension AND
+# RepeatMasker's downstream overlap-filter/ProcessRepeats. culling discards an
+# HSP whose query range is enveloped by >= N higher-scoring HSPs, collapsing that
+# redundancy at search time (the best hit per locus is never culled, so masking
+# and classification are preserved). It is, in effect, library reduction applied
+# at search time -- useful when the library itself is hard to reduce further.
+# Measured through the real repeatmasker_wrapper.py path on a Pisum-type genome:
+#   2          -> ~3.0x faster RepeatMasker, -0.7% masked bp
+#   2 + rush   -> ~7.5x faster,             -1.8% masked bp
+#   1          -> slightly faster still but -3% masked bp (too aggressive)
+# Recommended value 2. Injected via an RMBLAST_DIR shim in the wrapper, so no
+# RepeatMasker/container patch is needed (works in the existing image). Validate
+# on your own genome before making it the default.
+repeatmasker_culling_limit: 0
+
 # Library size reduction (mmseqs/cap3 dedup). True or False; default True.
 reduce_library: True
 
