@@ -694,9 +694,9 @@ json_sunburst <- function(sb) {
 # "Other" aggregate), columns = BAR_CATEGORIES, values = fraction of the row's
 # length. y_labels: one label per row. genome_avg_frac: the single reference
 # line (= GFF Level-1 union / genome = length-weighted mean of all rows).
-json_composition_bar <- function(cov_mat, y_labels, genome_avg_frac, note_text) {
+json_composition_bar <- function(cov_mat, y_labels, genome_avg_frac) {
   cats   <- colnames(cov_mat)
-  max_x  <- max(rowSums(cov_mat), genome_avg_frac, 0.05) * 1.10
+  max_x  <- max(rowSums(cov_mat), genome_avg_frac, 0.05) * 1.15
 
   traces <- lapply(cats, function(cat) list(
     type        = "bar",
@@ -714,25 +714,28 @@ json_composition_bar <- function(cov_mat, y_labels, genome_avg_frac, note_text) 
                       y0 = 0, y1 = 1, yref = "paper",
                       line = list(color = "#333333", width = 1.5, dash = "dash")))
 
+  # Genome-average label sits ABOVE the top bar (yref=paper, y>1), anchored to
+  # the line; anchor side flips near the right edge so it never clips off-plot.
+  lab_anchor <- if (genome_avg_frac > 0.5 * max_x) "right" else "left"
   annotations <- list(
-    list(x = genome_avg_frac, y = 1.03, xref = "x", yref = "paper",
+    list(x = genome_avg_frac, y = 1.04, xref = "x", yref = "paper",
          text = sprintf("genome avg %.1f%%", genome_avg_frac * 100),
-         showarrow = FALSE, xanchor = "left",
-         font = list(size = 10, color = "#333333")),
-    list(x = 0, y = 1.10, xref = "paper", yref = "paper", text = note_text,
-         showarrow = FALSE, xanchor = "left",
-         font = list(size = 10, color = "#888888"))
+         showarrow = FALSE, xanchor = lab_anchor, yanchor = "bottom",
+         font = list(size = 10, color = "#333333"))
   )
 
   layout <- list(
     barmode     = "stack",
-    height      = max(300, nrow(cov_mat) * 22 + 95),
-    margin      = list(l = 200, r = 20, t = 55, b = 60),
-    xaxis       = list(title = "Fraction of sequence", range = c(0, max_x)),
+    height      = max(320, nrow(cov_mat) * 26 + 135),
+    # Generous top (genome-avg label) and bottom (x-axis title ABOVE the legend).
+    margin      = list(l = 200, r = 35, t = 42, b = 115),
+    xaxis       = list(title = list(text = "Fraction of sequence", standoff = 8),
+                       range = c(0, max_x)),
     # Pin row order to y_labels (rev: first label at top).
     yaxis       = list(title = "", automargin = TRUE,
                        categoryorder = "array", categoryarray = rev(y_labels)),
-    legend      = list(orientation = "h", y = -0.15),
+    legend      = list(orientation = "h", y = -0.3, yanchor = "top",
+                       x = 0, xanchor = "left"),
     showlegend  = TRUE,
     shapes      = shapes,
     annotations = annotations
@@ -1356,10 +1359,9 @@ h3{color:#34495e;font-size:0.95em;margin:14px 0 8px}
 <h2>Genomic Distribution</h2>
 <h3>Repeat content per sequence</h3>
 %s
-<p class="caption">Fraction of each sequence covered by each repeat class (similarity-based).
-Dashed line = genome-wide average (%.1f%%). Sequences &lt; %.0f kb aggregated into Other.
-Per-sequence values can differ from the genome average because satellite arrays
-are concentrated on specific chromosomes.</p>
+<p class="caption">Each bar = fraction of that sequence covered by each repeat class
+(Level-1 union from the unified annotation). Dashed line = genome-wide average (%.1f%%).
+Contigs &lt; %.0f kb are aggregated into the single Other bar.</p>
 <h3 style="margin-top:24px">Density — major repeat categories</h3>
 <p class="caption">Gray: raw %s-kb bins. Red: smoothed. All sequences concatenated; vertical lines separate chromosomes.</p>
 %s
@@ -1560,7 +1562,7 @@ main <- function() {
   sunburst_chart <- json_sunburst(sb_data)
 
   comp_bar_chart <- if (nrow(cov_mat) > 0)
-    json_composition_bar(cov_mat, y_labels, genome_avg_frac, comp_bar_note)
+    json_composition_bar(cov_mat, y_labels, genome_avg_frac)
   else NULL
 
   message("Building density panel 1 (top-level categories)...")
@@ -1586,7 +1588,9 @@ main <- function() {
 
   sunburst_div      <- plotly_div("sunburst-plot", sunburst_chart)
   comp_bar_div      <- if (!is.null(comp_bar_chart))
-    plotly_div("comp-bar-plot", comp_bar_chart) else "<p>No composition bar data.</p>"
+    paste0("<p class=\"caption\" style=\"margin:0 0 8px\">", comp_bar_note, "</p>",
+           plotly_div("comp-bar-plot", comp_bar_chart))
+  else "<p>No composition bar data.</p>"
   density_top_div     <- if (!is.null(density_top_chart))
     plotly_div("density-top-plot",     density_top_chart)     else NULL
   density_lineage_div <- if (!is.null(density_lineage_chart))
