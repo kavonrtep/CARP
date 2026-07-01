@@ -81,6 +81,34 @@ if "repeatmasker_culling_limit" not in config:
 if "tidecluster_reannotate_culling_limit" not in config:
     config["tidecluster_reannotate_culling_limit"] = 0
 
+# Superfamily-aware array recovery for the RM-on-TideCluster reannotation.
+# TideCluster's tc_reannotate keeps an array only where a *single TRC* reaches
+# the monomer-length threshold; when one real tandem array is tiled by >=2 TRCs
+# of the same superfamily (common for short near-identical satellites) each
+# per-TRC piece is sub-threshold and the array is lost -> a TE-derived tandem
+# array is missed and the underlying TE prevails. (Culling masks this by
+# collapsing each locus to one TRC, making the annotation culling-dependent.)
+# When True the pipeline runs tc_reannotate in --debug mode and re-filters its
+# raw hits (scripts/tc_reannotate_sf_filter.py) grouping sibling TRCs by
+# superfamily, so real arrays are recovered deterministically (culling-
+# independent) while every feature keeps its bare TRC_<n> Name. Default True.
+if "tidecluster_reannotate_superfamily_merge" not in config:
+    config["tidecluster_reannotate_superfamily_merge"] = True
+elif config["tidecluster_reannotate_superfamily_merge"] not in [True, False]:
+    raise ValueError("Invalid value for tidecluster_reannotate_superfamily_merge. "
+                     "Must be either True or False.")
+
+# Tandem gate for the unified annotation. When True, a Tier-4 RM-on-TideCluster
+# satellite may override a Tier-5 TE call only where it has independent tandem
+# evidence (raw TideHunter); an RM_TC array with no tandem support (a short
+# AT-rich consensus tiling a non-tandem TE) is demoted below the TE, so the TE
+# is not spuriously re-labelled satellite. RM_TC over non-TE sequence and
+# genuine satellites are unaffected. Default True.
+if "rm_tc_tandem_gate" not in config:
+    config["rm_tc_tandem_gate"] = True
+elif config["rm_tc_tandem_gate"] not in [True, False]:
+    raise ValueError("Invalid value for rm_tc_tandem_gate. Must be either True or False.")
+
 # TideCluster sensitivity preset (--sensitivity {quick,default,rush}).
 # Kept in sync with the RepeatMasker sensitivity setting: TideCluster uses
 # RepeatMasker internally for its reannotation step.
@@ -976,7 +1004,8 @@ rule tidecluster_reannotate:
         tc_sensitivity=tc_sensitivity,
         reduce_dimer=config["reduce_tidecluster_library"],
         chunk_size=config["tidecluster_chunk_size"],
-        culling_limit=config["tidecluster_reannotate_culling_limit"]
+        culling_limit=config["tidecluster_reannotate_culling_limit"],
+        superfamily_merge=config["tidecluster_reannotate_superfamily_merge"]
     log:
         stdout=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.log",
         stderr=F"{config['output_dir']}/TideCluster/default/tidecluster_reannotate.err"
@@ -1014,6 +1043,7 @@ rule tidecluster_reannotate:
         dl_absolute_path=$(realpath {input.genome_fasta})
         dl_basename=$(basename {input.genome_fasta})
         gff_absolute_path=$(realpath {output.gff3})
+        sf_map=$(realpath {params.outdir}/default/TideCluster_trc_superfamilies.csv 2>/dev/null || echo "")
         cd {params.outdir}
         cp $dl_absolute_path .
         # Optional rmblastn culling for TideCluster's internal RepeatMasker.
@@ -1025,7 +1055,30 @@ rule tidecluster_reannotate:
             export RMBLAST_DIR="$shim"
             echo "tc_reannotate culling: -culling_limit {params.culling_limit} (RMBLAST_DIR=$shim)"
         fi
-        tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path -c {threads} --sensitivity {params.tc_sensitivity} --chunk_size {params.chunk_size}
+        if [ "{params.superfamily_merge}" = "True" ] && [ -n "$sf_map" ] && [ -s "$sf_map" ]; then
+            # Superfamily-aware array recovery (see config comment). Run
+            # tc_reannotate in --debug mode so its raw per-TRC hits (rm.gff3)
+            # survive, then re-filter grouping sibling TRCs by superfamily so a
+            # real array tiled by >1 same-family TRC is not lost to the per-TRC
+            # length filter. Makes the reannotation culling-independent.
+            tc_log=$(mktemp)
+            tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path -c {threads} --sensitivity {params.tc_sensitivity} --chunk_size {params.chunk_size} --debug > "$tc_log" 2>&1
+            cat "$tc_log"
+            tc_tmp=$(grep -m1 'Temp directory:' "$tc_log" | sed 's/.*Temp directory: //')
+            if [ -n "$tc_tmp" ] && [ -s "$tc_tmp/rm.gff3" ]; then
+                tc_reannotate_sf_filter.py \
+                    --rm-gff3 "$tc_tmp/rm.gff3" \
+                    --superfamily-map "$sf_map" \
+                    --dimer-lib $gf_absolute_path \
+                    --output $gff_absolute_path
+                rm -rf "$tc_tmp"
+            else
+                echo "WARNING: tc_reannotate rm.gff3 not found; keeping per-TRC filtered output"
+            fi
+            rm -f "$tc_log"
+        else
+            tc_reannotate.py -s $dl_basename -f $gf_absolute_path -o $gff_absolute_path -c {threads} --sensitivity {params.tc_sensitivity} --chunk_size {params.chunk_size}
+        fi
         rm $dl_basename
         [ -n "${{shim:-}}" ] && rm -rf "$shim" || true
         """
@@ -1497,6 +1550,8 @@ rule make_unified_annotation:
         rm=F"{config['output_dir']}/RepeatMasker/RM_on_combined_library_plus_DANTE.gff3",
         th_default=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter_short.gff3",
         th_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_tidehunter_short.gff3",
+        th_raw_default=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter.gff3",
+        th_raw_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_tidehunter.gff3",
         fai=F"{config['output_dir']}/genome_cleaned.fasta.fai",
         validation_marker=F"{config['output_dir']}/.classifications_validated"
     output:
@@ -1509,7 +1564,8 @@ rule make_unified_annotation:
         # tc_short), but are absent when tidecluster_detect_rdna is false — the
         # R script guards with file.exists and falls back to the rDNA_type attr.
         tc_rdna_default=F"{config['output_dir']}/TideCluster/default/TideCluster_rdna.tsv",
-        tc_rdna_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_rdna.tsv"
+        tc_rdna_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_rdna.tsv",
+        rm_tc_tandem_gate=config["rm_tc_tandem_gate"]
     log:
         stdout=F"{config['output_dir']}/Repeat_Annotation_Unified.log",
         stderr=F"{config['output_dir']}/Repeat_Annotation_Unified.err"
@@ -1538,6 +1594,9 @@ rule make_unified_annotation:
             --rm       {input.rm} \
             --th_default {input.th_default} \
             --th_short   {input.th_short} \
+            --th_raw_default {input.th_raw_default} \
+            --th_raw_short   {input.th_raw_short} \
+            --rm_tc_tandem_gate {params.rm_tc_tandem_gate} \
             --fai      {input.fai} \
             --output   {output.gff} \
             --threads  {threads}

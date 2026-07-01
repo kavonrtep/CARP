@@ -64,6 +64,12 @@ option_list <- list(
   make_option("--rm",               type="character", help="RepeatMasker+DANTE merged GFF3"),
   make_option("--th_default",       type="character", help="TideHunter default residuals GFF3"),
   make_option("--th_short",         type="character", help="TideHunter short residuals GFF3"),
+  make_option("--th_raw_default",   type="character", default="",
+              help="Raw TideHunter default GFF3 (independent tandem evidence for the RM-on-TideCluster tandem gate; optional)"),
+  make_option("--th_raw_short",     type="character", default="",
+              help="Raw TideHunter short GFF3 (independent tandem evidence; optional)"),
+  make_option("--rm_tc_tandem_gate", type="character", default="TRUE",
+              help="When TRUE, a Tier-4 RM-on-TideCluster satellite may override a Tier-5 TE call only where it has independent tandem evidence (raw TideHunter); unsupported RM_TC is demoted below the TE. [TRUE]"),
   make_option("--fai",              type="character", help="Genome FAI file"),
   make_option("--output",           type="character", help="Output unified GFF3"),
   make_option("--threads",          type="integer",   default=4L,
@@ -133,7 +139,14 @@ subset_seqs <- function(gr, seqs) {
       md[[col]] <- if (col == "source_tier") as.integer(val) else as.character(val)
     }
   }
-  mcols(gr) <- if (length(md) > 0) do.call(S4Vectors::DataFrame, md) else S4Vectors::DataFrame()
+  # Rebuild with the standardised columns; a track with none (e.g. the th_raw
+  # tandem-evidence intervals) gets its mcols cleared — assigning an empty
+  # DataFrame() to a non-zero-length object errors, so use NULL.
+  if (length(md) > 0) {
+    mcols(gr) <- do.call(S4Vectors::DataFrame, md)
+  } else {
+    mcols(gr) <- NULL
+  }
   # Standardize seqlevels to the batch set
   suppressWarnings(seqlevels(gr, pruning.mode = "coarse") <- seqs)
   gr
@@ -798,14 +811,29 @@ process_batch <- function(seqs, data, min_len) {
                   batch_label, length(t3s_trimmed), length(level1)))
 
   # ── Step 5: Tier 4 — RM on TideCluster library, trim against Tiers 1–3 ──
+  # Tandem gate: a Tier-4 satellite may override a Tier-5 TE only where it has
+  # independent tandem evidence (raw TideHunter, `th_raw`). Supported arrays keep
+  # Tier-4 priority here; UNsupported arrays are held and placed only AFTER
+  # Tier-5 TE (Step 6b), so a TE wins any contested span while a genuine
+  # satellite that TideHunter merely missed still survives in open sequence. When
+  # the gate is off / no evidence, th_raw is empty → all t4 stays supported (no-op).
+  th_raw_b <- sub$th_raw
+  if (length(t4) > 0 && length(th_raw_b) > 0) {
+    has_td      <- overlapsAny(t4, th_raw_b, ignore.strand = TRUE)
+    t4_tandem   <- t4[has_td]
+    t4_notandem <- t4[!has_td]
+  } else {
+    t4_tandem   <- t4
+    t4_notandem <- t4[integer(0)]
+  }
   higher_1_3  <- timed(sprintf("  %s  step5: reduce(level1) [%d]", batch_label, length(level1)),
                         if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges())
-  t4_trimmed  <- timed(sprintf("  %s  step5: trim Tier4 (%d) vs Tiers1-3 (%d regions)",
-                                batch_label, length(t4), length(higher_1_3)),
-                        resolve_within_tier(trim_to_nonoverlap(t4, higher_1_3, min_len)))
+  t4_trimmed  <- timed(sprintf("  %s  step5: trim Tier4 tandem (%d/%d) vs Tiers1-3 (%d regions)",
+                                batch_label, length(t4_tandem), length(t4), length(higher_1_3)),
+                        resolve_within_tier(trim_to_nonoverlap(t4_tandem, higher_1_3, min_len)))
   if (length(t4_trimmed) > 0) level1 <- suppressWarnings(c(level1, t4_trimmed))
-  log_msg(sprintf("  %s  step5 done: +%d → level1=%d",
-                  batch_label, length(t4_trimmed), length(level1)))
+  log_msg(sprintf("  %s  step5 done: +%d (tandem-supported; %d held for step6b) → level1=%d",
+                  batch_label, length(t4_trimmed), length(t4_notandem), length(level1)))
 
   # ── Step 6: Tier 5 TE hits — trim against Tiers 1–4 ─────────────────────
   higher_1_4 <- timed(sprintf("  %s  step6: reduce(level1) [%d]", batch_label, length(level1)),
@@ -816,6 +844,21 @@ process_batch <- function(seqs, data, min_len) {
   if (length(t5_trimmed) > 0) level1 <- suppressWarnings(c(level1, t5_trimmed))
   log_msg(sprintf("  %s  step6 done: +%d → level1=%d",
                   batch_label, length(t5_trimmed), length(level1)))
+
+  # ── Step 6b: RM-on-TideCluster satellites WITHOUT tandem evidence ────────
+  # Demoted below Tier-5 TE by the tandem gate: trim against everything placed so
+  # far (Tiers 1–4-tandem AND Tier-5 TE), so a TE wins any contested span. What
+  # remains is satellite in sequence no TE claims (genuine array TideHunter
+  # missed). Empty when the gate is off. These keep their Tier-4 satellite tag.
+  if (length(t4_notandem) > 0) {
+    higher_6b   <- if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges()
+    t4nt_trimmed <- timed(sprintf("  %s  step6b: trim ungated Tier4 (%d) vs Tiers1-5 (%d regions)",
+                                  batch_label, length(t4_notandem), length(higher_6b)),
+                          resolve_within_tier(trim_to_nonoverlap(t4_notandem, higher_6b, min_len)))
+    if (length(t4nt_trimmed) > 0) level1 <- suppressWarnings(c(level1, t4nt_trimmed))
+    log_msg(sprintf("  %s  step6b done: +%d (ungated RM_TC kept where no TE) → level1=%d",
+                    batch_label, length(t4nt_trimmed), length(level1)))
+  }
 
   # ── Step 7: Tier 5 Simple/Low complexity ─────────────────────────────────
   # Overlapping an existing Level 1 feature → Level 2 nested
@@ -1149,6 +1192,31 @@ log_msg("Tier 5 total: ", length(rm_data$te), " TE + ",
 t6 <- timed("load TideHunter (Tier 6)",
             load_tier6_tidehunter(opt$th_default, opt$th_short))
 log_msg("Tier 6 total: ", length(t6), " features")
+
+# Independent tandem evidence for the RM-on-TideCluster (Tier 4) tandem gate.
+# The RM-on-TC dimer library can tile a *non*-tandem, AT-rich TE (e.g. a Tekay
+# LTR-RT) as a long apparent "array"; when such a satellite overrides the TE it
+# is spurious over-masking. Raw TideHunter (a de-novo tandem detector, run
+# independently of the dimer library) marks where real tandem structure exists.
+# We use it to gate whether a Tier-4 satellite may override a Tier-5 TE. Reduced
+# to plain intervals; empty when the gate is off or the files are absent.
+rm_tc_tandem_gate <- toupper(opt$rm_tc_tandem_gate) %in% c("TRUE","T","YES","1")
+th_raw <- GRanges()
+if (rm_tc_tandem_gate) {
+  raw_paths <- Filter(function(p) !is.null(p) && nzchar(p) && file.exists(p),
+                      c(opt$th_raw_default, opt$th_raw_short))
+  if (length(raw_paths) > 0) {
+    th_raw <- timed("load raw TideHunter (tandem evidence)",
+                    suppressWarnings(reduce(granges(do.call(c, lapply(raw_paths,
+                      function(p) { g <- safe_import(p); mcols(g) <- NULL; g }))),
+                      ignore.strand = TRUE)))
+    log_msg("RM_TC tandem gate: ON, ", length(th_raw), " raw-TideHunter evidence regions")
+  } else {
+    log_msg("RM_TC tandem gate: requested but no raw-TideHunter files given — gate inert")
+  }
+} else {
+  log_msg("RM_TC tandem gate: OFF")
+}
 toc(t_load)
 
 # Read genome FAI
@@ -1168,7 +1236,8 @@ data <- list(
   t4         = t4,
   t5_te      = rm_data$te,
   t5_sc      = rm_data$simple,
-  t6         = t6
+  t6         = t6,
+  th_raw     = th_raw               # tandem evidence for the Tier-4 gate (may be empty)
 )
 
 # Decide batching. Even when the genome is below the "chunked processing"

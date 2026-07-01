@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+- **New `tidecluster_reannotate_superfamily_merge` option (default `True`).**
+  Superfamily-aware array recovery for the RM-on-TideCluster reannotation.
+  `tc_reannotate`'s array-length filter is strictly per-TRC, so a real tandem
+  array tiled by ≥2 TRCs of the **same superfamily** is fragmented below
+  threshold and lost — the underlying TE then prevails, and enabling
+  `tidecluster_reannotate_culling_limit` only masks this by collapsing each locus
+  to one TRC (making the annotation culling-dependent). The pipeline now runs
+  `tc_reannotate --debug` and re-filters its raw hits
+  (`scripts/tc_reannotate_sf_filter.py`) grouping sibling TRCs by superfamily, so
+  those arrays are recovered **deterministically, independent of culling**, while
+  every feature keeps its bare `TRC_<n>` `Name`.
+- **New `rm_tc_tandem_gate` option (default `True`).** A Tier-4 RM-on-TideCluster
+  satellite may override a Tier-5 TE call only where it has independent tandem
+  evidence (raw TideHunter); an unsupported RM_TC array — a short AT-rich
+  consensus tiling a genuinely non-tandem TE (e.g. a Tekay LTR-RT) — is demoted
+  below the TE, preventing spurious TE→satellite over-masking. Genuine satellites
+  and RM_TC over non-TE sequence are unaffected. Measured on a Merodon genome:
+  recovers ~7 Mb of TE that culling had re-labelled satellite, while keeping the
+  ~22 Mb of real TE-derived tandem arrays.
+
 ## 1.0.0
 - **New `repeatmasker_culling_limit` option (default `0` = off).** Passes rmblastn
   `-culling_limit N` to the RepeatMasker step to cap the redundant per-locus HSP
