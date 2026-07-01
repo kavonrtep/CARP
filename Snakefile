@@ -1043,7 +1043,15 @@ rule tidecluster_reannotate:
         dl_absolute_path=$(realpath {input.genome_fasta})
         dl_basename=$(basename {input.genome_fasta})
         gff_absolute_path=$(realpath {output.gff3})
-        sf_map=$(realpath {params.outdir}/default/TideCluster_trc_superfamilies.csv 2>/dev/null || echo "")
+        # Locate TideCluster's TRC->superfamily map. Its basename varies across
+        # TideCluster builds (TideCluster_trc_superfamilies.csv vs
+        # TideCluster_superfamilies.csv) and it is empty when clustering found no
+        # multi-TRC superfamilies — take the first non-empty candidate.
+        sf_map=""
+        for cand in TideCluster_trc_superfamilies.csv TideCluster_superfamilies.csv; do
+            c="{params.outdir}/default/$cand"
+            if [ -s "$c" ]; then sf_map=$(realpath "$c"); break; fi
+        done
         cd {params.outdir}
         cp $dl_absolute_path .
         # Optional rmblastn culling for TideCluster's internal RepeatMasker.
@@ -1055,7 +1063,13 @@ rule tidecluster_reannotate:
             export RMBLAST_DIR="$shim"
             echo "tc_reannotate culling: -culling_limit {params.culling_limit} (RMBLAST_DIR=$shim)"
         fi
-        if [ "{params.superfamily_merge}" = "True" ] && [ -n "$sf_map" ] && [ -s "$sf_map" ]; then
+        if [ "{params.superfamily_merge}" = "True" ] && [ -z "$sf_map" ]; then
+            echo "NOTE: tidecluster_reannotate_superfamily_merge is on but no populated" \
+                 "TRC superfamily map was found (TideCluster found no multi-TRC" \
+                 "superfamilies, or the file is named/located unexpectedly) — using the" \
+                 "per-TRC filter (nothing to merge)."
+        fi
+        if [ "{params.superfamily_merge}" = "True" ] && [ -n "$sf_map" ]; then
             # Superfamily-aware array recovery (see config comment). Run
             # tc_reannotate in --debug mode so its raw per-TRC hits (rm.gff3)
             # survive, then re-filter grouping sibling TRCs by superfamily so a
