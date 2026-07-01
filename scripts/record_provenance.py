@@ -108,6 +108,8 @@ def _filter_config(config: dict) -> dict:
         "tandem_repeat_library", "repeatmasker_sensitivity",
         "repeatmasker_culling_limit",
         "tidecluster_reannotate_culling_limit",
+        "tidecluster_reannotate_superfamily_merge",
+        "rm_tc_tandem_gate",
         "reduce_library",
         "dante_tir_min_multiplicity",
         "dante_tir_fallback_min_alignments",

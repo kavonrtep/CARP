@@ -40,6 +40,27 @@ repeatmasker_culling_limit: 0
 # mechanism (no RepeatMasker/container patch). Recommended test value 2.
 tidecluster_reannotate_culling_limit: 0
 
+# Superfamily-aware array recovery for the RM-on-TideCluster reannotation
+# (default True). tc_reannotate keeps an array only where a SINGLE TRC reaches
+# the monomer-length threshold; when one real tandem array is tiled by >=2 TRCs
+# of the same superfamily (common for short near-identical satellites) each
+# per-TRC piece is sub-threshold and the array is lost -> a TE-derived tandem
+# array is missed and the underlying TE prevails (culling only masks this by
+# collapsing each locus to one TRC, making the result culling-dependent). When
+# True the pipeline runs tc_reannotate --debug and re-filters its raw hits
+# (scripts/tc_reannotate_sf_filter.py) grouping sibling TRCs by superfamily, so
+# real arrays are recovered deterministically (independent of culling) while
+# every feature keeps its bare TRC_<n> Name.
+tidecluster_reannotate_superfamily_merge: True
+
+# Tandem gate for the unified annotation (default True). A Tier-4 RM-on-
+# TideCluster satellite may override a Tier-5 TE call only where it has
+# independent tandem evidence (raw TideHunter); an unsupported RM_TC array (a
+# short AT-rich consensus tiling a non-tandem TE such as a Tekay LTR-RT) is
+# demoted below the TE, preventing spurious TE->satellite over-masking. RM_TC
+# over non-TE sequence and genuine satellites are unaffected.
+rm_tc_tandem_gate: True
+
 # Library size reduction (mmseqs/cap3 dedup). True or False; default True.
 reduce_library: True
 
