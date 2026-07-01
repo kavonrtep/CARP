@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+## 1.0.0
+- **New `repeatmasker_culling_limit` option (default `0` = off).** Passes rmblastn
+  `-culling_limit N` to the RepeatMasker step to cap the redundant per-locus HSP
+  explosion a de-novo library causes (each genomic TE copy aligns to hundreds of
+  near-identical consensi). `2` → ~3× faster RepeatMasker at ~−0.7 % masked bp,
+  classification preserved. Injected via an `RMBLAST_DIR` shim
+  (`scripts/rmblast_culling_shim.py`) — no RepeatMasker/container patch, works in
+  the existing image.
+- **New `tidecluster_reannotate_culling_limit` option (default `0` = off).** The
+  same culling for TideCluster's internal RepeatMasker in `tidecluster_reannotate`
+  — the strongest culling target (a consensus dimer matches a satellite array at
+  every rotational phase). `2` → ~3.7× faster reannotation at ~−0.8 % masked bp.
+  Independent of `repeatmasker_culling_limit`; validate masked bp on
+  large-satellite genomes before enabling (may under-mask megasatellite arrays).
+- **`dante_tir_fallback` performance fix.** Reverted a subtype-parallelisation
+  that regressed the rule ~3.6× on genomes with size-imbalanced TIR subtypes (the
+  dominant subtype was starved to `threads/N` while small subtypes left cores
+  idle). Subtypes now run serially with the full thread budget; output unchanged.
+- **Tool bumps:** TideCluster 1.16.0 → 1.16.1, dante_tir 0.2.5 → 0.2.6.
 - **rDNA classification restructured (breaking; output schema v3).** The flat
   top-level classes `rDNA_45S` / `rDNA_5S` are now nested under a single `rDNA`
   parent — `rDNA/45S_rDNA`, `rDNA/45S_rDNA/{18S,25S,5.8S,IGS,ITS1,ITS2}`,

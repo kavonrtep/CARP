@@ -122,6 +122,8 @@ and TideCluster tuning, in **[docs/configuration.md](docs/configuration.md)**):
 | `custom_library` | none | Extra repeat library merged into the RepeatMasker library |
 | `tandem_repeat_library` | none | Reference used by TideCluster to name tandem families |
 | `repeatmasker_sensitivity` | `default` | RepeatMasker mode: `rush`, `default`, or `quick` |
+| `repeatmasker_culling_limit` | `0` (off) | rmblastn `-culling_limit` for RepeatMasker — caps redundant per-locus HSPs; `2` ≈ 3× faster at ~−0.7 % masked bp |
+| `tidecluster_reannotate_culling_limit` | `0` (off) | Same culling for TideCluster reannotation; `2` ≈ 3.7× faster (validate masked bp on large-satellite genomes first) |
 | `reduce_library` | `True` | Deduplicate the RepeatMasker library (smaller, faster) |
 
 The pipeline also screens the LTR library against `Class_II/Subclass_1` elements
