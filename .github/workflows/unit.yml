@@ -38,6 +38,9 @@ jobs:
       - name: Unified GFF3 output contract (format-drift guard)
         run: python tests/test_unified_gff3_spec.py
 
+      - name: Config parameters + CHANGELOG documented (docs-in-sync gate)
+        run: python tests/test_config_docs.py
+
       - name: Containment library-reduction logic
         run: python tests/test_containment_reduce.py
 

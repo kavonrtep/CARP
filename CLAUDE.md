@@ -102,6 +102,17 @@ cheap CI gates, commits and tags (no push):
 ```bash
 .claude/skills/release/cut-release.sh <VERSION>   # e.g. 1.0.0rc1
 ```
+**Docs ship with the code (enforced).** Before cutting, bring the docs current
+or the release fails: the gate `tests/test_config_docs.py` (run by `cut-release.sh`
+in `--release <VERSION>` mode and by CI `unit.yml`) blocks the release when a
+config parameter the Snakefile reads is missing from `docs/configuration.md`, or
+when `CHANGELOG.md` has no `## <VERSION>` section. Delegate the doc work to the
+two repo agents — **`config-docs`** (syncs `docs/configuration.md` + README table
++ `config*.yaml`) and **`changelog`** (adds `## Unreleased` bullets as changes
+land; renames `## Unreleased` → `## <VERSION>` at release) — and commit those
+changes *before* running the helper (it refuses a dirty tree). When you add or
+change a config parameter, add it to `docs/configuration.md` in the same change.
+
 Then push from the **host** (the sandbox has no ssh): `git push origin main && git push origin <VERSION>`.
 The tag push drives `.github/workflows/release.yml` (SIF build → in-container
 fixture → GHCR → GitHub Release → Zenodo). See `.claude/skills/release/SKILL.md`.
