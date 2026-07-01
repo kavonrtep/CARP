@@ -15,6 +15,22 @@ Tags are **unprefixed** PEP-440-lite — `MAJOR.MINOR.PATCH[aN|bN|rcN]`
 (`1.0.0rc1`, `1.0.0`, `1.1.0a1`). **No leading `v`** (both `version.yml` and
 `release.yml` trigger on `tags: ['[0-9]*']`).
 
+## Step 0 — docs must ship WITH the code (enforced)
+Before cutting, the docs must be current, or the release **fails**. The gate
+`tests/test_config_docs.py --release <VERSION>` (run by `cut-release.sh`) blocks
+the release when a config parameter the Snakefile reads is missing from
+`docs/configuration.md`, or when `CHANGELOG.md` has no `## <VERSION>` section.
+Bring both up to date first — delegate to the two repo agents:
+
+- **`config-docs`** — syncs `docs/configuration.md` (+ README table, `config*.yaml`)
+  with any added/changed config parameters. `Agent(subagent_type="config-docs", …)`.
+- **`changelog`** — adds `## Unreleased` bullets as changes land, and at release
+  time **renames `## Unreleased` → `## <VERSION>`**. `Agent(subagent_type="changelog", …)`.
+
+Commit those doc changes **before** running `cut-release.sh` (it refuses a dirty
+tree). This is exactly the slip that shipped 1.0.0's culling knobs undocumented —
+the gate now makes that impossible.
+
 ## One command — does everything reversible
 ```bash
 .claude/skills/release/cut-release.sh <VERSION>      # e.g. 1.0.0rc1
@@ -22,9 +38,9 @@ Tags are **unprefixed** PEP-440-lite — `MAJOR.MINOR.PATCH[aN|bN|rcN]`
 The helper: validates the version shape, refuses a dirty working tree or an
 already-existing tag, checks the new version is **> current** (monotonic),
 bumps **both** `__version__` and `__version_info__` in lock-step, runs the cheap
-CI gates (version parse + the Python unit tests; R mirror test best-effort),
-commits `Release <VERSION>`, and creates the **annotated** tag. It does **not**
-push.
+CI gates (version parse + the Python unit tests including the docs-in-sync gate
+`test_config_docs.py --release <VERSION>`; R mirror test best-effort), commits
+`Release <VERSION>`, and creates the **annotated** tag. It does **not** push.
 
 ## Push — from the HOST, not the sandbox
 The remote is SSH (`git@github.com:kavonrtep/...`) and the container has **no

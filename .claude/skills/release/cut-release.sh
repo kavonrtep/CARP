@@ -75,6 +75,10 @@ echo "== gate: tests/test_manifest.py =="
 python3 tests/test_manifest.py
 echo "== gate: tests/test_unified_gff3_spec.py =="
 python3 tests/test_unified_gff3_spec.py
+echo "== gate: tests/test_config_docs.py --release $VER =="
+# Blocks the release if a config param is undocumented in docs/configuration.md
+# or the CHANGELOG has no '## <VERSION>' section (docs must ship WITH the code).
+python3 tests/test_config_docs.py --release "$VER"
 echo "== gate: tests/test_classification.R (best-effort) =="
 if command -v Rscript >/dev/null 2>&1; then
   if Rscript tests/test_classification.R; then :; else
