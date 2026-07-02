@@ -23,13 +23,19 @@
 # instead of an unheadered 0-byte <prefix>_superfamilies.csv. That is the file
 # scripts/tc_reannotate_sf_filter.py consumes for superfamily-aware array
 # recovery (config tidecluster_reannotate_superfamily_merge).
+#
+# 1.16.3 fixes the tc_reannotate chunk-pool RepeatMasker library-build race that
+# could silently truncate the reannotation on a fresh env's first run: the RM
+# libraries are now built once before the pool fans out, and a failed chunk
+# makes tc_reannotate exit non-zero instead of merging a partial set. See
+# docs/tidecluster_reannotate_chunk_race_request.md.
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.16.2
+  - tidecluster=1.16.3
   - bioconductor-rtracklayer
   - r-optparse
   - mmseqs2
