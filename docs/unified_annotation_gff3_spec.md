@@ -120,6 +120,15 @@ routes rDNA by `classification`, so `Name` can stay `TRC_<n>` on disk.
     `TE_origin_structure`); a purely degraded array with no complete elements is
     *not* flagged TE-derived here and stays a plain `Satellite` (RepeatMasker
     similarity is deliberately not used as the trigger — structural only).
+- **Tier-4 tandem gate (`rm_tc_tandem_gate`, default on).** A `TideCluster_RM`
+  (tier-4) satellite normally outranks a `RepeatMasker` (tier-5) TE call, but it
+  does so **only where it has independent tandem evidence** (raw TideHunter). An
+  RM_TC array over a tier-5 TE with *no* tandem support — a short satellite
+  consensus tiling a genuinely non-tandem TE — is instead **demoted below** the
+  TE (resolved after tier-5 TE placement), so the TE keeps that span rather than
+  being re-labelled `Satellite`. RM_TC over non-TE sequence, and genuine
+  satellites, are unaffected. This is the one place the nominal tier-4 > tier-5
+  priority is conditionally reversed.
 - **Tandem LTR-RT (`LTR_RT_TR`).** Head-to-tail, same-lineage LTR-RT arrays that
   share boundary LTRs (`scripts/resolve_ltr_tandems.py`, upstream of the unified
   annotation) are one **Level-1 container** (`structure=LTR_RT_TR`,
