@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.1
 - **TideCluster 1.16.1 → 1.16.3.** 1.16.2 fixed the TRC-superfamily
   empty-fallback naming (canonical `<prefix>_trc_superfamilies.csv` with header,
   even when empty), giving the map consumed by
