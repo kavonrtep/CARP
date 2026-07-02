@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- **TideCluster 1.16.1 → 1.16.2.** Fixes the TRC-superfamily empty-fallback
+  naming: the no-superfamily case now writes the canonical
+  `<prefix>_trc_superfamilies.csv` (with header) instead of an unheadered 0-byte
+  `<prefix>_superfamilies.csv`, so the superfamily map consumed by
+  `tidecluster_reannotate_superfamily_merge` has a stable name/schema across
+  genomes.
 - **New `tidecluster_reannotate_superfamily_merge` option (default `True`).**
   Superfamily-aware array recovery for the RM-on-TideCluster reannotation.
   `tc_reannotate`'s array-length filter is strictly per-TRC, so a real tandem

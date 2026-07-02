@@ -1,5 +1,14 @@
 # TideCluster TRC-superfamily output: naming inconsistency + request
 
+> **RESOLVED in TideCluster 1.16.2 (2026-07-01).** All three requests below were
+> implemented: `make_empty_outputs` now writes the canonical
+> `<prefix>_trc_superfamilies.csv` with the `Superfamily,TRC,fallback` header
+> even when empty (0 data rows), and a `write_superfamily_manifest()` was added.
+> CARP pins `tidecluster=1.16.2` (`envs/tidecluster_run.yaml`); the both-name
+> lookup in the `tidecluster_reannotate` rule is retained for backward
+> compatibility with 1.16.1. This document is kept as the record of the finding.
+
+
 CARP's superfamily-aware RM-on-TideCluster filter
 (`scripts/tc_reannotate_sf_filter.py`, config
 `tidecluster_reannotate_superfamily_merge`) consumes TideCluster's per-TRC

@@ -17,13 +17,19 @@
 # so the env is self-documenting and robust to future dependency changes:
 #   - calculate_density_batch.R -> bioconductor-rtracklayer, r-optparse
 #   - reduce_dimer_library.py    -> mmseqs2
+#
+# 1.16.2 fixes the TRC-superfamily empty-fallback naming: the no-superfamily
+# case now writes the canonical <prefix>_trc_superfamilies.csv (with header)
+# instead of an unheadered 0-byte <prefix>_superfamilies.csv. That is the file
+# scripts/tc_reannotate_sf_filter.py consumes for superfamily-aware array
+# recovery (config tidecluster_reannotate_superfamily_merge).
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.16.1
+  - tidecluster=1.16.2
   - bioconductor-rtracklayer
   - r-optparse
   - mmseqs2
