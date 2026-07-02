@@ -123,7 +123,9 @@ and TideCluster tuning, in **[docs/configuration.md](docs/configuration.md)**):
 | `tandem_repeat_library` | none | Reference used by TideCluster to name tandem families |
 | `repeatmasker_sensitivity` | `default` | RepeatMasker mode: `rush`, `default`, or `quick` |
 | `repeatmasker_culling_limit` | `0` (off) | rmblastn `-culling_limit` for RepeatMasker — caps redundant per-locus HSPs; `2` ≈ 3× faster at ~−0.7 % masked bp |
-| `tidecluster_reannotate_culling_limit` | `0` (off) | Same culling for TideCluster reannotation; `2` ≈ 3.7× faster (validate masked bp on large-satellite genomes first) |
+| `tidecluster_reannotate_culling_limit` | `0` (off) | Same culling for TideCluster reannotation; `2` ≈ 3.7× faster. With superfamily-merge on (below) the result is culling-independent, so this becomes a pure speed knob |
+| `tidecluster_reannotate_superfamily_merge` | `True` | Group sibling TRCs by superfamily when applying the RM-on-TideCluster array-length filter, so a real tandem array tiled by several near-identical satellite TRCs is recovered instead of fragmented and lost (and the result no longer depends on culling) |
+| `rm_tc_tandem_gate` | `True` | A TideCluster-RM satellite may override a TE call only where independent tandem evidence (TideHunter) supports it; an unsupported satellite tiling a non-tandem TE is demoted below the TE, preventing spurious TE→satellite over-masking |
 | `reduce_library` | `True` | Deduplicate the RepeatMasker library (smaller, faster) |
 
 The pipeline also screens the LTR library against `Class_II/Subclass_1` elements

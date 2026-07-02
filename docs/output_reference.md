@@ -88,7 +88,11 @@ HTML reports:
   - `TideCluster_consensus_dimer_library.fasta` — consensus sequences
   - `TideCluster_clustering_split_files/` — one GFF3 per cluster (`TRC_<n>`),
     feeding the structural per-family BigWigs
-  - `RM_on_TideCluster_Library.gff3` — RepeatMasker annotation using the tandem library
+  - `RM_on_TideCluster_Library.gff3` — RepeatMasker annotation using the tandem
+    (dimer) library. With `tidecluster_reannotate_superfamily_merge` on (default),
+    arrays are qualified at the superfamily level so ones tiled by several sibling
+    TRCs are recovered rather than fragmented; each feature still keeps its bare
+    `TRC_<n>` `Name`
 - `short_monomer/` — short-monomer run (10–39 bp); same structure as `default/`
 - `TideCluster_clustering_default_and_short_merged.gff3` — merged results
 
