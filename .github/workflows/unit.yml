@@ -44,6 +44,9 @@ jobs:
       - name: Containment library-reduction logic
         run: python tests/test_containment_reduce.py
 
+      - name: All-vs-all alignment grouping (OOM-guard) logic
+        run: python tests/test_aln_grouping.py
+
       - name: R classification vector
         run: Rscript tests/test_classification.R
 

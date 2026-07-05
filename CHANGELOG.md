@@ -1,6 +1,20 @@
 # Changelog
 
 ## 1.0.1
+- **Bounded, deterministic grouping for the DANTE_TIR_FALLBACK / DANTE_LINE flank
+  alignment (OOM fix on large genomes).** The all-vs-all flank aligner
+  (`scripts/global_local_aln.py`) is O(N²) in memory and compute; on a big
+  genome a single high-copy TIR subtype (e.g. CACTA/Mutator) has thousands of
+  near-identical TPase anchors, so even after the mmseqs prefilter the candidate
+  pairs stay ~O(N²) and the run OOMs. It now mirrors DANTE_TIR's `--max_class_size`
+  strategy: when a subtype (fallback) or the LINE pattern set exceeds
+  `dante_tir_fallback_max_group_size` / `dante_line_max_group_size` (default
+  `1000`), the sequences are split into deterministic, mmseqs-clustering-based
+  groups of at most that size and aligned per group, dropping cost to O(N·group).
+  Clustering keeps similar flanks together, so the split is near-lossless
+  (verified byte-identical `Selected_Length` vs the ungrouped path on distinct
+  families); at or below the threshold the code path is unchanged. New unit test
+  `tests/test_aln_grouping.py`.
 - **TideCluster 1.16.1 → 1.16.3.** 1.16.2 fixed the TRC-superfamily
   empty-fallback naming (canonical `<prefix>_trc_superfamilies.csv` with header,
   even when empty), giving the map consumed by

@@ -1142,7 +1142,7 @@ def run_mmseqs_clustering(input_fasta: str, output_dir: Path, threads: int = 1) 
         return False
 
 
-def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments: int = 3, verbose: bool = False) -> None:
+def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments: int = 3, verbose: bool = False, max_group_size: Optional[int] = None) -> None:
     """Run all-vs-all alignment analysis on prime sequences.
 
     For 5' sequences: use --end 3 (3' end fixed, analyze 5' similarity)
@@ -1199,7 +1199,8 @@ def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments:
                 mismatch=-2,
                 score_threshold=20,
                 threads=threads,
-                verbose=verbose
+                verbose=verbose,
+                max_group_size=max_group_size
             )
             print(f"    → {output_name}")
         except Exception as e:
@@ -1266,10 +1267,18 @@ Examples:
                        help='Minimum number of alignments for length threshold calculation (default: 3)')
     parser.add_argument('--mask-gff3',
                        help='Optional: GFF3 file with features that can limit flanking regions')
+    parser.add_argument('--max-group-size', type=int, default=None,
+                       help='When more than this many LINE patterns are found, split them '
+                            'into deterministic clustering-based groups of at most this size '
+                            'and run the all-vs-all flank alignment per group (bounds O(N^2) '
+                            'memory). Below the threshold the run is byte-identical to no '
+                            'grouping. Default: unset.')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Print verbose progress messages for alignment analysis (default: False)')
 
     args = parser.parse_args()
+    if args.max_group_size is not None and args.max_group_size < 2:
+        parser.error("--max-group-size must be >= 2")
 
     # Validate input files
     for file_path, name in [(args.genome, "Genome"), (args.annotations, "Annotations")]:
@@ -1367,7 +1376,7 @@ Examples:
                 print(f"  {name}: {path.name}")
 
         # Run alignment analysis on prime sequences
-        run_prime_alignments(output_dir, threads=args.threads, min_num_alignments=args.min_num_alignments, verbose=args.verbose)
+        run_prime_alignments(output_dir, threads=args.threads, min_num_alignments=args.min_num_alignments, verbose=args.verbose, max_group_size=args.max_group_size)
 
         # Load alignment lengths and create LINE elements
         print("\nCreating LINE_element features from alignment data...")

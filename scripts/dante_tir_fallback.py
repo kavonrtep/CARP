@@ -388,6 +388,7 @@ def run_prime_alignments(
     threads: int = 1,
     min_num_alignments: int = 3,
     verbose: bool = False,
+    max_group_size: Optional[int] = None,
 ) -> None:
     """Run all-vs-all alignment analysis for TIR flanks."""
     alignment_files = [
@@ -417,6 +418,7 @@ def run_prime_alignments(
                 score_threshold=20,
                 threads=threads,
                 verbose=verbose,
+                max_group_size=max_group_size,
             )
             print(f"    -> {output_name}")
         except Exception as e:
@@ -805,6 +807,7 @@ def process_subtype(
     mask_features: List[GFF3Feature] = None,
     seq_lengths: Dict[str, int] = None,
     verbose: bool = False,
+    max_group_size: Optional[int] = None,
 ) -> Tuple[Optional[Path], Optional[Path], List[TIRFallbackElement], str]:
     """Run the fallback workflow for one TIR subtype.
 
@@ -868,6 +871,7 @@ def process_subtype(
             threads=threads,
             min_num_alignments=min_num_alignments,
             verbose=verbose,
+            max_group_size=max_group_size,
         )
 
         alignment_lengths = load_prime_alignment_lengths(subtype_dir)
@@ -988,6 +992,18 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
     )
     parser.add_argument("--mask-gff3", help="Optional GFF3 file with features that can limit flanking regions")
     parser.add_argument(
+        "--max-group-size",
+        type=int,
+        default=None,
+        help=(
+            "When a TIR subtype has more than this many TPase anchors, split "
+            "them into deterministic, clustering-based groups of at most this "
+            "size and run the all-vs-all flank alignment per group. Bounds the "
+            "O(N^2) memory that OOMs on large families (big genomes). Below the "
+            "threshold the run is byte-identical to no grouping. Default: unset."
+        ),
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -1000,6 +1016,8 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
         parser.error("--min-cluster-size must be >= 1")
     if args.min_num_alignments < 1:
         parser.error("--min-num-alignments must be >= 1")
+    if args.max_group_size is not None and args.max_group_size < 2:
+        parser.error("--max-group-size must be >= 2")
 
     for file_path, name in [(args.genome, "Genome"), (args.annotations, "Annotations")]:
         if not Path(file_path).exists():
@@ -1092,6 +1110,7 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
             mask_features=mask_features,
             seq_lengths=seq_lengths,
             verbose=args.verbose,
+            max_group_size=args.max_group_size,
         )
         per_subtype_results.append((subtype, gff_path, rep_path))
         all_elements.extend(elements)
