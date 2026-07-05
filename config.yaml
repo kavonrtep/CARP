@@ -50,6 +50,14 @@ containment_min_coverage: 0.90
 #   multiplicity requirement for library entries).
 dante_tir_fallback_min_alignments: 3
 dante_tir_fallback_min_cluster_size: 3
+# dante_tir_fallback_max_group_size / dante_line_max_group_size (default 1000):
+#   OOM guard for the O(N^2) all-vs-all flank alignment. When a TIR subtype
+#   (fallback) or the LINE pattern set has MORE anchors than this, they are
+#   split into deterministic, mmseqs-clustering-based groups of at most this
+#   size and aligned per group. At/below the threshold the result is
+#   byte-identical to no grouping. Must be >= 2.
+dante_tir_fallback_max_group_size: 1000
+dante_line_max_group_size: 1000
 # DANTE_TIR primary-element library filter. Default 3 matches the
 # historical behaviour from before the DANTE_TIR_FALLBACK refactor (when
 # the library was sourced from `all_representative_elements_min3.fasta`,

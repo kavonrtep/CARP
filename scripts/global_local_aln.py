@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 import argparse, sys
-import parasail
+import os
+import shutil
+import subprocess
+import tempfile
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# parasail is imported lazily inside pick_func()/make_matrix() so this module
+# (and its pure-Python grouping helpers) can be imported for unit testing in a
+# lightweight environment where the parasail wheel is not installed.
 
 def read_first_fasta_seq(path):
     seq, seen = [], False
@@ -60,6 +68,7 @@ def read_fasta_sequences(path):
     return sequences
 
 def pick_func(end_anchor: str):
+    import parasail
     # Fix 5′ (left) on both -> free 3′ ends on both
     # Fix 3′ (right) on both -> free 5′ ends on both
     if end_anchor == "5":
@@ -69,6 +78,7 @@ def pick_func(end_anchor: str):
     # See Parasail naming table. :contentReference[oaicite:3]{index=3}
 
 def make_matrix(match: int, mismatch: int):
+    import parasail
     # Build a simple DNA matrix; strong negative mismatch stops extension.
     # (Alternative is parasail.nuc44, but simple is clearer/tunable.)
     return parasail.matrix_create("ACGT", match, mismatch)
@@ -680,6 +690,232 @@ def generate_sequence_pairs_filtered(sequences, candidate_pairs):
             yield (seq1_id, seq_dict[seq1_id], seq2_id, seq_dict[seq2_id])
 
 
+def _run_mmseqs_easy_cluster(fasta_file, threads=1, verbose=True):
+    """Cluster the sequences in ``fasta_file`` with ``mmseqs easy-cluster``.
+
+    Returns ``{rep_id: [member_ids]}`` on success, or ``None`` if mmseqs is
+    absent or fails. Parameters mirror DANTE_TIR's ``cluster_aa_sequences_mmseqs2``
+    (min-seq-id 0.8, coverage 0.8) — enough to keep copies of the same element
+    family together while separating distinct families. All temp files live in
+    a private directory that is always cleaned up.
+    """
+    tmp_root = tempfile.mkdtemp(prefix="mmseqs_group_")
+    prefix = os.path.join(tmp_root, "grp")
+    tmp_dir = os.path.join(tmp_root, "tmp")
+    cluster_tsv = prefix + "_cluster.tsv"
+    try:
+        cmd = [
+            "mmseqs", "easy-cluster",
+            fasta_file, prefix, tmp_dir,
+            "--min-seq-id", "0.8",
+            "-c", "0.8",
+            "--cov-mode", "0",
+            "--threads", str(threads),
+        ]
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+        if not os.path.exists(cluster_tsv):
+            return None
+        clusters = defaultdict(list)
+        with open(cluster_tsv) as handle:
+            for line in handle:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) >= 2:
+                    clusters[parts[0]].append(parts[1])
+        return dict(clusters)
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        if verbose:
+            print(f"Warning: mmseqs easy-cluster for grouping failed: {exc}",
+                  file=sys.stderr)
+        return None
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+def _bin_clusters(clusters, max_group_size):
+    """Deterministically bin mmseqs clusters into groups of <= max_group_size.
+
+    Ported from DANTE_TIR's ``group_sequences_by_clusters`` (dt_utils.py) with
+    explicit tie-breaks added for reproducibility:
+
+    - clusters are ordered by (size DESC, representative-id ASC),
+    - members inside every cluster are sorted by id,
+    - a cluster >= 2x max is split into (nearly) equal id-sorted chunks,
+    - the remaining (smaller) clusters are merged, in that fixed order, into
+      groups up to max_group_size.
+
+    Merging only ever combines *distinct* clusters (mutually dissimilar, so
+    cross-pairs are sub-threshold and add nothing); the only approximate case
+    is chopping one oversized cluster, which by construction is a near-identical
+    high-copy family where any chunk yields the same inferred length. The result
+    is a fixed function of the cluster assignment, i.e. fully deterministic.
+    """
+    cluster_list = sorted(clusters.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+
+    groups = []
+    small = []
+    for rep_id, members in cluster_list:
+        members = sorted(members)
+        if len(members) >= 2 * max_group_size:
+            n_sub = (len(members) + max_group_size - 1) // max_group_size
+            sub_size = len(members) // n_sub
+            for i in range(n_sub):
+                start = i * sub_size
+                end = len(members) if i == n_sub - 1 else (i + 1) * sub_size
+                groups.append(members[start:end])
+        else:
+            small.append(members)
+
+    current = []
+    for members in small:
+        if current and len(current) + len(members) > max_group_size:
+            groups.append(current)
+            current = []
+        current.extend(members)
+    if current:
+        groups.append(current)
+
+    return groups
+
+
+def group_sequences_for_alignment(fasta_file, seq_ids, max_group_size,
+                                  threads=1, verbose=True):
+    """Partition ``seq_ids`` into groups of <= max_group_size for a bounded
+    all-vs-all alignment.
+
+    Returns a list of id-lists. When ``max_group_size`` is falsy or the input
+    already fits in one group, returns a single group containing every id (the
+    caller then takes the unchanged single-pass path — byte-identical to the
+    ungrouped behaviour). This is the "limit where splitting fires".
+
+    Otherwise the sequences are clustered with mmseqs (so similar flanks stay
+    together) and binned deterministically. If mmseqs is unavailable or fails,
+    it falls back to deterministic id-sorted chunks so memory is still bounded
+    (a warning is printed; this loses cross-chunk alignments but never OOMs).
+    """
+    n = len(seq_ids)
+    if not max_group_size or n <= max_group_size:
+        return [list(seq_ids)]
+
+    clusters = _run_mmseqs_easy_cluster(fasta_file, threads=threads, verbose=verbose)
+    if clusters is None:
+        sorted_ids = sorted(seq_ids)
+        print("Warning: falling back to deterministic size-based chunks for "
+              f"grouping {n} sequences (max_group_size={max_group_size})",
+              file=sys.stderr)
+        return [sorted_ids[i:i + max_group_size]
+                for i in range(0, n, max_group_size)]
+
+    # Guard against ids that mmseqs did not echo back (should not happen — every
+    # sequence is at least its own singleton cluster — but keep it lossless).
+    seen = {m for members in clusters.values() for m in members}
+    for missing in sorted(set(seq_ids) - seen):
+        clusters[missing] = [missing]
+
+    groups = _bin_clusters(clusters, max_group_size)
+    if verbose:
+        sizes = sorted((len(g) for g in groups), reverse=True)
+        print(f"  Grouped {n} sequences into {len(groups)} groups via mmseqs "
+              f"clustering (max_group_size={max_group_size}; largest={sizes[0] if sizes else 0})")
+    return groups
+
+
+def _compare_sequences(sequences, fasta_file, args, verbose,
+                       use_prefilter, prefilter_identity):
+    """Run MMseqs2 prefilter + all-vs-all parasail comparison for one set of
+    sequences and return the list of result dicts (no file is written).
+
+    Factored out of ``run_all_vs_all_alignment`` so the identical logic serves
+    both the single-pass path and each bounded group.
+    """
+    threads = args.threads
+    total_possible_pairs = len(sequences) * (len(sequences) - 1) // 2
+    if verbose:
+        print(f"Total possible pairwise comparisons: {total_possible_pairs}")
+
+    candidate_pairs = None
+    local_use_prefilter = use_prefilter
+    if local_use_prefilter:
+        if len(sequences) < 100:
+            if verbose:
+                print("\nSkipping prefiltering (fewer than 100 sequences)")
+            local_use_prefilter = False
+        else:
+            if verbose:
+                print("\nRunning MMseqs2 prefiltering...")
+            candidate_pairs = run_mmseqs_prefilter(
+                fasta_file, args.end, min_identity=prefilter_identity,
+                threads=threads, verbose=verbose,
+            )
+            if candidate_pairs is None:
+                local_use_prefilter = False
+            elif verbose:
+                num_filtered = len(candidate_pairs)
+                reduction_pct = (1 - num_filtered / total_possible_pairs) * 100 \
+                    if total_possible_pairs > 0 else 0
+                print(f"  Prefiltering reduced comparisons by {reduction_pct:.1f}% "
+                      f"({total_possible_pairs} → {num_filtered})")
+
+    if local_use_prefilter and candidate_pairs is not None:
+        total_comparisons = len(candidate_pairs)
+        if verbose:
+            print(f"\nPerforming {total_comparisons} prefiltered pairwise "
+                  f"alignments using {threads} threads...")
+        pair_generator = generate_sequence_pairs_filtered(sequences, candidate_pairs)
+    else:
+        total_comparisons = len(sequences) * (len(sequences) - 1) // 2
+        if verbose:
+            print(f"\nPerforming {total_comparisons} pairwise alignments using "
+                  f"{threads} threads...")
+        pair_generator = generate_sequence_pairs(sequences)
+
+    results = []
+
+    if threads == 1:
+        comparison_count = 0
+        for pair_data in pair_generator:
+            comparison_count += 1
+            if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
+                print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
+
+            if len(pair_data) == 6:
+                result = run_single_comparison(pair_data, args)
+            else:
+                seq1_id, seq1, seq2_id, seq2 = pair_data
+                result = run_alignment_comparison(seq1_id, seq1, seq2_id, seq2, args)
+                if result['max_score'] < args.score_threshold:
+                    result = None
+
+            if result is not None:
+                results.append(result)
+    else:
+        comparison_count = 0
+        with ThreadPoolExecutor(max_workers=threads) as executor:
+            futures = []
+            for pair_data in pair_generator:
+                if len(pair_data) == 6:
+                    future = executor.submit(run_single_comparison, pair_data, args)
+                else:
+                    seq1_id, seq1, seq2_id, seq2 = pair_data
+
+                    def align_and_filter(s1_id, s1, s2_id, s2, a):
+                        res = run_alignment_comparison(s1_id, s1, s2_id, s2, a)
+                        return res if res['max_score'] >= a.score_threshold else None
+
+                    future = executor.submit(align_and_filter, seq1_id, seq1, seq2_id, seq2, args)
+                futures.append(future)
+
+            for future in as_completed(futures):
+                comparison_count += 1
+                if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
+                    print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
+
+                result = future.result()
+                if result is not None:
+                    results.append(result)
+
+    return results
+
+
 def run_all_vs_all_alignment(
     fasta_file,
     output_file,
@@ -692,7 +928,8 @@ def run_all_vs_all_alignment(
     threads=1,
     verbose=True,
     use_prefilter=True,
-    prefilter_identity=0.8
+    prefilter_identity=0.8,
+    max_group_size=None
 ):
     """
     Run all-vs-all pairwise alignment analysis on sequences in a FASTA file.
@@ -723,6 +960,12 @@ def run_all_vs_all_alignment(
         Use MMseqs2 prefiltering to speed up alignment, default True
     prefilter_identity : float, optional
         Minimum identity threshold for MMseqs2 prefiltering (0-1), default 0.8 (80%)
+    max_group_size : int or None, optional
+        If set and the input has more than this many sequences, partition them
+        into clustering-based groups of <= max_group_size and run the all-vs-all
+        step per group (bounds the O(N^2) memory/compute that OOMs on very large
+        families). None (default) or an input that already fits in one group
+        takes the unchanged single-pass path. See group_sequences_for_alignment.
 
     Returns
     -------
@@ -751,107 +994,49 @@ def run_all_vs_all_alignment(
     if verbose:
         print(f"Found {len(sequences)} sequences")
 
-    # Calculate total possible pairs
-    total_possible_pairs = len(sequences) * (len(sequences) - 1) // 2
-    if verbose:
-        print(f"Total possible pairwise comparisons: {total_possible_pairs}")
+    # Bounded, clustering-based grouping keeps the all-vs-all step from
+    # exploding (O(N^2) memory/compute -> OOM) on very large families. When
+    # max_group_size is None / the input already fits one group, this returns a
+    # single group and the path below is byte-identical to the ungrouped code.
+    groups = group_sequences_for_alignment(
+        fasta_file,
+        [seq_id for seq_id, _ in sequences],
+        max_group_size,
+        threads=threads,
+        verbose=verbose,
+    )
 
-    # Run MMseqs2 prefiltering if enabled and sequence count is sufficient
-    candidate_pairs = None
-    if use_prefilter:
-        if len(sequences) < 100:
-            # Skip prefiltering for small datasets
-            if verbose:
-                print(f"\nSkipping prefiltering (fewer than 100 sequences)")
-            use_prefilter = False
-        else:
-            if verbose:
-                print(f"\nRunning MMseqs2 prefiltering...")
-            candidate_pairs = run_mmseqs_prefilter(
-                fasta_file,
-                end,
-                min_identity=prefilter_identity,
-                threads=threads,
-                verbose=verbose
-            )
-
-            # If prefiltering failed, fall back to all-vs-all
-            if candidate_pairs is None:
-                use_prefilter = False
-            elif verbose:
-                # Report filtering statistics
-                num_filtered = len(candidate_pairs)
-                reduction_pct = (1 - num_filtered / total_possible_pairs) * 100 if total_possible_pairs > 0 else 0
-                print(f"  Prefiltering reduced comparisons by {reduction_pct:.1f}% ({total_possible_pairs} → {num_filtered})")
-
-    # Determine comparison strategy
-    if use_prefilter and candidate_pairs is not None:
-        # Use prefiltered pairs
-        total_comparisons = len(candidate_pairs)
-        if verbose:
-            print(f"\nPerforming {total_comparisons} prefiltered pairwise alignments using {threads} threads...")
-        pair_generator = generate_sequence_pairs_filtered(sequences, candidate_pairs)
-    else:
-        # Use all-vs-all pairs
-        total_comparisons = len(sequences) * (len(sequences) - 1) // 2
-        if verbose:
-            print(f"\nPerforming {total_comparisons} pairwise alignments using {threads} threads...")
-        pair_generator = generate_sequence_pairs(sequences)
-
-    # Perform comparisons
     results = []
 
-    if threads == 1:
-        # Serial processing for single thread
-        comparison_count = 0
-        for pair_data in pair_generator:
-            comparison_count += 1
-            if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
-                print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
-
-            # Handle different tuple formats from generators
-            if len(pair_data) == 6:
-                # From generate_sequence_pairs: (i, j, seq1_id, seq1, seq2_id, seq2)
-                result = run_single_comparison(pair_data, args)
-            else:
-                # From generate_sequence_pairs_filtered: (seq1_id, seq1, seq2_id, seq2)
-                seq1_id, seq1, seq2_id, seq2 = pair_data
-                result = run_alignment_comparison(seq1_id, seq1, seq2_id, seq2, args)
-                # Apply score threshold
-                if result['max_score'] < args.score_threshold:
-                    result = None
-
-            if result is not None:
-                results.append(result)
+    if len(groups) <= 1:
+        results = _compare_sequences(
+            sequences, fasta_file, args, verbose, use_prefilter, prefilter_identity
+        )
     else:
-        # Parallel processing
-        comparison_count = 0
-        with ThreadPoolExecutor(max_workers=threads) as executor:
-            # Submit all tasks - need to handle different tuple formats
-            futures = []
-            for pair_data in pair_generator:
-                if len(pair_data) == 6:
-                    # From generate_sequence_pairs
-                    future = executor.submit(run_single_comparison, pair_data, args)
-                else:
-                    # From generate_sequence_pairs_filtered
-                    seq1_id, seq1, seq2_id, seq2 = pair_data
-                    # Create a wrapper function that applies threshold
-                    def align_and_filter(s1_id, s1, s2_id, s2, a):
-                        res = run_alignment_comparison(s1_id, s1, s2_id, s2, a)
-                        return res if res['max_score'] >= a.score_threshold else None
-                    future = executor.submit(align_and_filter, seq1_id, seq1, seq2_id, seq2, args)
-                futures.append(future)
-
-            # Collect results as they complete
-            for future in as_completed(futures):
-                comparison_count += 1
-                if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
-                    print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
-
-                result = future.result()
-                if result is not None:
-                    results.append(result)
+        seq_dict = dict(sequences)
+        if verbose:
+            print(f"\nProcessing {len(groups)} groups independently "
+                  f"(bounded all-vs-all, max_group_size={max_group_size})...")
+        for gi, group_ids in enumerate(groups, 1):
+            group_seqs = [(sid, seq_dict[sid]) for sid in group_ids if sid in seq_dict]
+            if len(group_seqs) < 2:
+                continue
+            if verbose:
+                print(f"\n  Group {gi}/{len(groups)}: {len(group_seqs)} sequences")
+            group_fasta = tempfile.mktemp(suffix=f"_group{gi}.fasta")
+            try:
+                with open(group_fasta, "w") as handle:
+                    for sid, seq in group_seqs:
+                        handle.write(f">{sid}\n{seq}\n")
+                results.extend(
+                    _compare_sequences(
+                        group_seqs, group_fasta, args, verbose,
+                        use_prefilter, prefilter_identity,
+                    )
+                )
+            finally:
+                if os.path.exists(group_fasta):
+                    os.remove(group_fasta)
 
     # Write results to output file
     if verbose:
@@ -859,7 +1044,7 @@ def run_all_vs_all_alignment(
     write_results_table(results, output_file)
 
     if verbose:
-        print(f"Analysis complete! Generated {len(results)} alignment records from {total_comparisons} comparisons.")
+        print(f"Analysis complete! Generated {len(results)} alignment records.")
 
     return results
 
@@ -886,6 +1071,11 @@ def main():
                     help="Disable MMseqs2 prefiltering (use full all-vs-all comparison)")
     ap.add_argument("--prefilter-identity", type=float, default=0.8,
                     help="Minimum identity for MMseqs2 prefiltering (0-1, default 0.8)")
+    ap.add_argument("--max-group-size", type=int, default=None,
+                    help="If set and the input has more sequences than this, split "
+                         "into clustering-based groups of at most this size and run "
+                         "the all-vs-all per group (bounds memory on huge families). "
+                         "Default: unset (single pass).")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="Print progress messages (default: False)")
     args = ap.parse_args()
@@ -906,7 +1096,8 @@ def main():
         threads=args.threads,
         verbose=args.verbose,
         use_prefilter=not args.no_prefilter,
-        prefilter_identity=args.prefilter_identity
+        prefilter_identity=args.prefilter_identity,
+        max_group_size=args.max_group_size
     )
 
 

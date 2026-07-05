@@ -162,6 +162,21 @@ for _key in ("dante_tir_fallback_min_alignments", "dante_tir_fallback_min_cluste
     if not isinstance(config[_key], int) or config[_key] < 1:
         raise ValueError(f"Invalid value for {_key}: must be a positive integer.")
 
+# All-vs-all flank-alignment grouping cap for the fallback (per TIR subtype)
+# and for DANTE_LINE (LINE pattern set). When the number of anchors/patterns
+# exceeds this value, the O(N^2) parasail all-vs-all is split into
+# deterministic, clustering-based groups of at most this many sequences and run
+# per group, bounding the peak memory that OOMs on large families (big
+# genomes). At or below the threshold the result is byte-identical to no
+# grouping, so LINE and small TIR subtypes are unaffected. Grouping keeps
+# similar flanks together (mmseqs easy-cluster), so it is near-lossless. Must be
+# an integer >= 2. See group_sequences_for_alignment() in global_local_aln.py.
+for _key in ("dante_tir_fallback_max_group_size", "dante_line_max_group_size"):
+    if _key not in config:
+        config[_key] = 1000
+    if not isinstance(config[_key], int) or isinstance(config[_key], bool) or config[_key] < 2:
+        raise ValueError(f"Invalid value for {_key}: must be an integer >= 2.")
+
 # DANTE_TIR primary-element library filter (Multiplicity floor). Default 3
 # matches the pre-fallback behaviour where the library was sourced from
 # `all_representative_elements_min3.fasta` produced by `dante_tir_summary.R`
@@ -487,7 +502,8 @@ rule dante_tir_fallback:
     params:
         output_dir=F"{config['output_dir']}/DANTE_TIR_FALLBACK",
         min_alignments=config["dante_tir_fallback_min_alignments"],
-        min_cluster_size=config["dante_tir_fallback_min_cluster_size"]
+        min_cluster_size=config["dante_tir_fallback_min_cluster_size"],
+        max_group_size=config["dante_tir_fallback_max_group_size"]
     log:
         stdout=F"{config['output_dir']}/DANTE_TIR_FALLBACK/dante_tir_fallback.log",
         stderr=F"{config['output_dir']}/DANTE_TIR_FALLBACK/dante_tir_fallback.err"
@@ -512,6 +528,7 @@ rule dante_tir_fallback:
             -t {threads} \
             --min-num-alignments {params.min_alignments} \
             --min-cluster-size {params.min_cluster_size} \
+            --max-group-size {params.max_group_size} \
             --mask-gff3 {input.mask_gff}
 
         # Ensure outputs exist even if no TIR elements were found
@@ -712,7 +729,8 @@ rule dante_line:
         line_regions=F"{config['output_dir']}/DANTE_LINE/LINE_regions.fasta",
         line_regions_extended=F"{config['output_dir']}/DANTE_LINE/LINE_regions_extended.fasta"
     params:
-        output_dir=F"{config['output_dir']}/DANTE_LINE"
+        output_dir=F"{config['output_dir']}/DANTE_LINE",
+        max_group_size=config["dante_line_max_group_size"]
     log:
         stdout=F"{config['output_dir']}/DANTE_LINE/dante_line.log",
         stderr=F"{config['output_dir']}/DANTE_LINE/dante_line.err"
@@ -739,6 +757,7 @@ rule dante_line:
         mkdir -p {params.output_dir}
         if ! dante_line.py -g {input.genome} -a {input.gff} \
                 -o {params.output_dir} -t {threads} \
+                --max-group-size {params.max_group_size} \
                 --mask-gff3 {input.gff3_tidehunter}; then
             echo "dante_line.py failed (likely too few LINE features); creating empty outputs"
         fi

@@ -68,6 +68,15 @@ reduce_library: True
 dante_tir_fallback_min_alignments: 3
 dante_tir_fallback_min_cluster_size: 3
 
+# All-vs-all flank-alignment OOM guard (default 1000 each). When a TIR subtype
+# (fallback) or the LINE pattern set has MORE anchors than this, the O(N^2)
+# parasail all-vs-all is split into deterministic, mmseqs-clustering-based
+# groups of at most this size and run per group — bounding peak memory on large
+# genomes. At/below the threshold the result is byte-identical to no grouping.
+# Must be >= 2. See docs/configuration.md.
+dante_tir_fallback_max_group_size: 1000
+dante_line_max_group_size: 1000
+
 # DANTE_TIR primary-library Multiplicity floor (default 3).
 # Drop primary elements with Multiplicity < threshold from the library.
 # They stay in DANTE_TIR_combined.gff3 and the unified annotation.
