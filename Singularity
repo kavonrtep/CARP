@@ -3,7 +3,14 @@ From: continuumio/miniconda3
 
 %post
     apt-get update
-    apt-get install -y libxml2 libxml2-dev
+    # jq is a BUILD-time requirement of the bioconda bioconductor-*data post-link
+    # scripts (installBiocDataPackage.sh -> yq -> jq). It must be on PATH at the
+    # system level *before* the conda env creation below, because conda does not
+    # guarantee jq links before genomeinfodbdata's post-link runs (there is no
+    # dependency between them), so pinning jq inside the env yaml is not enough.
+    # Installing it here makes it available to every post-link regardless of
+    # conda's link order. Without it the SIF build fails: "yq: Error starting jq".
+    apt-get install -y libxml2 libxml2-dev jq
     mkdir -p /opt/conda/config
     export CONDARC=/opt/conda/config/.condarc
 

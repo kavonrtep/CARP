@@ -26,7 +26,9 @@ dependencies:
   - r-jsonlite
   - r-yaml
   - pyyaml
-  # jq is required at BUILD time by the bioconductor-*data post-link scripts
-  # (installBiocDataPackage.sh -> yq -> jq); without it the transitive
-  # bioconductor-genomeinfodbdata install fails the env solve. Do not remove.
+  # jq here is belt-and-suspenders for the bioconductor-*data post-link scripts
+  # (installBiocDataPackage.sh -> yq -> jq). The AUTHORITATIVE fix is the
+  # system-level `apt-get install jq` in the Singularity %post, because conda
+  # gives no ordering guarantee that this env-level jq links before
+  # genomeinfodbdata's post-link runs. Keep both.
   - jq
