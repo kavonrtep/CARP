@@ -1,14 +1,19 @@
 # Changelog
 
-## 1.0.3
-- **Fix Singularity/SIF build failure (bioconda `genomeinfodbdata` post-link).**
-  The `1.0.2` build failed in `release.yml` while solving the Bioconductor R
-  envs: `bioconductor-genomeinfodbdata`'s post-link script runs
-  `installBiocDataPackage.sh` → `yq` → `jq`, but `jq` was not in the env, so the
-  link (and the whole SIF build) errored out. Added `jq` explicitly to
-  `envs/tidecluster.yaml` and `envs/tidecluster_run.yaml`. (1.0.2 published no
-  artifacts — its build never completed — so this is the first release to ship
-  the flank-alignment grouping change below.)
+## 1.0.4
+- **Fix Singularity/SIF build failure (bioconda `genomeinfodbdata` post-link),
+  properly this time.** `bioconductor-genomeinfodbdata`'s post-link script runs
+  `installBiocDataPackage.sh` → `yq` → `jq`; with `jq` absent the link errored
+  and the whole SIF build failed (`yq: Error starting jq`). 1.0.3 tried pinning
+  `jq` inside the two Bioconductor env yamls, but that did **not** fix it: conda
+  gives no ordering guarantee that the env-level `jq` links before
+  `genomeinfodbdata`'s post-link runs (no dependency between them), so `jq` can
+  still be missing at post-link time. The authoritative fix is to install `jq`
+  at the **system level** in the `Singularity` `%post` (`apt-get install jq`,
+  before the conda env creation), so it is on `PATH` for every post-link
+  regardless of link order. The env-yaml `jq` is kept as redundancy. (1.0.2 and
+  1.0.3 published no artifacts — their builds never completed — so this is the
+  first release to ship the flank-alignment grouping change below.)
 - **Bounded, deterministic grouping for the DANTE_TIR_FALLBACK / DANTE_LINE flank
   alignment (OOM fix on large genomes).** The all-vs-all flank aligner
   (`scripts/global_local_aln.py`) is O(N²) in memory and compute; on a big
