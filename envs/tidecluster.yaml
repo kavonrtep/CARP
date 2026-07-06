@@ -26,3 +26,7 @@ dependencies:
   - r-jsonlite
   - r-yaml
   - pyyaml
+  # jq is required at BUILD time by the bioconductor-*data post-link scripts
+  # (installBiocDataPackage.sh -> yq -> jq); without it the transitive
+  # bioconductor-genomeinfodbdata install fails the env solve. Do not remove.
+  - jq

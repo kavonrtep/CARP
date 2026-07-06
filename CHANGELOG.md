@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.0.2
+## 1.0.3
+- **Fix Singularity/SIF build failure (bioconda `genomeinfodbdata` post-link).**
+  The `1.0.2` build failed in `release.yml` while solving the Bioconductor R
+  envs: `bioconductor-genomeinfodbdata`'s post-link script runs
+  `installBiocDataPackage.sh` → `yq` → `jq`, but `jq` was not in the env, so the
+  link (and the whole SIF build) errored out. Added `jq` explicitly to
+  `envs/tidecluster.yaml` and `envs/tidecluster_run.yaml`. (1.0.2 published no
+  artifacts — its build never completed — so this is the first release to ship
+  the flank-alignment grouping change below.)
 - **Bounded, deterministic grouping for the DANTE_TIR_FALLBACK / DANTE_LINE flank
   alignment (OOM fix on large genomes).** The all-vs-all flank aligner
   (`scripts/global_local_aln.py`) is O(N²) in memory and compute; on a big
