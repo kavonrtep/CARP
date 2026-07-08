@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.5
 - **HTML report: fix large-genome crash and make report generation non-fatal.**
   `make_repeat_report.R` aborted on a large genome while building the density
   panels: a bin midpoint on a chromosome > ~1.07 Gbp overflowed 32-bit integer
