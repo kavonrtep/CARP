@@ -2106,11 +2106,37 @@ rule make_repeat_report:
         set -x
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        make_repeat_report.R \
-            --output_dir {params.output_dir} \
-            --bin_width {params.bin_width} \
-            --min_len_chart {params.min_len_chart} \
-            --min_len_tracks {params.min_len_tracks} \
-            --max_tracks {params.max_tracks} \
-            --top_sat_clusters {params.top_sat_clusters}
+
+        # The HTML report is a best-effort, non-essential output: it must never
+        # fail the whole pipeline. Per-section failures are already handled
+        # inside the script (safe_build -> "not generated" placeholders). This
+        # guard is the last resort for a TOTAL failure (e.g. an unforeseen
+        # large-genome edge case or OOM before any HTML is written): log it and
+        # emit a minimal placeholder so the declared output exists and the
+        # `all` target still completes. The annotation outputs are unaffected.
+        if ! make_repeat_report.R \
+                --output_dir {params.output_dir} \
+                --bin_width {params.bin_width} \
+                --min_len_chart {params.min_len_chart} \
+                --min_len_tracks {params.min_len_tracks} \
+                --max_tracks {params.max_tracks} \
+                --top_sat_clusters {params.top_sat_clusters}; then
+            echo "WARNING: make_repeat_report.R failed; writing placeholder report so the pipeline continues" >&2
+        fi
+
+        if [ ! -s {output} ]; then
+            cat > {output} <<'HTML'
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Repeat Annotation Report — not generated</title></head>
+<body style="font-family:sans-serif;max-width:820px;margin:40px auto;color:#000">
+<h1>Repeat annotation report was not generated</h1>
+<p>The HTML report could not be built for this run (for example, a very large
+genome hit a resource or edge-case limit during report rendering). This does
+<b>not</b> affect the annotation results: the GFF3 files, repeat libraries,
+BigWig density tracks and <code>summary_statistics.csv</code> are complete and
+valid.</p>
+<p>See <code>logs/make_repeat_report.err</code> for the cause.</p>
+</body></html>
+HTML
+        fi
         """

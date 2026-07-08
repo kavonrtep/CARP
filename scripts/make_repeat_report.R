@@ -38,6 +38,32 @@ outdir <- normalizePath(opt$output_dir, mustWork = TRUE)
 
 `%||%` <- function(a, b) if (!is.null(a) && length(a) > 0 && !is.na(a[1])) a else b
 
+# Build one report section defensively. On ANY error, log a WARNING and return
+# NULL so the caller renders a "not generated" placeholder (via %||% in
+# assemble_html) instead of aborting the whole report — one bad panel (e.g. a
+# density plot hitting a large-genome edge case) must not lose the rest of the
+# report, nor fail the pipeline. `expr` is a lazy promise: it is only evaluated
+# inside the tryCatch, so its errors are caught here.
+safe_build <- function(label, expr) {
+  tryCatch(expr, error = function(e) {
+    message(sprintf(
+      "WARNING: section '%s' not generated (%s) — placeholder shown, report continues.",
+      label, conditionMessage(e)))
+    NULL
+  })
+}
+
+# In-report placeholder for a section that produced no chart — either because
+# there was no data for it or because safe_build() caught an error. Rendered as
+# a visible amber note so a missing panel is obvious in the HTML.
+not_generated_html <- function(what)
+  sprintf(paste0('<p style="padding:10px 12px;border-left:4px solid #e0a800;',
+                 'background:#fff8e1;color:#000;margin:8px 0;border-radius:3px">',
+                 '⚠ %s was <b>not generated</b> (no data, or an error while ',
+                 'building it — see <code>logs/make_repeat_report.err</code>). ',
+                 'The rest of the report is unaffected.</p>'),
+          what)
+
 # ═══════════════════════════════════════════════════════════════════════════
 # B. DATA LOADING
 # ═══════════════════════════════════════════════════════════════════════════
@@ -460,20 +486,39 @@ rdp_simplify <- function(x, y, epsilon) {
   if (n <= 2L || epsilon <= 0) return(seq_len(n))
   keep <- logical(n)
 
-  rdp_seg <- function(a, b) {
-    keep[a] <<- TRUE
-    keep[b] <<- TRUE
-    if (b <= a + 1L) return(invisible(NULL))
-    xi    <- x[(a + 1L):(b - 1L)]
-    yi    <- y[(a + 1L):(b - 1L)]
-    frac  <- (xi - x[a]) / (x[b] - x[a])
-    dists <- abs(yi - (y[a] + frac * (y[b] - y[a])))
-    dists[is.na(dists)] <- Inf   # NA interior points are always splitting candidates
-    j <- which.max(dists)
-    if (dists[j] > epsilon) {
-      mid <- a + j
-      rdp_seg(a, mid)
-      rdp_seg(mid, b)
+  # Iterative (explicit-stack) segmentation. The classic RDP recursion can reach
+  # depth O(n) on adversarial input (e.g. a long NA-poisoned run peels one point
+  # per split), which overflows R's fixed C stack — fatal on large genomes with
+  # hundreds of thousands of density points. An explicit LIFO of (a, b) segments
+  # has no such limit; the visited set of points is identical to the recursion.
+  # sa/sb/top are locals of this function mutated in-place by the while loop, so
+  # only keep[] (in the parent scope) needs <<- — exactly as the recursion did.
+  rdp_seg_iter <- function(a0, b0) {
+    cap <- 2L * as.integer(b0 - a0) + 16L
+    sa  <- integer(cap); sb <- integer(cap); top <- 1L
+    sa[1L] <- a0; sb[1L] <- b0
+    while (top > 0L) {
+      a <- sa[top]; b <- sb[top]; top <- top - 1L
+      keep[a] <<- TRUE
+      keep[b] <<- TRUE
+      if (b <= a + 1L) next
+      xi    <- x[(a + 1L):(b - 1L)]
+      yi    <- y[(a + 1L):(b - 1L)]
+      frac  <- (xi - x[a]) / (x[b] - x[a])
+      dists <- abs(yi - (y[a] + frac * (y[b] - y[a])))
+      dists[is.na(dists)] <- Inf   # NA interior points are always splitting candidates
+      j <- which.max(dists)
+      if (dists[j] > epsilon) {
+        mid <- a + j
+        if (top + 2L > length(sa)) {          # grow defensively (amortised O(1))
+          sa <- c(sa, integer(length(sa)))
+          sb <- c(sb, integer(length(sb)))
+        }
+        # Push [a, mid] then [mid, b]; LIFO pops [mid, b] first, matching the
+        # recursion's rdp_seg(a, mid); rdp_seg(mid, b) visitation order.
+        top <- top + 1L; sa[top] <- a;   sb[top] <- mid
+        top <- top + 1L; sa[top] <- mid; sb[top] <- b
+      }
     }
   }
 
@@ -486,7 +531,7 @@ rdp_simplify <- function(x, y, epsilon) {
     seg_s <- non_na[brk]
     seg_e <- non_na[c(brk[-1L], TRUE)]
     for (k in seq_along(seg_s))
-      rdp_seg(seg_s[k], seg_e[k])
+      rdp_seg_iter(seg_s[k], seg_e[k])
   }
   sort(which(keep))
 }
@@ -795,7 +840,12 @@ json_concat_density_plot <- function(bw_map, seq_info, bin_width, n_smooth = 10)
       raw_cat <- c(raw_cat, raw)
       sm_cat  <- c(sm_cat,  sm)
       if (!built_x)
-        x_all <- c(x_all, round((starts + ends) / 2 / 1e6 + cum_mb[si], 3))
+        # as.numeric() BEFORE the sum: on a large genome starts/ends are R
+        # integers and a bin midpoint on a chromosome > ~1.07 Gbp makes
+        # `starts + ends` exceed 2^31, silently producing NA (integer overflow).
+        # Those NAs then poison the x-axis and drive rdp_simplify into O(n)
+        # recursion ("C stack usage too close to the limit"). Doubles don't wrap.
+        x_all <- c(x_all, round((as.numeric(starts) + as.numeric(ends)) / 2 / 1e6 + cum_mb[si], 3))
     }
     built_x            <- TRUE
     track_y_raw[[lbl]] <- raw_cat
@@ -1406,11 +1456,11 @@ Contigs &lt; %.0f kb are aggregated into the single Other bar.</p>
     genome_avg_pct,
     opt$min_len_chart / 1000,
     bin_width / 1000,
-    density_top_div     %||% "<p>No top-level density data available.</p>",
-    density_lineage_div %||% "<p>No lineage density data available.</p>",
-    density_trc_div     %||% "<p>No TRC density data available.</p>",
+    density_top_div     %||% not_generated_html("The top-level density panel"),
+    density_lineage_div %||% not_generated_html("The LTR-lineage density panel"),
+    density_trc_div     %||% not_generated_html("The TRC-cluster density panel"),
     sat_table_html,
-    sat_bar_div %||% "<p>No satellite density data available.</p>",
+    sat_bar_div %||% not_generated_html("The satellite density panel"),
     sub_links,
     provenance_footer_html
   )
@@ -1559,22 +1609,29 @@ main <- function() {
   sb_data        <- build_sunburst_data(comp_report, genome_size = genome_size)
   tree_df        <- build_comp_tree(comp_report, ltr_stats, tir_stats, line_stats,
                                      genome_size = genome_size)
-  sunburst_chart <- json_sunburst(sb_data)
+  sunburst_chart <- safe_build("composition sunburst", json_sunburst(sb_data))
 
   comp_bar_chart <- if (nrow(cov_mat) > 0)
-    json_composition_bar(cov_mat, y_labels, genome_avg_frac)
+    safe_build("composition bar", json_composition_bar(cov_mat, y_labels, genome_avg_frac))
   else NULL
 
+  # The three density panels are the heaviest sections and the ones most exposed
+  # to large-genome edge cases (huge chromosomes, many bins) — each is built
+  # defensively so a failure in one leaves a "not generated" placeholder and the
+  # rest of the report (and the pipeline) is unaffected.
   message("Building density panel 1 (top-level categories)...")
-  density_top_chart     <- json_concat_density_plot(top_bw_map,     density_seq_info, d_bin)
+  density_top_chart     <- safe_build("density panel 1 (top-level categories)",
+    json_concat_density_plot(top_bw_map,     density_seq_info, d_bin))
   message("Building density panel 2 (LTR lineages)...")
-  density_lineage_chart <- json_concat_density_plot(lineage_bw_map, density_seq_info, d_bin)
+  density_lineage_chart <- safe_build("density panel 2 (LTR lineages)",
+    json_concat_density_plot(lineage_bw_map, density_seq_info, d_bin))
   message("Building density panel 3 (TRC clusters)...")
   # Reverse so TRC_1 ends up at the top (matches summary_plots.pdf: rev(trc_bw))
-  density_trc_chart     <- json_concat_density_plot(rev(trc_bw_map), density_seq_info, d_bin)
+  density_trc_chart     <- safe_build("density panel 3 (TRC clusters)",
+    json_concat_density_plot(rev(trc_bw_map), density_seq_info, d_bin))
 
   sat_bar_chart <- if (!is.null(sat_data$per_seq) && nrow(sat_data$per_seq) > 0)
-    json_satellite_bar(sat_data, genome_info)
+    safe_build("satellite density bar", json_satellite_bar(sat_data, genome_info))
   else NULL
 
   # ── Render HTML ────────────────────────────────────────────────────────

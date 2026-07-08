@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+- **HTML report: fix large-genome crash and make report generation non-fatal.**
+  `make_repeat_report.R` aborted on a large genome while building the density
+  panels: a bin midpoint on a chromosome > ~1.07 Gbp overflowed 32-bit integer
+  arithmetic (`starts + ends` → `NA`), and those `NA`s drove the recursive
+  `rdp_simplify` line-simplifier into O(n) recursion → `Error: C stack usage is
+  too close to the limit`. Fixes: (1) do the midpoint sum in double precision so
+  it never overflows; (2) rewrite `rdp_simplify` with an explicit stack (no
+  recursion → cannot overflow the C stack), verified identical to the old output
+  on 300 random cases. Robustness: (3) each chart section is now built via
+  `safe_build()` so a failure in one panel leaves a visible "not generated"
+  placeholder and the rest of the report still renders; (4) the `make_repeat_report`
+  rule writes a minimal placeholder HTML if the script fails entirely, so a
+  report failure can never abort the pipeline (the annotation outputs are
+  unaffected).
+
 ## 1.0.4
 - **Fix Singularity/SIF build failure (bioconda `genomeinfodbdata` post-link),
   properly this time.** `bioconductor-genomeinfodbdata`'s post-link script runs
