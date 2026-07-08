@@ -14,6 +14,16 @@ From: continuumio/miniconda3
     mkdir -p /opt/conda/config
     export CONDARC=/opt/conda/config/.condarc
 
+    # Accept the Anaconda channel Terms of Service BEFORE any conda install.
+    # conda 26.x refuses to install from the default pkgs/main and pkgs/r
+    # channels until their ToS is accepted, otherwise it aborts the build with
+    # "CondaToSNonInteractiveError: Terms of Service have not been accepted".
+    # The base continuumio/miniconda3 image ships those channels, and the two
+    # bootstrap `conda install`s below resolve against them. Guarded with
+    # || true so a future base image without the ToS plugin is a harmless no-op.
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r    || true
+
     conda install python=3.11
 
     # Install Snakemake
