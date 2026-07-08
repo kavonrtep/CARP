@@ -1,6 +1,16 @@
 # Changelog
 
-## 1.0.5
+## 1.0.6
+- **Fix Singularity/SIF build failure (Anaconda channel Terms of Service).**
+  With the `jq` fix from 1.0.4 in place, the SIF build got past the Bioconductor
+  post-link but then failed at the bootstrap `conda install` in `%post`:
+  conda 26.x (in the `continuumio/miniconda3` base image) now refuses to install
+  from the default `pkgs/main` / `pkgs/r` channels until their Terms of Service
+  are accepted (`CondaToSNonInteractiveError`). The `%post` now runs
+  `conda tos accept` for both channels before any install (guarded with
+  `|| true` so it is a no-op on older conda without the ToS plugin). (1.0.5
+  published no artifacts — its build failed here — so this is the first release
+  to ship the HTML-report large-genome fix below.)
 - **HTML report: fix large-genome crash and make report generation non-fatal.**
   `make_repeat_report.R` aborted on a large genome while building the density
   panels: a bin midpoint on a chromosome > ~1.07 Gbp overflowed 32-bit integer
