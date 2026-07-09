@@ -23,12 +23,14 @@ dependencies:
   - repeatmasker=4.1.2.p1
   - seqkit=2.8.2
   - cap3=10.2011
-  - r-jsonlite
-  - r-yaml
-  - pyyaml
+  # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
+  # r-jsonlite/r-yaml are the r-base 4.1.3 (r41) builds this env resolves.
+  - r-jsonlite=1.8.5
+  - r-yaml=2.3.7
+  - pyyaml=6.0.3
   # jq here is belt-and-suspenders for the bioconductor-*data post-link scripts
   # (installBiocDataPackage.sh -> yq -> jq). The AUTHORITATIVE fix is the
   # system-level `apt-get install jq` in the Singularity %post, because conda
   # gives no ordering guarantee that this env-level jq links before
   # genomeinfodbdata's post-link runs. Keep both.
-  - jq
+  - jq=1.8.2

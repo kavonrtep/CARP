@@ -3,8 +3,12 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - seqkit
-  - parasail-python
-  - mmseqs2
-  - blast
-  - pyyaml
+  # Versions pinned to the validated SIF build (release 1.0.7). These were
+  # solved together and shipped in a working container, so they are a
+  # known-compatible set; re-pinning them keeps the dante_line env reproducible
+  # instead of re-solving to whatever conda-forge/bioconda serve at build time.
+  - seqkit=2.13.0
+  - parasail-python=1.3.4
+  - mmseqs2=18.8cc5c
+  - blast=2.17.0
+  - pyyaml=6.0.3

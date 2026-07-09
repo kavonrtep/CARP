@@ -36,15 +36,18 @@ channels:
   - petrnovak
 dependencies:
   - tidecluster=1.16.3
-  - bioconductor-rtracklayer
-  - r-optparse
-  - mmseqs2
-  - r-jsonlite
-  - r-yaml
-  - pyyaml
+  # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
+  # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
+  # resolves (TideCluster needs r-base >= 4.2).
+  - bioconductor-rtracklayer=1.62.0
+  - r-optparse=1.7.5
+  - mmseqs2=16.747c6
+  - r-jsonlite=2.0.0
+  - r-yaml=2.3.10
+  - pyyaml=6.0.3
   # jq here is belt-and-suspenders (bioconductor-rtracklayer pulls
   # bioconductor-genomeinfodbdata, whose post-link runs yq -> jq). The
   # AUTHORITATIVE fix is the system-level `apt-get install jq` in the Singularity
   # %post — conda gives no guarantee this env-level jq links before that
   # post-link runs. Keep both.
-  - jq
+  - jq=1.8.2
