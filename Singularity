@@ -41,20 +41,23 @@ From: continuumio/miniconda3:24.9.2-0
     conda config --remove channels defaults 2>/dev/null || true
     conda config --set channel_priority strict
 
-    # Remove Anaconda's base "helper" packages BEFORE installing python. Drifted
-    # base images ship telemetry/guide packages (anaconda-anon-usage,
-    # anaconda-channel-guide, ...) that HARD-PIN the base python (e.g. 3.14) and
-    # block the downgrade to 3.11 (LibMambaUnsatisfiableError); anaconda-anon-usage
-    # also corrupts 'conda info --json', which Snakemake 8.12+ parses. Remove
-    # them here (separate, guarded commands so a missing one is a harmless
-    # no-op). With the pinned 24.9.2-0 base these are largely no-ops, but they
-    # keep the build robust if the pin is ever bumped forward.
+    # Do NOT downgrade the base env's python. The pinned base ships python 3.12,
+    # and snakemake 8.12.0 is a noarch package (build pyhdfd78af_0 — runs on
+    # 3.11/3.12/3.13), so it installs into the base env as-is. Changing the base
+    # python (the old `conda install python=3.11`) rewrites the base env and
+    # breaks the base `conda` package, which is built for the base python; the
+    # next conda operation then fails plugin discovery with
+    # "PluginError: Conflicting post_solves plugins: signature-verification".
+    #
+    # anaconda-anon-usage (a base telemetry plugin) corrupts 'conda info --json',
+    # which Snakemake 8.12+ parses, so remove it first; also drop
+    # anaconda-channel-guide if present (both guarded, separate commands so a
+    # missing package is a harmless no-op).
     conda remove --force -y anaconda-anon-usage    2>/dev/null || true
     conda remove --force -y anaconda-channel-guide 2>/dev/null || true
 
-    conda install -y --override-channels -c conda-forge python=3.11
-
-    # Install Snakemake (conda-forge + bioconda only)
+    # Install Snakemake into the base env (conda-forge + bioconda only; the base
+    # python 3.12 is retained — snakemake 8.12.0 is noarch).
     conda install -y --override-channels -c conda-forge -c bioconda snakemake=8.12.0
     conda init bash
 

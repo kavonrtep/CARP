@@ -17,10 +17,15 @@
   **conda-forge + bioconda**, never Anaconda's default channels (drops `defaults`
   from the config + `--override-channels` on the bootstrap installs) — avoids the
   ToS gate on any conda and keeps CARP off Anaconda's commercially-licensed
-  channels; (3) remove the Anaconda helper packages (`anaconda-anon-usage`,
-  `anaconda-channel-guide`) before the python install so a future pin bump can't
-  reintroduce the python-pin conflict. (The earlier 1.0.4 `jq` system-install
-  fix for the Bioconductor `genomeinfodbdata` post-link is retained.)
+  channels; (3) stop downgrading the base env's python — snakemake 8.12.0 is a
+  noarch package, so it installs onto the base python (3.12) as-is; the old
+  `conda install python=3.11` rewrote the base env and broke the base `conda`
+  package, whose next operation then failed plugin discovery
+  (`PluginError: Conflicting post_solves plugins: signature-verification`);
+  (4) remove the Anaconda telemetry helper packages (`anaconda-anon-usage`,
+  `anaconda-channel-guide`) so `conda info --json` stays clean for Snakemake.
+  (The earlier 1.0.4 `jq` system-install fix for the Bioconductor
+  `genomeinfodbdata` post-link is retained.)
 - **HTML report: fix large-genome crash and make report generation non-fatal.**
   `make_repeat_report.R` aborted on a large genome while building the density
   panels: a bin midpoint on a chromosome > ~1.07 Gbp overflowed 32-bit integer
