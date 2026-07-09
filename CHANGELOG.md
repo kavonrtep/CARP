@@ -1,20 +1,26 @@
 # Changelog
 
 ## Unreleased
-- **Fix Singularity/SIF build failure (Anaconda channel Terms of Service).**
-  After the 1.0.4 `jq` fix cleared the Bioconductor post-link, the build failed
-  in `%post` at the bootstrap conda step: the (unpinned) `continuumio/miniconda3`
-  base image drifted to a newer conda that refuses to install from Anaconda's
-  default `pkgs/main` / `pkgs/r` channels until their Terms of Service are
-  accepted (`CondaToSNonInteractiveError`) — and, worse, that conda build
-  enforces the ToS but does not even ship the `conda tos` CLI to accept it
-  (so the 1.0.6 `conda tos accept` attempt was an invalid command). The build
-  path was byte-identical to the working 1.0.4 build, so this was pure
-  base-image drift. Fix: build the container from **conda-forge + bioconda
-  only**, never Anaconda's default channels — the `%post` drops `defaults` from
-  the conda config and uses `--override-channels` for the bootstrap installs, so
-  no solve touches the ToS-gated channels (also keeps CARP off Anaconda's
-  commercially-licensed channels). Independent of the conda version.
+- **Pin the Singularity base image and harden `%post` against base-image drift
+  (fixes the SIF build).** The `continuumio/miniconda3` base was unpinned, so
+  every build pulled `:latest`; between the working 1.0.4 build and the next one
+  it drifted twice and broke the release build (the `%post` and `envs/` were
+  byte-identical the whole time — `git diff 1.0.4 1.0.5 -- Singularity envs/` is
+  empty). First a newer conda began enforcing Anaconda's channel Terms of
+  Service on the default `pkgs/main`/`pkgs/r` channels
+  (`CondaToSNonInteractiveError`) — and that conda build enforced it but didn't
+  ship the `conda tos` CLI to accept it. Then the base python jumped to 3.14 with
+  an Anaconda helper package (`anaconda-channel-guide`) that hard-pinned it,
+  blocking the downgrade to 3.11 (`LibMambaUnsatisfiableError`). Fixes:
+  (1) **pin** `From: continuumio/miniconda3:24.9.2-0` (a pre-drift conda 24.9.2
+  build — the same conda the project's sandbox uses); (2) build only from
+  **conda-forge + bioconda**, never Anaconda's default channels (drops `defaults`
+  from the config + `--override-channels` on the bootstrap installs) — avoids the
+  ToS gate on any conda and keeps CARP off Anaconda's commercially-licensed
+  channels; (3) remove the Anaconda helper packages (`anaconda-anon-usage`,
+  `anaconda-channel-guide`) before the python install so a future pin bump can't
+  reintroduce the python-pin conflict. (The earlier 1.0.4 `jq` system-install
+  fix for the Bioconductor `genomeinfodbdata` post-link is retained.)
 - **HTML report: fix large-genome crash and make report generation non-fatal.**
   `make_repeat_report.R` aborted on a large genome while building the density
   panels: a bin midpoint on a chromosome > ~1.07 Gbp overflowed 32-bit integer

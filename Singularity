@@ -1,5 +1,14 @@
 Bootstrap: docker
-From: continuumio/miniconda3
+# PINNED base image (do not use the floating :latest). The unpinned
+# continuumio/miniconda3 drifted repeatedly and broke the release build:
+# first a newer conda started enforcing Anaconda's channel Terms of Service
+# (CondaToSNonInteractiveError), then the base python jumped to 3.14 with an
+# Anaconda helper package (anaconda-channel-guide) that hard-pinned it and
+# blocked the downgrade to 3.11. 24.9.2-0 is a pre-drift conda 24.9.2 build
+# (the same conda version this project's sandbox runs the pipeline on, so it is
+# known-compatible). Bump this tag deliberately, and re-test the SIF build, when
+# you actually want a newer base — never let it float.
+From: continuumio/miniconda3:24.9.2-0
 
 %post
     apt-get update
@@ -15,29 +24,33 @@ From: continuumio/miniconda3
     export CONDARC=/opt/conda/config/.condarc
 
     # Build ONLY from conda-forge + bioconda, never Anaconda's default channels
-    # (pkgs/main, pkgs/r).
-    #
-    # Why: `From: continuumio/miniconda3` is unpinned, so each build pulls the
-    # current image. Newer conda (25/26) refuses to install from the default
-    # channels until their Terms of Service are accepted, aborting the build
-    # with "CondaToSNonInteractiveError". This gate appeared purely via
-    # base-image drift AFTER the 1.0.4 build (whose conda predated ToS
-    # enforcement) — the %post itself was unchanged. Worse, some of these conda
-    # builds enforce the ToS but do not ship the `conda tos` CLI to accept it,
-    # so accepting is impossible. The robust, version-independent fix is to not
-    # resolve against the default channels at all — which also keeps CARP off
-    # Anaconda's commercially-licensed channels. `--override-channels` ignores
-    # any configured channels (incl. defaults) for the bootstrap installs, and
-    # dropping `defaults` from the config keeps the later `snakemake --use-conda`
-    # env creation (which reads this config) off them too.
-    # Strip the default channels from BOTH the system condarc and $CONDARC so
-    # neither the bootstrap nor the later `snakemake --use-conda` env creation
-    # (which reads the config, not --override-channels) resolves against them.
+    # (pkgs/main, pkgs/r). This (1) keeps CARP off Anaconda's commercially-
+    # licensed channels, and (2) is defence-in-depth against the channel Terms-
+    # of-Service gate: newer conda refuses to install from the default channels
+    # until their ToS is accepted (CondaToSNonInteractiveError), and some conda
+    # builds enforce that but don't even ship the `conda tos` CLI to accept it.
+    # The pinned 24.9.2-0 base predates ToS enforcement, but keeping defaults out
+    # of the config means a future pin bump can't silently reintroduce the gate.
+    # --override-channels covers the bootstrap installs below; stripping
+    # `defaults` from BOTH the system condarc and $CONDARC covers the later
+    # `snakemake --use-conda` env creation (which reads the config, not
+    # --override-channels).
     conda config --system --remove channels defaults 2>/dev/null || true
     conda config --add channels bioconda
     conda config --add channels conda-forge
     conda config --remove channels defaults 2>/dev/null || true
     conda config --set channel_priority strict
+
+    # Remove Anaconda's base "helper" packages BEFORE installing python. Drifted
+    # base images ship telemetry/guide packages (anaconda-anon-usage,
+    # anaconda-channel-guide, ...) that HARD-PIN the base python (e.g. 3.14) and
+    # block the downgrade to 3.11 (LibMambaUnsatisfiableError); anaconda-anon-usage
+    # also corrupts 'conda info --json', which Snakemake 8.12+ parses. Remove
+    # them here (separate, guarded commands so a missing one is a harmless
+    # no-op). With the pinned 24.9.2-0 base these are largely no-ops, but they
+    # keep the build robust if the pin is ever bumped forward.
+    conda remove --force -y anaconda-anon-usage    2>/dev/null || true
+    conda remove --force -y anaconda-channel-guide 2>/dev/null || true
 
     conda install -y --override-channels -c conda-forge python=3.11
 
@@ -54,12 +67,8 @@ From: continuumio/miniconda3
     conda activate base
     # Verify that strict channel priority is set
     conda config --show | grep channel_priority
-
-    # anaconda-anon-usage (Anaconda telemetry plugin) is incompatible with
-    # conda 26.x: it prints "Error loading anaconda-anon-usage: ..." to STDOUT
-    # before the JSON, corrupting 'conda info --json' output that Snakemake
-    # 8.12+ parses. Remove it so conda info returns clean JSON.
-    conda remove anaconda-anon-usage --force -y || true
+    # (anaconda-anon-usage / anaconda-channel-guide were removed above, before
+    #  the python install, so 'conda info --json' is clean for Snakemake here.)
 
     cd /opt/pipeline
     # make dummy data so snakemake can create the environments
