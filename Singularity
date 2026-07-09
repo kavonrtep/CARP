@@ -14,23 +14,35 @@ From: continuumio/miniconda3
     mkdir -p /opt/conda/config
     export CONDARC=/opt/conda/config/.condarc
 
-    # Accept the Anaconda channel Terms of Service BEFORE any conda install.
-    # conda 26.x refuses to install from the default pkgs/main and pkgs/r
-    # channels until their ToS is accepted, otherwise it aborts the build with
-    # "CondaToSNonInteractiveError: Terms of Service have not been accepted".
-    # The base continuumio/miniconda3 image ships those channels, and the two
-    # bootstrap `conda install`s below resolve against them. Guarded with
-    # || true so a future base image without the ToS plugin is a harmless no-op.
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r    || true
-
-    conda install python=3.11
-
-    # Install Snakemake
-    conda install -c bioconda -c conda-forge snakemake=8.12.0
-    # mamba install h5py
-    # configure strict channel priority
+    # Build ONLY from conda-forge + bioconda, never Anaconda's default channels
+    # (pkgs/main, pkgs/r).
+    #
+    # Why: `From: continuumio/miniconda3` is unpinned, so each build pulls the
+    # current image. Newer conda (25/26) refuses to install from the default
+    # channels until their Terms of Service are accepted, aborting the build
+    # with "CondaToSNonInteractiveError". This gate appeared purely via
+    # base-image drift AFTER the 1.0.4 build (whose conda predated ToS
+    # enforcement) — the %post itself was unchanged. Worse, some of these conda
+    # builds enforce the ToS but do not ship the `conda tos` CLI to accept it,
+    # so accepting is impossible. The robust, version-independent fix is to not
+    # resolve against the default channels at all — which also keeps CARP off
+    # Anaconda's commercially-licensed channels. `--override-channels` ignores
+    # any configured channels (incl. defaults) for the bootstrap installs, and
+    # dropping `defaults` from the config keeps the later `snakemake --use-conda`
+    # env creation (which reads this config) off them too.
+    # Strip the default channels from BOTH the system condarc and $CONDARC so
+    # neither the bootstrap nor the later `snakemake --use-conda` env creation
+    # (which reads the config, not --override-channels) resolves against them.
+    conda config --system --remove channels defaults 2>/dev/null || true
+    conda config --add channels bioconda
+    conda config --add channels conda-forge
+    conda config --remove channels defaults 2>/dev/null || true
     conda config --set channel_priority strict
+
+    conda install -y --override-channels -c conda-forge python=3.11
+
+    # Install Snakemake (conda-forge + bioconda only)
+    conda install -y --override-channels -c conda-forge -c bioconda snakemake=8.12.0
     conda init bash
 
     # Source the conda.sh script to ensure conda commands are available

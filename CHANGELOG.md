@@ -1,16 +1,20 @@
 # Changelog
 
-## 1.0.6
+## Unreleased
 - **Fix Singularity/SIF build failure (Anaconda channel Terms of Service).**
-  With the `jq` fix from 1.0.4 in place, the SIF build got past the Bioconductor
-  post-link but then failed at the bootstrap `conda install` in `%post`:
-  conda 26.x (in the `continuumio/miniconda3` base image) now refuses to install
-  from the default `pkgs/main` / `pkgs/r` channels until their Terms of Service
-  are accepted (`CondaToSNonInteractiveError`). The `%post` now runs
-  `conda tos accept` for both channels before any install (guarded with
-  `|| true` so it is a no-op on older conda without the ToS plugin). (1.0.5
-  published no artifacts — its build failed here — so this is the first release
-  to ship the HTML-report large-genome fix below.)
+  After the 1.0.4 `jq` fix cleared the Bioconductor post-link, the build failed
+  in `%post` at the bootstrap conda step: the (unpinned) `continuumio/miniconda3`
+  base image drifted to a newer conda that refuses to install from Anaconda's
+  default `pkgs/main` / `pkgs/r` channels until their Terms of Service are
+  accepted (`CondaToSNonInteractiveError`) — and, worse, that conda build
+  enforces the ToS but does not even ship the `conda tos` CLI to accept it
+  (so the 1.0.6 `conda tos accept` attempt was an invalid command). The build
+  path was byte-identical to the working 1.0.4 build, so this was pure
+  base-image drift. Fix: build the container from **conda-forge + bioconda
+  only**, never Anaconda's default channels — the `%post` drops `defaults` from
+  the conda config and uses `--override-channels` for the bootstrap installs, so
+  no solve touches the ToS-gated channels (also keeps CARP off Anaconda's
+  commercially-licensed channels). Independent of the conda version.
 - **HTML report: fix large-genome crash and make report generation non-fatal.**
   `make_repeat_report.R` aborted on a large genome while building the density
   panels: a bin midpoint on a chromosome > ~1.07 Gbp overflowed 32-bit integer
