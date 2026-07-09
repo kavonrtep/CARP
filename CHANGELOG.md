@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+- **Pin CARP's own conda env dependencies to the validated 1.0.7 SIF versions
+  (reproducibility).** The env files listed several deps unpinned
+  (`envs/dante_line.yaml`: `seqkit`, `parasail-python`, `mmseqs2`, `blast`,
+  `pyyaml`; `envs/tidecluster.yaml` / `envs/tidecluster_run.yaml`: the
+  `r-jsonlite`/`r-yaml`/`r-optparse`/`pyyaml`/`jq` helper deps and
+  `bioconductor-rtracklayer`/`mmseqs2`), so each build re-solved them to whatever
+  the channels served that day. They are now pinned to the exact versions that
+  the validated 1.0.7 container shipped (a known co-solvable set), so the CARP
+  envs build reproducibly. The r-* helper pins deliberately differ between the
+  two TideCluster envs because they track each env's `r-base` (4.1.3 vs 4.3.3).
+  The upstream tools' transitive deps are still unconstrained — that is the
+  subject of `docs/dante_tidecluster_dependency_pinning_request.md`.
+
 ## 1.0.7
 - **Pin the Singularity base image and harden `%post` against base-image drift
   (fixes the SIF build).** The `continuumio/miniconda3` base was unpinned, so
