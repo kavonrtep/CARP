@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.7
 - **Pin the Singularity base image and harden `%post` against base-image drift
   (fixes the SIF build).** The `continuumio/miniconda3` base was unpinned, so
   every build pulled `:latest`; between the working 1.0.4 build and the next one
