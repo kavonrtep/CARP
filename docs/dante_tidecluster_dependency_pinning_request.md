@@ -26,18 +26,25 @@ closure.
 
 CARP pins the four tool versions above and builds a released Singularity image
 on every tag. Because the recipes leave the deps unconstrained, the deps float.
-Concrete examples of dependencies that are pulled with **no version constraint**
-(versions as currently solved in our built environments):
+The clearest evidence is a **single CARP container** (release 1.0.7): because
+the recipes don't constrain the deps, the *same* result-affecting dependency
+resolved to **different versions across the three tools' environments — in one
+image, built at one moment**:
 
-| dependency | pulled version | pulled by | result-affecting? |
-|------------|----------------|-----------|-------------------|
-| `mmseqs2` | `16.747c6` (TideCluster env) | TideCluster, DANTE_TIR | **yes** — clustering |
-| `mmseqs2` | `18.8cc5c` (another env) | (unconstrained → drifts) | **yes** |
-| `repeatmasker` | (bundled, unconstrained) | TideCluster, DANTE_LTR | **yes** — masking |
-| `bioconductor-rtracklayer` | `1.62.0` | TideCluster, DANTE_LTR | yes — R I/O |
-| `r-base` | `4.3.3` (TideCluster) / `4.1.3` (DANTE) | all R steps | yes |
-| `blast` | `2.17.0` | DANTE_*, TideCluster | yes |
-| `r-optparse`, `r-jsonlite`, `r-yaml` | float | R steps | low |
+| dependency | DANTE / DANTE_LTR env | DANTE_TIR env | TideCluster env | result-affecting? |
+|------------|:---------------------:|:-------------:|:---------------:|-------------------|
+| `mmseqs2` | `16.747c6` | **`18.8cc5c`** | `16.747c6` | **yes** — clustering (major-version split) |
+| `bioconductor-rtracklayer` | `1.54.0` | **`1.62.0`** | **`1.62.0`** | yes — R I/O (8 minor versions apart) |
+| `r-base` | `4.1.3` | **`4.3.3`** | **`4.3.3`** | yes — whole R stack |
+| `blast` | `2.16.0` | **`2.17.0`** | `2.16.0` | yes |
+| `repeatmasker` | `4.1.2.p1` | — | `4.1.2.p1` | yes — masking |
+| `tidehunter` | `1.4.3` | — | `1.4.3` | yes — tandem detection |
+| `cap3` | `10.2011` | `10.2011` | — | yes |
+
+If a single build can't even resolve `mmseqs2` or `rtracklayer` consistently
+across the three tools, then the *same recipe rebuilt next month* has no chance
+of reproducing today's versions. (The version each tool happens to get is just
+"latest compatible on build day".)
 
 The same class of drift recently broke CARP's release build repeatedly (the
 unpinned `continuumio/miniconda3` base drifted to a conda that enforced
