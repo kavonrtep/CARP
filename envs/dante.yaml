@@ -1,0 +1,19 @@
+# Dedicated env for the `dante` rule (the bare DANTE protein-domain search).
+#
+# Split out from envs/tidecluster.yaml as of dante 0.2.11 / dante_ltr 0.5.1.0:
+# dante 0.2.11 moved to r-base 4.2.3, while dante_ltr 0.5.1.0 still pins
+# r-dplyr 1.0.7 (which only builds for r-base <4.2). The two therefore can no
+# longer coexist in one conda env. The `dante` rule is the only rule that runs
+# the `dante` command, so it gets its own env here; dante_ltr and the R/report
+# stack stay in envs/tidecluster.yaml (r-base 4.1). If a future dante_ltr release
+# relaxes the r-dplyr pin to allow r-base 4.2, the two can be re-merged.
+#
+# dante 0.2.11 includes the post-chunk merge-tail parallelization (parallel
+# per-chunk coordinate recalculation + `sort --parallel`) contributed from CARP.
+name: dante
+channels:
+  - conda-forge
+  - bioconda
+  - petrnovak
+dependencies:
+  - dante=0.2.11
