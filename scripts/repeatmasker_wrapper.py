@@ -55,6 +55,32 @@ def read_single_fasta_to_dictionary(fh):
     return fasta_dict
 
 
+def iter_fasta_records(fasta_file):
+    """Yield ``(header, sequence)`` one record at a time.
+
+    Only the current record is held in memory (peak = the largest single
+    sequence), not the whole file — the streaming replacement for
+    ``read_single_fasta_to_dictionary``, which materialised the entire
+    (genome-sized) FASTA in RAM (~90 GB on a 90 Gbp assembly). The header is the
+    token up to the first whitespace, matching ``read_fasta_sequence_size`` /
+    ``read_single_fasta_to_dictionary`` so the same ``matching_table`` keys line
+    up. The file handle is closed on exit (the old callers leaked it).
+    """
+    header = None
+    chunks = []
+    with open(fasta_file, 'r') as fh:
+        for line in fh:
+            if line and line[0] == '>':
+                if header is not None:
+                    yield header, ''.join(chunks)
+                header = line.strip().split()[0][1:]
+                chunks = []
+            else:
+                chunks.append(line.strip())
+        if header is not None:
+            yield header, ''.join(chunks)
+
+
 def split_fasta_to_chunks(fasta_file, chunk_size=100000000, overlap=100000, temp_dir=None):
     """
     Split fasta file to chunks, sequences longe than chuck size are split to overlaping
@@ -92,21 +118,20 @@ def split_fasta_to_chunks(fasta_file, chunk_size=100000000, overlap=100000, temp
             new_header = header + '_0'
             matching_table.append([header, 0, 0, size, new_header])
     print("splitting fasta file")
-    # read sequences from fasta files and split them to chunks according to matching table
-    # open output and input files, use with statement to close files
-    # TODO - avoid using dictionary - could be problem for large files!!
-    fasta_dict = read_single_fasta_to_dictionary(open(fasta_file, 'r'))
     # Index matching_table rows by original header once. This was previously a
     # per-header `[x for x in matching_table if x[0]==header]` scan inside the
     # loop -> O(headers x chunks), pathological on highly fragmented assemblies.
     rows_by_header = {}
     for row in matching_table:
         rows_by_header.setdefault(row[0], []).append(row)
+    # Stream the FASTA one record at a time and write its chunk slices — the old
+    # read_single_fasta_to_dictionary held the entire genome in RAM (~90 GB on a
+    # 90 Gbp assembly). Records stream in file order, so the output is identical.
     with open(fasta_file_split, 'w') as fh_out:
-        for header in fasta_dict:
+        for header, sequence in iter_fasta_records(fasta_file):
             for header2, i, start, end, new_header in rows_by_header.get(header, []):
                 fh_out.write('>' + new_header + '\n')
-                fh_out.write(fasta_dict[header][start:end] + '\n')
+                fh_out.write(sequence[start:end] + '\n')
     return fasta_file_split, matching_table
 
 def make_temp_files(number_of_files):
@@ -269,11 +294,13 @@ def split_fasta_to_files(fasta_file, workdir, chunk_size=5000000):
     final annotation — are identical; only the number of RM processes (and the
     redundant per-process library preprocessing) drops.
     """
-    fasta_dict = read_single_fasta_to_dictionary(open(fasta_file, 'r'))
     fasta_files = []
     cur_fh = None
     cur_size = 0
-    for header, sequence in fasta_dict.items():
+    # Stream one record at a time (bin-packing needs no random access) — the old
+    # read_single_fasta_to_dictionary held the entire genome-sized split file in
+    # RAM (~90 GB). Records stream in file order, so the bins are identical.
+    for header, sequence in iter_fasta_records(fasta_file):
         seq_len = len(sequence)
         # Close the current bin when adding this record would push it over
         # chunk_size. A record >= chunk_size simply lands in a bin of its own.
