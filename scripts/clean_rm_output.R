@@ -8,32 +8,22 @@ source(file.path(dirname(sub("^--file=", "",
 gff_cleanup <- function(gff){
   ## remove overlapin annotation track - assign new annot
   gff_disjoin <- disjoin(gff, with.revmap=TRUE)
-  ## append annotation:
-  #  Parallel workers from CPU_COUNT (exported by the repeatmasker rule).
-  #  Fall back to a small fixed default rather than detectCores(): a
-  #  machine-wide count would oversubscribe the job's allocation and
-  #  balloon COW max_rss (see the sister fix in merge_repeat_annotations.R).
-  #  mc.cores never affects the result (mclapply preserves input order),
-  #  only speed/memory.
-  num_cores <- as.integer(Sys.getenv("CPU_COUNT"))
-  if (is.na(num_cores) || num_cores < 1L){
-    num_cores <- 4L
-  }
-  #  Single fused pass over the disjoint ranges (Name + strand together),
-  #  halving the fork/join versus the previous two separate mclapply calls.
-  gff_annot <- mclapply(as.list(gff_disjoin$revmap),
-                        FUN = function(x) list(name = gff$Name[x],
-                                               strand = strand(gff[x])),
-                        mc.cores = num_cores)
-  gff_names <- lapply(gff_annot, `[[`, "name")
-  gff_strands <- lapply(gff_annot, `[[`, "strand")
-  new_annot <- sapply(sapply(gff_names, unique), paste, collapse="|")
+  ## For each disjoint range, collapse the Names (and strands) of the source
+  ## features with a single vectorized extractList + unstrsplit that stays in the
+  ## compressed S4Vectors list domain. The previous approach did
+  ## as.list(gff_disjoin$revmap) — materialising tens of millions of tiny R
+  ## vectors — inside an mclapply that COW-forked the whole GRanges into every
+  ## worker, hitting 296 GB max_rss on a 3.9 Gb genome. The result is identical
+  ## (order-preserving); parallel/CPU_COUNT are no longer needed here.
+  names_cl  <- extractList(gff$Name, gff_disjoin$revmap)
+  new_annot <- unstrsplit(unique(names_cl), sep = "|")
+  strand_cl <- extractList(as.character(strand(gff)), gff_disjoin$revmap)
+  strand_attribute <- unstrsplit(unique(strand_cl), sep = "|")
+  ## LCA per DISTINCT class-combo (bounded set), then map back to all ranges.
   new_annot_uniq <- unique(new_annot)
   lca_annot <- sapply(strsplit(new_annot_uniq, "|", fixed = TRUE), resolve_name)
   names(lca_annot) <- new_annot_uniq
   new_annot_lca <- lca_annot[new_annot]
-  #new_annot_lca = sapply(sapply(gff_names, unique), resolve_name)
-  strand_attribute <- sapply(sapply(gff_strands, unique), paste, collapse="|")
   gff_disjoin$source <- "RM"
   gff_disjoin$type <- "repeat"
   gff_disjoin$score <- NA
@@ -67,7 +57,16 @@ args <- commandArgs(trailingOnly = TRUE)
 infile <- args[1]
 outfile <- args[2]
 
-rm_out <- read.table(infile, as.is=TRUE, sep="", skip = 2, fill=TRUE, header=FALSE, col.names=paste0("V", 1:16))
+# Read only the 5 columns actually used (V5 seqname, V6/V7 coords, V10/V11
+# class), skipping the other 11 via colClasses="NULL". On a 90 Gbp genome the
+# raw RepeatMasker .out has hundreds of millions of rows, so dropping 11 columns
+# and the type-guessing is a large memory/time saving. (data.table::fread would
+# be faster still but is not in this env.)
+.rm_col_classes <- rep("NULL", 16)
+.rm_col_classes[c(5, 6, 7)] <- c("character", "integer", "integer")
+.rm_col_classes[c(10, 11)]  <- "character"
+rm_out <- read.table(infile, as.is=TRUE, sep="", skip = 2, fill=TRUE, header=FALSE,
+                     col.names=paste0("V", 1:16), colClasses = .rm_col_classes)
 
 gff <- GRanges(seqnames = rm_out$V5, ranges = IRanges(start = rm_out$V6, end=rm_out$V7))
 
