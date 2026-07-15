@@ -48,6 +48,15 @@ jobs:
       - name: All-vs-all alignment grouping (OOM-guard) logic
         run: python tests/test_aln_grouping.py
 
+      - name: Flank-index equivalence (dante_line / dante_tir_fallback)
+        run: python tests/test_flank_index.py
+
+      - name: RepeatMasker-wrapper streaming FASTA reader
+        run: python tests/test_repeatmasker_wrapper_streaming.py
+
+      - name: Every test is run by CI or explicitly exempted (coverage guard)
+        run: python tests/test_ci_test_coverage.py
+
       - name: R classification vector
         run: Rscript tests/test_classification.R
 
