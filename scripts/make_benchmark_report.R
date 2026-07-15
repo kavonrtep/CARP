@@ -35,7 +35,17 @@ for (col in c("s", "max_rss", "max_vms", "max_uss", "max_pss",
 df <- df[order(-df$s, na.last = TRUE), ]
 
 # ── SVG helper ─────────────────────────────────────────────────────────────
-# Returns inline SVG string from a base-R plot function
+# Returns inline SVG string from a base-R plot function.
+#
+# cairo's svg() device gives every SVG document-LOCAL ids (clip-N, glyph-N-M)
+# that restart from the same numbers in each file. Inlining several such SVGs
+# into ONE HTML page makes those ids collide: a later chart's
+# `<use xlink:href="#glyph-0-1">` / `clip-path="url(#clip-1)"` resolves to the
+# FIRST chart's definition, so its text (labels, y-axis) and clipping render in
+# the wrong place. The first chart is fine because it is defined first. Fix:
+# give each SVG a unique id prefix, rewriting both the id="…" definitions and
+# every reference to them (url(#…) and [xlink:]href="#…").
+.svg_id_counter <- 0L
 make_svg <- function(plot_fn, width = 10, height = 5.5) {
   tmp <- tempfile(fileext = ".svg")
   on.exit(unlink(tmp))
@@ -44,7 +54,13 @@ make_svg <- function(plot_fn, width = 10, height = 5.5) {
     plot.new(); text(0.5, 0.5, paste("Plot error:", e$message), cex = 0.8)
   })
   dev.off()
-  paste(readLines(tmp, warn = FALSE), collapse = "\n")
+  s <- paste(readLines(tmp, warn = FALSE), collapse = "\n")
+  .svg_id_counter <<- .svg_id_counter + 1L
+  pfx <- sprintf("c%d-", .svg_id_counter)
+  s <- gsub('id="',    paste0('id="',    pfx), s, fixed = TRUE)
+  s <- gsub('url(#',   paste0('url(#',   pfx), s, fixed = TRUE)
+  s <- gsub('href="#', paste0('href="#', pfx), s, fixed = TRUE)
+  s
 }
 
 bar_colors <- function(vals, hi = "#d73027", lo = "#4575b4") {
