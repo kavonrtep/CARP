@@ -129,7 +129,10 @@ safe_import <- function(path) {
 # Ensures all retained columns are plain atomic vectors (not CharacterList).
 subset_seqs <- function(gr, seqs) {
   if (length(gr) == 0) return(gr)
-  gr <- gr[as.character(seqnames(gr)) %in% seqs]
+  # `%in%` on the seqnames Rle matches on run values (cheap); the old
+  # `as.character(seqnames(gr))` expanded the whole tier's seqnames to a plain
+  # character vector on every batch call -> O(n_batches x tier_features).
+  gr <- gr[seqnames(gr) %in% seqs]
   if (length(gr) == 0) return(gr)
   # Rebuild mcols with only the standardised columns, coerced to plain types
   md <- list()
@@ -632,13 +635,30 @@ resolve_tier1_overlaps <- function(t1, min_len) {
   h <- suppressWarnings(findOverlaps(t1, ignore.strand = TRUE,
                                      drop.self = TRUE, drop.redundant = TRUE))
   if (length(h) == 0) return(t1)
-  t1s  <- t1[order(width(t1), decreasing = TRUE)]   # longest first stays complete
+  # Only features that overlap another need the greedy trim; the rest pass
+  # through intact. A non-overlapping feature cannot overlap an overlapping one
+  # (or it would appear in `h`), so a trim never has to consider the pass-through
+  # set — restricting the loop to the overlapping subset is exact. This turns the
+  # old O(N^2) (grow `kept` by one element per feature AND trim each feature
+  # against the whole growing set) into O(k^2), k = overlapping tier-1 features in
+  # the batch (usually tiny; a single overlapping pair used to drag the whole
+  # batch's tier-1 set through the loop). Output order is irrelevant — the
+  # combined annotation is sorted in finalise_output.
+  involved    <- sort(unique(c(queryHits(h), subjectHits(h))))
+  passthrough <- t1[-involved]
+  t1s  <- t1[involved][order(width(t1[involved]), decreasing = TRUE)]  # longest first
+  pieces <- vector("list", length(t1s))
+  pieces[[1]] <- t1s[1]
   kept <- t1s[1]
   for (i in 2:length(t1s)) {
     piece <- trim_to_nonoverlap(t1s[i], kept, min_len)
-    if (length(piece) > 0) kept <- suppressWarnings(c(kept, piece))
+    if (length(piece) > 0) {
+      pieces[[i]] <- piece
+      kept <- suppressWarnings(c(kept, piece))
+    }
   }
-  kept
+  pieces <- pieces[!vapply(pieces, is.null, logical(1))]
+  suppressWarnings(c(passthrough, do.call(c, pieces)))
 }
 
 # After trimming lower-tier features against higher tiers, some overlaps can be
@@ -1032,9 +1052,23 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
         sprintf("##git-sha %s", .or_unknown(prov$git_sha)),
         sprintf("##run-started %s", .or_unknown(prov$run_started))
       )
-      gff_lines <- readLines(output_path)
-      # Insert after the existing ##gff-version line (always first).
-      writeLines(c(gff_lines[1], header, gff_lines[-1]), output_path)
+      # Insert after the existing ##gff-version line (always first) by streaming
+      # into a sibling temp file — readLines(output_path) used to pull the entire
+      # multi-GB unified GFF3 into memory just to prepend 3 lines.
+      tmp_out <- tempfile(tmpdir = dirname(output_path))
+      con_in  <- file(output_path, "r")
+      con_out <- file(tmp_out, "w")
+      on.exit({ if (isOpen(con_in)) close(con_in)
+                if (isOpen(con_out)) close(con_out) }, add = TRUE)
+      first <- readLines(con_in, n = 1L)
+      writeLines(c(first, header), con_out)
+      repeat {
+        chunk <- readLines(con_in, n = 100000L)
+        if (length(chunk) == 0L) break
+        writeLines(chunk, con_out)
+      }
+      close(con_in); close(con_out)
+      file.rename(tmp_out, output_path)
     }
   }
 
