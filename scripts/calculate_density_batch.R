@@ -55,6 +55,10 @@ density_per_family <- function(g, chr_size_all, step, N_for_mean = 10){
   occ <- seqlevels(g)
   not_used <- setdiff(names(chr_size_all), occ)
   chr_in_order <- chr_size_all[c(occ, not_used)]   # occupied first, as the original
+  # NB: tileGenome sets the tile width to sum(seqlengths)/round(sum/step), so the
+  # bin boundaries depend on the WHOLE-genome total — tiling occupied-only would
+  # produce different bins (verified). The grid must be built over the full
+  # genome and then filtered; only the (cheap) filter keeps it occupied-only.
   bins <- unlist(tileGenome(chr_in_order, tilewidth = step))
   bins <- bins[as.character(seqnames(bins)) %in% occ]
   bins <- keepSeqlevels(bins, occ, pruning.mode = "coarse")
