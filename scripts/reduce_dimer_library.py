@@ -27,11 +27,14 @@ Headers follow the RepeatMasker convention ``>name#classification``
 (e.g. ``>TRC_1#TRC_1``); the TRC group is the part after ``#``.
 """
 import argparse
+import multiprocessing
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 
 # mmseqs nucleotide k-mer length for the monomer-vs-dimer prefilter.
 #
@@ -187,6 +190,34 @@ def reduce_trc_group(records, work_dir, min_seq_id, min_cov, threads):
     return reps
 
 
+def _reduce_one_trc(task):
+    """Pool worker: reduce ONE TRC group. Returns (trc_id, reps, status, detail).
+
+    ``status`` is "reduced" | "short" | "fallback". mmseqs runs single-threaded
+    here because parallelism is across TRC groups; the result is identical to the
+    serial multi-threaded path — the reduction is thread-invariant (mmseqs hits
+    feed a set-based greedy cover; verified by comparing -t 1 vs -t 4 output).
+    Single-threaded is also the more robust path (the code's own retry dropped to
+    1 thread precisely because multi-thread mmseqs races/segfaults). The group's
+    scratch dir is removed on exit to bound peak disk.
+    """
+    trc_id, records, work_dir, min_seq_id, min_cov = task
+    os.makedirs(work_dir, exist_ok=True)
+    try:
+        shortest_mono = min(len(s) // 2 for _, s in records) if records else 0
+        if len(records) > 1 and shortest_mono < MIN_MONOMER_FOR_MMSEQS:
+            return (trc_id, records, "short", shortest_mono)
+        try:
+            reps = reduce_trc_group(records, work_dir, min_seq_id, min_cov, 1)
+            return (trc_id, reps, "reduced", "")
+        except Exception as exc:
+            # Reduction is a lossless optimisation, never a correctness
+            # requirement — keep the group UNREDUCED rather than fail the run.
+            return (trc_id, records, "fallback", str(exc))
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Rotation-invariant per-TRC reduction of a TideCluster dimer library."
@@ -214,58 +245,44 @@ def main():
     fallback_groups = 0
     fallback_seqs = 0
     short_groups = 0
+    trc_ids = sorted(groups)
+    # Reduce TRC groups in parallel (each mmseqs single-threaded) instead of
+    # serially with a multi-threaded mmseqs each. Every group is a tiny,
+    # independent mmseqs easy-search, so on a satellite-rich genome the old serial
+    # loop paid thousands of ~1-core mmseqs startups back-to-back. Output is
+    # identical: the reduction is thread-invariant, pool.map preserves input
+    # (sorted-TRC) order, and each group is independent. spawn keeps workers off
+    # the parent's heap; each group's records travel as the pickled task.
     with tempfile.TemporaryDirectory() as tmp_root:
-        for trc_id in sorted(groups):
-            records = groups[trc_id]
-            work_dir = os.path.join(tmp_root, trc_id.replace("/", "_"))
-            os.makedirs(work_dir, exist_ok=True)
-            # Skip the mmseqs path for groups whose shortest monomer is too short
-            # for the nucleotide prefilter (it would crash for ANY k). Keep them
-            # unreduced — lossless, and these ultra-short tandems are negligible.
-            shortest_mono = min(len(s) // 2 for _, s in records) if records else 0
-            if len(records) > 1 and shortest_mono < MIN_MONOMER_FOR_MMSEQS:
-                sys.stderr.write(
-                    f"  {trc_id}: shortest monomer ~{shortest_mono} bp is below the "
-                    f"mmseqs prefilter floor ({MIN_MONOMER_FOR_MMSEQS} bp); kept "
-                    f"unreduced ({len(records)} sequences)\n"
-                )
-                output_records.extend(records)
-                short_groups += 1
-                continue
-            try:
-                reps = reduce_trc_group(
-                    records, work_dir, args.min_seq_id, args.min_cov, args.threads
-                )
-            except Exception as exc:
-                # mmseqs can segfault / error on a pathological group. The
-                # reduction is a lossless optimisation, never a correctness
-                # requirement, so degrade gracefully instead of failing the
-                # whole pipeline. First retry single-threaded (many mmseqs
-                # segfaults are thread races / memory pressure with many
-                # threads); if that still fails, keep the group UNREDUCED —
-                # masking is unaffected, the dimer library for this TRC just
-                # stays full-size.
-                sys.stderr.write(
-                    f"  WARNING: {trc_id}: reduction failed ({exc}); "
-                    f"retrying single-threaded\n"
-                )
-                retry_dir = os.path.join(work_dir, "retry_t1")
-                os.makedirs(retry_dir, exist_ok=True)
-                try:
-                    reps = reduce_trc_group(
-                        records, retry_dir, args.min_seq_id, args.min_cov, 1
-                    )
-                except Exception as exc2:
-                    sys.stderr.write(
-                        f"  WARNING: {trc_id}: reduction failed again ({exc2}); "
-                        f"keeping all {len(records)} sequences unreduced "
-                        f"(lossless — masking unaffected)\n"
-                    )
-                    reps = records
-                    fallback_groups += 1
-                    fallback_seqs += len(records)
-            sys.stderr.write(f"  {trc_id}: {len(records)} → {len(reps)} sequences\n")
-            output_records.extend(reps)
+        tasks = [
+            (trc_id, groups[trc_id],
+             os.path.join(tmp_root, trc_id.replace("/", "_")),
+             args.min_seq_id, args.min_cov)
+            for trc_id in trc_ids
+        ]
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=max(1, args.threads),
+                                 mp_context=ctx) as pool:
+            results = list(pool.map(_reduce_one_trc, tasks))
+
+    for trc_id, reps, status, detail in results:
+        n_rec = len(groups[trc_id])
+        if status == "short":
+            sys.stderr.write(
+                f"  {trc_id}: shortest monomer ~{detail} bp is below the mmseqs "
+                f"prefilter floor ({MIN_MONOMER_FOR_MMSEQS} bp); kept unreduced "
+                f"({n_rec} sequences)\n"
+            )
+            short_groups += 1
+        elif status == "fallback":
+            sys.stderr.write(
+                f"  WARNING: {trc_id}: reduction failed ({detail}); keeping all "
+                f"{n_rec} sequences unreduced (lossless — masking unaffected)\n"
+            )
+            fallback_groups += 1
+            fallback_seqs += n_rec
+        sys.stderr.write(f"  {trc_id}: {n_rec} → {len(reps)} sequences\n")
+        output_records.extend(reps)
 
     write_fasta(output_records, args.output)
     sys.stderr.write(
