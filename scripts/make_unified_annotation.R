@@ -1058,8 +1058,15 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
       tmp_out <- tempfile(tmpdir = dirname(output_path))
       con_in  <- file(output_path, "r")
       con_out <- file(tmp_out, "w")
-      on.exit({ if (isOpen(con_in)) close(con_in)
-                if (isOpen(con_out)) close(con_out) }, add = TRUE)
+      # Safety net for the error path (a mid-stream readLines/writeLines throw
+      # leaves the connections open). On the success path the explicit close()
+      # below has already run, so these close() calls hit an already-closed
+      # connection — `close()` errors on that ("invalid connection"), so wrap in
+      # try(). NB: do NOT guard with isOpen() here: isOpen() itself *raises*
+      # "invalid connection" on a closed/destroyed connection (it does not return
+      # FALSE), which is exactly what crashed make_unified after a clean write.
+      on.exit({ try(close(con_in),  silent = TRUE)
+                try(close(con_out), silent = TRUE) }, add = TRUE)
       first <- readLines(con_in, n = 1L)
       writeLines(c(first, header), con_out)
       repeat {

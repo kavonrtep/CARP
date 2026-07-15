@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.1
+
+- **Hotfix: `make_unified_annotation` crashed at the end of a real pipeline run
+  (both CI fixtures red on the 1.1.0 tag).** The 1.1.0 streaming provenance-header
+  prepend (in `finalise_output`) guarded its connection cleanup with
+  `on.exit(if (isOpen(con)) close(con))`. In R, `isOpen()` **raises**
+  `"invalid connection"` on an already-closed connection — it does not return
+  `FALSE` — so after the explicit `close()` on the success path, the `on.exit`
+  handler threw at function exit, *after* the unified GFF3 had been written
+  correctly. R exited non-zero → snakemake failed the rule. The branch only runs
+  when `<output_dir>/run_provenance.json` exists, i.e. every `run_pipeline.py` /
+  container run (both CI fixtures, and every real user run), but **not** a bare
+  `snakemake` invocation — which is why 1.1.0's local validation missed it. Fixed
+  by using `try(close(con), silent = TRUE)` in `on.exit` instead of an `isOpen()`
+  guard. Regression test `tests/test_provenance_prepend.R` (wired into `unit.yml`)
+  exercises the success / missing / malformed-provenance paths and fails against
+  the old `isOpen()` cleanup.
+
 ## 1.1.0
 
 - **Large-genome (~90 Gbp) scaling pass across CARP's own scripts.** A sweep of
