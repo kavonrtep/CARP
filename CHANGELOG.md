@@ -1,6 +1,60 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
+
+- **Large-genome (~90 Gbp) scaling pass across CARP's own scripts.** A sweep of
+  the hangs / OOMs / quadratics that surfaced running the pipeline on a ~90 Gbp,
+  >10k-contig assembly. Every change is output-identical to the prior behaviour
+  and ships with a regression test:
+  - `dante_line.py` + `dante_tir_fallback.py`: flank clipping rescanned every
+    DANTE domain **and** every raw-TideHunter mask feature (millions on a large
+    genome) per pattern/anchor — O(patterns × features). Replaced with a shared
+    bisect `FeatureIndex` → O(patterns × log N) (`tests/test_flank_index.py`).
+  - `repeatmasker_wrapper.py`: `split_fasta_to_chunks` / `split_fasta_to_files`
+    loaded the whole genome into a Python dict (~90 GB each, twice) → stream one
+    record at a time via `iter_fasta_records()` (also closes two leaked handles;
+    `tests/test_repeatmasker_wrapper_streaming.py`).
+  - `clean_rm_output.R` + `merge_repeat_annotations.R`: `gff_cleanup` did
+    `as.list(revmap)` inside an `mclapply` that COW-forked the whole GRanges
+    (296 GB max_rss on a 3.9 Gb genome) → single vectorized `extractList` +
+    `unstrsplit`, no fork; `clean_rm_output.R` also reads only the 5 used
+    RepeatMasker `.out` columns via `colClasses` (`tests/test_gff_cleanup.R`).
+  - `make_unified_annotation.R`: dropped a per-batch full-Rle→character coercion
+    (`seqnames(gr) %in% seqs`), stopped `readLines()`-ing the whole unified GFF3
+    to prepend a 3-line provenance header (streaming prepend), and made the
+    tier-1 overlap resolver O(k²) instead of dragging the whole batch's tier-1
+    set through a greedy loop for a single overlapping pair
+    (`tests/test_resolve_tier1_overlaps.R`).
+  - `density_utils.R`: `rle_merge_granges` scanned all tiles once per seqlevel
+    (O(tiles × seqnames), effectively a hang at 90M tiles × >10k contigs) → a
+    single pass over the sorted seqnames-Rle runs (`tests/test_density_utils.R`).
+  - `reduce_dimer_library.py`: parallelised the per-TRC reduction (one group per
+    worker, each mmseqs single-threaded; the reduction is thread-invariant),
+    with per-group temp cleanup (`tests/test_reduce_dimer_parallel.sh`).
+  - `calculate_statistics_and_make_groups.R`: `readDNAStringSet(genome)`
+    (~90 GB just to sum widths) → `fasta.seqlengths()`.
+  - `Snakefile`: added the `ulimit -n` open-file stopgap to `tidecluster_long`,
+    `tidecluster_short` and `repeatmasker` (mirrors the existing `dante_ltr` /
+    `tidecluster_reannotate` stopgaps). Full audit in
+    `docs/carp_large_genome_audit.md`.
+- **Dependency modernization to the released upstream tools that now ship CARP's
+  large-genome fixes: `dante` 0.2.11, `dante_ltr` 0.5.1.0, `dante_tir` 0.2.7,
+  `TideCluster` 1.16.5.** These releases contain the fd-budget / merge-tail /
+  streaming-flanks / bounded-handle fixes contributed upstream from this project.
+  `dante` 0.2.11 moved to `r-base 4.2.3` while `dante_ltr` 0.5.1.0 still pins
+  `r-dplyr 1.0.7` (`r-base <4.2`), so DANTE can no longer share
+  `envs/tidecluster.yaml`: it splits into its own **`envs/dante.yaml`**
+  (r-base 4.2.3), and the two rules that run DANTE-package tools (`dante`,
+  `filter_dante` → `dante_gff_output_filtering.py`) point at it. Validated
+  end-to-end on tiny_pea (29/29 jobs, 0 errors; dante_ltr's 0.4→0.5 GFF3 schema
+  intact; `validate_classifications` green).
+- **Fixed misplaced plot / y-axis labels in the benchmark report's 2nd–4th
+  charts.** The four inline SVGs (from cairo's `svg()`) carried document-local
+  ids (`clip-N`, `glyph-N-M`) that collide when inlined into one page, so later
+  charts resolved their glyph/clip references to the first chart's definitions.
+  `make_benchmark_report.R` now namespaces each SVG's ids + references with a
+  unique per-chart prefix.
+
 - **Pin CARP's own conda env dependencies to the validated 1.0.7 SIF versions
   (reproducibility).** The env files listed several deps unpinned
   (`envs/dante_line.yaml`: `seqkit`, `parasail-python`, `mmseqs2`, `blast`,
