@@ -26,6 +26,7 @@ jobs:
             pyyaml
             r-base
             r-yaml
+            r-jsonlite
           cache-environment: true
           cache-downloads: true
 
@@ -49,6 +50,9 @@ jobs:
 
       - name: R classification vector
         run: Rscript tests/test_classification.R
+
+      - name: R provenance-header prepend (finalise_output on.exit guard)
+        run: Rscript tests/test_provenance_prepend.R
 
       - name: Pre-commit hook self-test
         run: |
