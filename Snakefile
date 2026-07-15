@@ -790,6 +790,13 @@ rule dante_ltr:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
+        # STOPGAP (large genomes): dante_ltr opens one temp-file handle per chunk
+        # simultaneously (int(total_size / -S) handles, ~1800 at 90 Gbp / 50 Mb),
+        # which exceeds the default soft open-file limit of 1024 and aborts with
+        # "OSError: [Errno 24] Too many open files". Raise the soft limit to the
+        # hard limit for this rule. Durable fix is upstream —
+        # see docs/dante_ltr_too_many_open_files_request.md.
+        ulimit -n "$(ulimit -Hn)" || true
         dante_ltr -o {params.prefix} -s {input.fasta} -g {input.gff} -c {threads} -M 1 -S 50000000
         # if exit status is 0 and gff3 file was created but html is missing, create an empty file
         echo "DANTE LTR-RTs finished"
@@ -911,6 +918,11 @@ rule tidecluster_long:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
+        # STOPGAP (large genomes): TideCluster's chunked run opens one handle per
+        # chunk (~genome_bp/chunk_size, ~1800 at 90 Gbp) and, with >10k contigs,
+        # more — exceeding the default 1024 soft limit ("Too many open files").
+        # Same class as dante_ltr/tc_reannotate. Raise soft→hard for this rule.
+        ulimit -n "$(ulimit -Hn)" || true
         wd=$(dirname {output.gff3_clust})
         prefix=$(basename {params.prefix})
         original_dir=$PWD
@@ -982,6 +994,9 @@ rule tidecluster_short:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
+        # STOPGAP (large genomes): see tidecluster_long — chunked run + >10k contigs
+        # can exceed the default 1024 open-file soft limit. Raise soft→hard.
+        ulimit -n "$(ulimit -Hn)" || true
         wd=$(dirname {output.gff3_clust})
         prefix=$(basename {params.prefix})
         original_dir=$PWD
@@ -1038,6 +1053,14 @@ rule tidecluster_reannotate:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
+        # STOPGAP (large genomes): tc_reannotate's chunked RepeatMasker opens one
+        # temp-file handle per genome chunk simultaneously (~genome_bp/chunk_size,
+        # ~1800 at 90 Gbp / 50 Mb) in TideCluster's split_fasta_to_chunk_files,
+        # exceeding the default soft open-file limit of 1024 ("Too many open
+        # files"). Same bug class as dante_ltr. Raise the soft limit to the hard
+        # limit for this rule. Durable fix is upstream —
+        # see docs/tidecluster_large_genome_request.md.
+        ulimit -n "$(ulimit -Hn)" || true
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
 
@@ -1497,6 +1520,10 @@ rule repeatmasker:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
+        # STOPGAP (large genomes): RepeatMasker with -pa {threads} over >10k contigs
+        # opens many temp files at once; raise the soft open-file limit to the hard
+        # limit so it does not hit "Too many open files".
+        ulimit -n "$(ulimit -Hn)" || true
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         # clean_rm_output.R reads CPU_COUNT for its mclapply worker count;

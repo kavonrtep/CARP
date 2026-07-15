@@ -31,6 +31,7 @@ import classification  # noqa: E402
 
 try:
     from dante_line import (
+        FeatureIndex,
         GFF3Feature,
         analyze_alignment_lengths,
         load_sequence_lengths,
@@ -52,6 +53,7 @@ except ImportError:
     parse_gff3_features = dante_line.parse_gff3_features
     process_strand_orientation_with_seqkit = dante_line.process_strand_orientation_with_seqkit
     run_mmseqs_clustering = dante_line.run_mmseqs_clustering
+    FeatureIndex = dante_line.FeatureIndex
 
 try:
     from global_local_aln import run_all_vs_all_alignment
@@ -229,10 +231,18 @@ def create_prime_bed_files(
     *any* domain marks the boundary of a different element that we must not
     extend into. Do not narrow this to just TPase.
     """
+    # Index once, not per anchor: mask_features (raw TideHunter) can be millions
+    # of records on a large genome, so the old per-anchor `[f for f in ...]`
+    # rescan was O(anchors x features). The anchor's own feature never satisfies
+    # the strict end<start / start>end clip conditions, so dropping the
+    # `other is feature` skip does not change the result.
+    all_index = FeatureIndex(all_features)
+    mask_index = FeatureIndex(mask_features) if mask_features else None
     with open(bed_5prime, "w") as f5, open(bed_3prime, "w") as f3:
         for anchor in anchors:
             feature = anchor.feature
             seq_length = seq_lengths.get(anchor.seqname) if seq_lengths else None
+            sn = anchor.seqname
 
             if anchor.strand == "+":
                 prime5_start = max(1, feature.start - flank_size)
@@ -240,52 +250,22 @@ def create_prime_bed_files(
                 prime3_start = feature.end + 1
                 prime3_end = feature.end + flank_size
 
-                seq_features = [f for f in all_features if f.seqname == anchor.seqname]
-                for other in seq_features:
-                    if other is feature:
-                        continue
-                    if other.end < feature.start and other.end > prime5_start:
-                        prime5_start = other.end + 1
-                for other in seq_features:
-                    if other is feature:
-                        continue
-                    if other.start > feature.end and other.start < prime3_end:
-                        prime3_end = other.start - 1
-
-                if mask_features:
-                    mask_seq_features = [f for f in mask_features if f.seqname == anchor.seqname]
-                    for other in mask_seq_features:
-                        if other.end < feature.start and other.end > prime5_start:
-                            prime5_start = other.end + 1
-                    for other in mask_seq_features:
-                        if other.start > feature.end and other.start < prime3_end:
-                            prime3_end = other.start - 1
+                prime5_start = all_index.nearest_end_below(sn, feature.start, prime5_start)
+                prime3_end = all_index.nearest_start_above(sn, feature.end, prime3_end)
+                if mask_index is not None:
+                    prime5_start = mask_index.nearest_end_below(sn, feature.start, prime5_start)
+                    prime3_end = mask_index.nearest_start_above(sn, feature.end, prime3_end)
             else:
                 prime5_start = feature.end + 1
                 prime5_end = feature.end + flank_size
                 prime3_start = max(1, feature.start - flank_size)
                 prime3_end = feature.start - 1
 
-                seq_features = [f for f in all_features if f.seqname == anchor.seqname]
-                for other in seq_features:
-                    if other is feature:
-                        continue
-                    if other.start > feature.end and other.start < prime5_end:
-                        prime5_end = other.start - 1
-                for other in seq_features:
-                    if other is feature:
-                        continue
-                    if other.end < feature.start and other.end > prime3_start:
-                        prime3_start = other.end + 1
-
-                if mask_features:
-                    mask_seq_features = [f for f in mask_features if f.seqname == anchor.seqname]
-                    for other in mask_seq_features:
-                        if other.start > feature.end and other.start < prime5_end:
-                            prime5_end = other.start - 1
-                    for other in mask_seq_features:
-                        if other.end < feature.start and other.end > prime3_start:
-                            prime3_start = other.end + 1
+                prime5_end = all_index.nearest_start_above(sn, feature.end, prime5_end)
+                prime3_start = all_index.nearest_end_below(sn, feature.start, prime3_start)
+                if mask_index is not None:
+                    prime5_end = mask_index.nearest_start_above(sn, feature.end, prime5_end)
+                    prime3_start = mask_index.nearest_end_below(sn, feature.start, prime3_start)
 
             if seq_length:
                 prime5_end = min(prime5_end, seq_length)

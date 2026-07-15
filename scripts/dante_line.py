@@ -21,6 +21,7 @@ import tempfile
 import os
 import re
 from pathlib import Path
+import bisect
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional, Set
@@ -308,8 +309,57 @@ def find_two_feature_pattern(named_features: List[Tuple[int, GFF3Feature]],
     return [f1_idx, f2_idx]
 
 
-def get_flanking_regions(pattern: FeatureGroup, all_features: List[GFF3Feature],
-                        flank_size: int, mask_features: List[GFF3Feature] = None) -> Tuple[int, int]:
+class FeatureIndex:
+    """Per-seqname index for O(log n) nearest-boundary lookups.
+
+    Flank clipping used to rescan the whole feature list per pattern
+    (``[f for f in all_features if f.seqname == ...]`` inside the per-pattern
+    loop), i.e. O(patterns x features). On a large genome ``mask_features`` (the
+    raw TideHunter tandem-repeat set) can hold millions of records, so that
+    quadratic scan dominates wall-time. This indexes features once and answers
+    the two flank-clipping queries by binary search.
+
+    Both queries reproduce the exact result of the original linear loops:
+      * ``nearest_end_below(seqname, ref, floor)`` -> the largest feature end
+        that is ``< ref`` (and ``> floor``), plus 1; otherwise ``floor``.
+        (Original: ``for f: if f.end < ref and f.end > floor: floor = f.end+1``.)
+      * ``nearest_start_above(seqname, ref, ceil)`` -> the smallest feature start
+        that is ``> ref`` (and ``< ceil``), minus 1; otherwise ``ceil``.
+        (Original: ``for f: if f.start > ref and f.start < ceil: ceil = f.start-1``.)
+    """
+
+    def __init__(self, features: List[GFF3Feature]):
+        ends = defaultdict(list)
+        starts = defaultdict(list)
+        for f in features:
+            ends[f.seqname].append(f.end)
+            starts[f.seqname].append(f.start)
+        self._ends = {sn: sorted(v) for sn, v in ends.items()}
+        self._starts = {sn: sorted(v) for sn, v in starts.items()}
+
+    def nearest_end_below(self, seqname: str, ref: int, floor: int) -> int:
+        ends = self._ends.get(seqname)
+        if not ends:
+            return floor
+        i = bisect.bisect_left(ends, ref)   # first end >= ref
+        if i == 0:
+            return floor                     # no end < ref
+        best = ends[i - 1]                   # largest end < ref
+        return best + 1 if best > floor else floor
+
+    def nearest_start_above(self, seqname: str, ref: int, ceil: int) -> int:
+        starts = self._starts.get(seqname)
+        if not starts:
+            return ceil
+        i = bisect.bisect_right(starts, ref)  # first start > ref
+        if i == len(starts):
+            return ceil                        # no start > ref
+        best = starts[i]                       # smallest start > ref
+        return best - 1 if best < ceil else ceil
+
+
+def get_flanking_regions(pattern: FeatureGroup, all_index: "FeatureIndex",
+                        flank_size: int, mask_index: "FeatureIndex" = None) -> Tuple[int, int]:
     """Calculate flanking regions with overlap detection.
 
     Parameters
@@ -334,34 +384,17 @@ def get_flanking_regions(pattern: FeatureGroup, all_features: List[GFF3Feature],
     flank_start = region_start - flank_size
     flank_end = region_end + flank_size
 
-    # Find overlapping features on the same sequence from DANTE annotations
-    seq_features = [f for f in all_features if f.seqname == pattern.seqname]
-
-    # Adjust left flank based on DANTE features
-    for feature in seq_features:
-        if (feature.end < region_start and feature.end > flank_start and
-            feature not in pattern.features):
-            flank_start = feature.end + 1
-
-    # Adjust right flank based on DANTE features
-    for feature in seq_features:
-        if (feature.start > region_end and feature.start < flank_end and
-            feature not in pattern.features):
-            flank_end = feature.start - 1
-
-    # Adjust flanks based on mask features if provided
-    if mask_features:
-        mask_seq_features = [f for f in mask_features if f.seqname == pattern.seqname]
-
-        # Adjust left flank based on mask features
-        for feature in mask_seq_features:
-            if feature.end < region_start and feature.end > flank_start:
-                flank_start = feature.end + 1
-
-        # Adjust right flank based on mask features
-        for feature in mask_seq_features:
-            if feature.start > region_end and feature.start < flank_end:
-                flank_end = feature.start - 1
+    # Clip against neighbouring DANTE features, then mask features (mask uses the
+    # DANTE-updated flanks as its floor/ceiling, matching the original order).
+    # The pattern's own features never satisfy end<region_start / start>region_end
+    # (they lie within [region_start, region_end]), so the old `not in
+    # pattern.features` guard was a no-op and is dropped.
+    sn = pattern.seqname
+    flank_start = all_index.nearest_end_below(sn, region_start, flank_start)
+    flank_end = all_index.nearest_start_above(sn, region_end, flank_end)
+    if mask_index is not None:
+        flank_start = mask_index.nearest_end_below(sn, region_start, flank_start)
+        flank_end = mask_index.nearest_start_above(sn, region_end, flank_end)
 
     # Ensure we don't go below 1
     flank_start = max(1, flank_start)
@@ -380,10 +413,12 @@ def create_extraction_bed(patterns: List[FeatureGroup], all_features: List[GFF3F
         bed_file: Output BED file path
         include_flanking: If True, include flanking regions; if False, extract only core region
     """
+    # Build the feature index once (not per pattern) when flanking is needed.
+    all_index = FeatureIndex(all_features) if include_flanking else None
     with open(bed_file, 'w') as f:
         for pattern in patterns:
             if include_flanking:
-                start, end = get_flanking_regions(pattern, all_features, flank_size)
+                start, end = get_flanking_regions(pattern, all_index, flank_size)
             else:
                 # Extract only the core region defined by the features
                 start, end = pattern.get_region_bounds()
@@ -690,10 +725,14 @@ def create_prime_bed_files(patterns: List[FeatureGroup], all_features: List[GFF3
 
     Flanking regions are limited by neighboring DANTE features, optional mask features, and sequence boundaries.
     """
+    # Index once, not per pattern (mask_features can be millions of records).
+    all_index = FeatureIndex(all_features)
+    mask_index = FeatureIndex(mask_features) if mask_features else None
     with open(bed_5prime, 'w') as f5, open(bed_3prime, 'w') as f3:
         for pattern in patterns:
             # Get sequence length if available
             seq_length = seq_lengths.get(pattern.seqname) if seq_lengths else None
+            sn = pattern.seqname
             # Find ENDO domain and last domain (RT or RH)
             if pattern.strand == '+':
                 # Plus strand: ENDO is first, RT/RH is last
@@ -708,28 +747,12 @@ def create_prime_bed_files(patterns: List[FeatureGroup], all_features: List[GFF3
                 prime3_start = last_feature.end + 1
                 prime3_end = last_feature.end + flank_size
 
-                # Adjust 5' region based on DANTE features
-                seq_features = [f for f in all_features if f.seqname == pattern.seqname]
-                for feature in seq_features:
-                    if (feature.end < endo_feature.start and feature.end > prime5_start and
-                        feature not in pattern.features):
-                        prime5_start = feature.end + 1
-
-                # Adjust 3' region based on DANTE features
-                for feature in seq_features:
-                    if (feature.start > last_feature.end and feature.start < prime3_end and
-                        feature not in pattern.features):
-                        prime3_end = feature.start - 1
-
-                # Adjust based on mask features if provided
-                if mask_features:
-                    mask_seq_features = [f for f in mask_features if f.seqname == pattern.seqname]
-                    for feature in mask_seq_features:
-                        if feature.end < endo_feature.start and feature.end > prime5_start:
-                            prime5_start = feature.end + 1
-                    for feature in mask_seq_features:
-                        if feature.start > last_feature.end and feature.start < prime3_end:
-                            prime3_end = feature.start - 1
+                # Clip 5' (left of ENDO) and 3' (right of last) by DANTE, then mask.
+                prime5_start = all_index.nearest_end_below(sn, endo_feature.start, prime5_start)
+                prime3_end = all_index.nearest_start_above(sn, last_feature.end, prime3_end)
+                if mask_index is not None:
+                    prime5_start = mask_index.nearest_end_below(sn, endo_feature.start, prime5_start)
+                    prime3_end = mask_index.nearest_start_above(sn, last_feature.end, prime3_end)
 
 
             else:
@@ -745,28 +768,12 @@ def create_prime_bed_files(patterns: List[FeatureGroup], all_features: List[GFF3
                 prime3_start = max(1, first_feature.start - flank_size)
                 prime3_end = first_feature.start - 1
 
-                # Adjust 5' region (downstream) based on DANTE features
-                seq_features = [f for f in all_features if f.seqname == pattern.seqname]
-                for feature in seq_features:
-                    if (feature.start > endo_feature.end and feature.start < prime5_end and
-                        feature not in pattern.features):
-                        prime5_end = feature.start - 1
-
-                # Adjust 3' region (upstream) based on DANTE features
-                for feature in seq_features:
-                    if (feature.end < first_feature.start and feature.end > prime3_start and
-                        feature not in pattern.features):
-                        prime3_start = feature.end + 1
-
-                # Adjust based on mask features if provided
-                if mask_features:
-                    mask_seq_features = [f for f in mask_features if f.seqname == pattern.seqname]
-                    for feature in mask_seq_features:
-                        if feature.start > endo_feature.end and feature.start < prime5_end:
-                            prime5_end = feature.start - 1
-                    for feature in mask_seq_features:
-                        if feature.end < first_feature.start and feature.end > prime3_start:
-                            prime3_start = feature.end + 1
+                # Clip 5' (right of ENDO) and 3' (left of first) by DANTE, then mask.
+                prime5_end = all_index.nearest_start_above(sn, endo_feature.end, prime5_end)
+                prime3_start = all_index.nearest_end_below(sn, first_feature.start, prime3_start)
+                if mask_index is not None:
+                    prime5_end = mask_index.nearest_start_above(sn, endo_feature.end, prime5_end)
+                    prime3_start = mask_index.nearest_end_below(sn, first_feature.start, prime3_start)
 
             # Constrain to sequence boundaries if seq_length is available
             if seq_length:

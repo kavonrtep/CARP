@@ -25,7 +25,6 @@ suppressPackageStartupMessages({
   library(Biostrings)
 })
 
-g <- readDNAStringSet(opt$genome)
 rm <- import(opt$rm)
 
 # Count Level-1 (top-level) features only. Level-2 nested children (LTR_RT_TR
@@ -37,7 +36,10 @@ rm <- import(opt$rm)
 if (!is.null(rm$ID))
   rm <- rm[grepl("^UA_L1_", as.character(rm$ID))]
 
-genome_size <- sum(width(g))
+# Sum sequence lengths without loading the sequences: readDNAStringSet() would
+# hold the entire assembly in RAM (~90 GB on a 90 Gbp genome) just to sum
+# widths. fasta.seqlengths() reads only the lengths.
+genome_size <- sum(Biostrings::fasta.seqlengths(opt$genome))
 
 # TideCluster rDNA arrays carry classification=rDNA_45S|5S but keep Name=TRC_<n>
 # (kept stable for downstream apps that key on Name). Relabel their Name to the
