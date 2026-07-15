@@ -411,7 +411,9 @@ rule dante:
     benchmark:
         F"{config['output_dir']}/benchmarks/dante.tsv"
     conda:
-        "envs/tidecluster.yaml"
+        # dante has its own env since 0.2.11 (r-base 4.2.3) — it can no longer
+        # share envs/tidecluster.yaml with dante_ltr (r-base <4.2). See envs/dante.yaml.
+        "envs/dante.yaml"
     threads: workflow.cores
     shell:
         """
@@ -669,7 +671,9 @@ rule filter_dante:
     benchmark:
         F"{config['output_dir']}/benchmarks/filter_dante.tsv"
     conda:
-        "envs/tidecluster.yaml"
+        # dante_gff_output_filtering.py ships with the DANTE package, which now
+        # lives in its own env (dante 0.2.11, r-base 4.2.3). See envs/dante.yaml.
+        "envs/dante.yaml"
     threads: 1
     shell:
         """
