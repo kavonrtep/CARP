@@ -72,9 +72,17 @@ Off-path (fix or delete before anyone wires them in): `calculate_coverage_from_b
 | ~~Q3~~ | ~~`make_unified_annotation.R:130`~~ | **FIXED this session** — `seqnames(gr) %in% seqs` (no full character coercion). Deeper `split()`-once refactor still possible if profiling shows the per-batch subset itself dominates. | — |
 | Q4 | `make_summary_plots.R:81-98` | `xx[xx$seqnames==sn,]` per track per contig, no min-length/max-tracks cap → O(rows × 10⁴ contigs); draws 10⁴ separators | `split(xx, seqnames)` once; cap to largest N seqs (mirror `make_repeat_report`'s 50). |
 | Q5 | `make_unified_annotation.R:649, :1076, :1110` | `findOverlaps(gr, gr)` self-joins materialize huge Hits only to test emptiness | `isDisjoint()` / `countOverlaps()`; run the L1 overlap report per-seqname. |
-| Q6 | `reduce_library_size.py:256, :573` | CAP3 on a whole LTR leaf class is ~O(N²), single-threaded, serial (`--max-big-cap3-parallel` default 1); 10⁴–10⁵ consensi/lineage | Pre-cluster each LTR class with mmseqs/linclust, CAP3 only within sub-clusters; raise the parallel cap. |
-| Q7 | `containment_reduce_library.py:64, :151, :85` | Whole-library self all-vs-all blastn (O(N²)) with **all** hits + records in RAM | Shard by `#classification` (containment is within-class), stream hits grouped by query, drop `-max_target_seqs`. |
-| Q8 | `reduce_dimer_library.py:218` | Serial over thousands of TRCs, each mmseqs given `--threads N` but run one-at-a-time; per-TRC temp dirs never cleaned until the end | `ProcessPoolExecutor` over TRCs (each mmseqs single-threaded); `rmtree` per group. |
+> **Scope note (maintainer):** the repeat *library* scales with library size, not
+> genome size (~80 MB at 14 Gbp → maybe a few hundred MB at 90 Gbp), so the
+> library reducers are **wall-time**, not OOM/hang, concerns. Q6/Q7 below are
+> throughput items, not blockers; the CAP3 O(N²) is bounded by per-class library
+> size and would only be a *slow* stage on the biggest LTR lineage, not a hard
+> failure — so the risky, byte-identity-breaking CAP3 replacement (Q6) is
+> deliberately **not** pursued.
+>
+| Q6 (deferred) | `reduce_library_size.py:256, :573` | CAP3 on an LTR leaf class is ~O(N²), single-threaded. **Byte-locked to the R reference** (`test_reduce_library_parity.sh`), so a scalable fix (pre-cluster then CAP3 within sub-clusters) would change the library — needs a masked-bp acceptance bar, not pursued (bounded by library size). | (if ever needed) mmseqs/linclust pre-cluster + masked-bp validation; or just raise `--max-big-cap3-parallel`. |
+| Q7 (open) | `containment_reduce_library.py:64, :151, :85` | Whole-library self all-vs-all blastn with all hits + records in RAM — bounded by library size (hundreds of MB), so time not OOM. Class-sharding is *mostly* output-identical but can find MORE containers where `-max_target_seqs` truncates → needs masked-bp validation. | Shard by `#classification`; stream hits per query. |
+| ~~Q8~~ | ~~`reduce_dimer_library.py:218`~~ | **FIXED this session** — `ProcessPoolExecutor` over TRC groups (each mmseqs single-threaded), per-group `rmtree`. Output-identical (mmseqs thread-invariant, verified `-t1==-t4` on a real 18-group fixture; `tests/test_reduce_dimer_parallel.sh`). | — |
 
 ---
 
