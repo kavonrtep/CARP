@@ -24,15 +24,23 @@ rle_merge_granges <- function(d) {
   # is exact (no rounding) so the track is lossless.
   if (length(d) == 0) return(d)
   d <- sort(d)
-  pieces <- list()
-  for (sn in seqlevels(d)) {
-    dd <- d[as.logical(seqnames(d) == sn)]
-    if (length(dd) == 0) next
+  # After sort(), each seqname occupies one contiguous run, so walk the runs of
+  # the seqnames Rle in a single O(n) pass. The previous per-seqlevel
+  # `d[as.logical(seqnames(d) == sn)]` scanned ALL of d once per seqlevel ->
+  # O(n_tiles x n_seqnames), which hangs at ~90M tiles x >10k contigs.
+  sn_rle    <- seqnames(d)
+  run_len   <- runLength(sn_rle)
+  run_end   <- cumsum(run_len)
+  run_start <- run_end - run_len + 1L
+  run_name  <- as.character(runValue(sn_rle))
+  pieces <- vector("list", length(run_name))
+  for (k in seq_along(run_name)) {
+    dd <- d[run_start[k]:run_end[k]]
     r <- S4Vectors::Rle(score(dd))
     ends_idx   <- cumsum(runLength(r))
     starts_idx <- c(1L, head(ends_idx, -1L) + 1L)
-    pieces[[sn]] <- GRanges(
-      seqnames = sn,
+    pieces[[k]] <- GRanges(
+      seqnames = run_name[k],
       ranges   = IRanges(start = start(dd)[starts_idx],
                          end   = end(dd)[ends_idx]),
       score    = runValue(r)
