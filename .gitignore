@@ -5,3 +5,6 @@
 
 # Personal, machine-specific Claude Code settings (permissions etc.)
 .claude/settings.local.json
+
+# Upstream tool clones for scaling analysis (not part of the pipeline)
+scratch/
