@@ -5,7 +5,7 @@
 # NOTE: neither TideCluster nor the bare DANTE (`dante`) tool is here.
 #   * TideCluster >=1.15 needs r-base >=4.2 (via r-igraph 2.0.3); the TideCluster
 #     rules use envs/tidecluster_run.yaml.
-#   * DANTE moved to r-base 4.2.3 in 0.2.11, while dante_ltr 0.5.1.0 still pins
+#   * DANTE moved to r-base 4.2.3 in 0.2.11, while dante_ltr 0.5.1.1 still pins
 #     r-dplyr 1.0.7 (r-base <4.2) — so the two can no longer share an env and
 #     DANTE split out to envs/dante.yaml. This env is pinned to r-base 4.1 by
 #     dante_ltr.
@@ -22,7 +22,7 @@ channels:
   - bioconda
   - petrnovak
 dependencies:
-  - dante_ltr=0.5.1.0
+  - dante_ltr=0.5.1.1
   - repeatmasker=4.1.2.p1
   - seqkit=2.8.2
   - cap3=10.2011

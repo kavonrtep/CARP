@@ -35,7 +35,7 @@ channels:
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.16.5
+  - tidecluster=1.16.6
   # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
   # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
   # resolves (TideCluster needs r-base >= 4.2).
