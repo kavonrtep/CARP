@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.2
+
+- **DANTE_LTR 0.5.1.0 → 0.5.1.1** (`envs/tidecluster.yaml`): a newer DANTE_LTR
+  build with improved efficiency on very large genomes. Dependency-identical to
+  0.5.1.0 (still `r-dplyr 1.0.7.*` → r-base 4.1), so the env shape and the whole
+  R/report stack are unchanged — a drop-in bump. Validated end-to-end on the
+  small fixture (env rebuilt from scratch, full DAG green).
+- **TideCluster 1.16.5 → 1.16.6** (`envs/tidecluster_run.yaml`): small upstream
+  update. Dependency-identical to 1.16.5 (same tidehunter 1.4.3 / mmseqs2 /
+  repeatmasker 4.1.2.p1 / r-igraph 2.0.3), so the env shape and the four
+  `tidecluster_*` behaviours the pipeline consumes are unchanged — a drop-in bump.
+- **CI: every test file is now enforced to actually run** (dev-infra). Added
+  `tests/test_ci_test_coverage.py` (wired into `unit.yml`): CI goes red if any
+  `tests/test_*.{py,R,sh}` is neither referenced by a workflow nor in an explicit
+  exemption list. Also wired the two stdlib-only regression tests
+  (`test_flank_index.py`, `test_repeatmasker_wrapper_streaming.py`) that were
+  present but never executed. Closes the "test on disk but CI never runs it" gap.
+
 ## 1.1.1
 
 - **Hotfix: `make_unified_annotation` crashed at the end of a real pipeline run
