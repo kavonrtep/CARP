@@ -156,6 +156,21 @@ if (length(tir) > 0){
   export(tir, paste0(opt$dir, "/Class_II.Subclass_1.TIR.gff3"), format="gff3")
 }
 
+# LTR_RT_TR density rollup. Tandem arrays of complete LTR-RTs are Level-1
+# containers carrying structure=LTR_RT_TR; their member copies are Level-2 and
+# already excluded by the L1 filter above, so no bp is double-counted. Write the
+# union into the split dir as LTR_RT_TR.gff3; make_bigwig_density then emits
+# LTR_RT_TR_{10k,100k}.bw automatically. This is a ROLL-UP (overlapping) view —
+# each container is ALSO counted in its Ty1_copia / Ty3_gypsy lineage and in the
+# Mobile_elements rollup — so it must NOT be summed with the disjoint per-class
+# partition (same status as All_Ty1_Copia / All_Ty3_Gypsy / Mobile_elements).
+if (!is.null(rm$structure)){
+  ltr_rt_tr <- rm[!is.na(rm$structure) & as.character(rm$structure) == "LTR_RT_TR"]
+  if (length(ltr_rt_tr) > 0){
+    export(ltr_rt_tr, paste0(opt$dir, "/LTR_RT_TR.gff3"), format="gff3")
+  }
+}
+
 
 # table output is at the end - it server as checkpoint in snakemake
 write.table(out, file=opt$output, row.names=FALSE, sep="\t")

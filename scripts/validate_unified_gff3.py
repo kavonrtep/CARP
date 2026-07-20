@@ -164,6 +164,24 @@ def validate(path):
             elif not a["copy_number"].isdigit():
                 v.append(f"L{lineno}: copy_number '{a['copy_number']}' is not an integer")
 
+        # in_structure / member_of — tandem LTR-RT MEMBER copies only (the Level-2
+        # DANTE_LTR features nested under an LTR_RT_TR container). in_structure
+        # marks the membership; member_of back-references the container and must
+        # equal the feature's Parent. (The container itself uses structure /
+        # copy_number, validated above; members use in_structure / member_of.)
+        if "in_structure" in a:
+            if a["in_structure"] not in STRUCTURE_VALUES:
+                v.append(f"L{lineno}: in_structure '{a['in_structure']}' not in {sorted(STRUCTURE_VALUES)}")
+            if level != "2" or tool != ELEMENT_TYPE_TOOL:
+                v.append(f"L{lineno}: in_structure only allowed on Level-2 {ELEMENT_TYPE_TOOL} members")
+        if "member_of" in a:
+            if "in_structure" not in a:
+                v.append(f"L{lineno}: member_of requires in_structure")
+            if not PARENT_RE.match(a["member_of"]):
+                v.append(f"L{lineno}: member_of '{a['member_of']}' does not match UA_L1_<8 digits>")
+            elif "Parent" in a and a["member_of"] != a["Parent"]:
+                v.append(f"L{lineno}: member_of '{a['member_of']}' must equal Parent '{a['Parent']}'")
+
         # TE_origin only on TE-derived clustering satellites; value is a class path
         if "TE_origin" in a:
             if tool not in TE_ORIGIN_TOOLS:

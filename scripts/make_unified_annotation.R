@@ -965,6 +965,11 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
     "transposable_element"
   )
   level1$source <- level1$source_tool
+  # LTR_RT_TR membership tags live only on Level-2 members (set below). Level-1
+  # features carry them as NA so level1 / level2 keep one mcols schema for the
+  # c() combine (orphan promotion + final) and the GFF3 export.
+  level1$in_structure <- NA_character_
+  level1$member_of    <- NA_character_
 
   # ── Assign Parent IDs to Level 2 features ────────────────────────────────
   if (length(level2) > 0) {
@@ -1004,6 +1009,19 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
       "repeat_region", "transposable_element"
     )
     level2$source <- level2$source_tool
+    # ── LTR_RT_TR membership tags ────────────────────────────────────────────
+    # The ONLY Level-2 DANTE_LTR features are tandem LTR-RT member copies
+    # (standalone LTR-RTs are Level 1; the LTR protein-domain/LTR children are
+    # not emitted to the unified GFF3), so source_tool=="DANTE_LTR" at Level 2
+    # uniquely identifies a tandem member. Tag it so a consumer can spot a member
+    # directly (in_structure) and jump to its container (member_of == the Parent
+    # just assigned) without having to look the parent up.
+    level2$in_structure <- NA_character_
+    level2$member_of    <- NA_character_
+    is_member <- as.character(level2$source_tool) == "DANTE_LTR" & !is.na(level2$Parent)
+    level2$in_structure[is_member] <- "LTR_RT_TR"
+    level2$member_of[is_member]    <- as.character(level2$Parent)[is_member]
+
     # Promote any Level-2 feature whose parent wasn't found to Level 1 (it can't
     # nest). type/source are already set above and we re-ID to a fresh UA_L1_, so
     # the promoted record is a valid Level-1 feature — not a parentless UA_L2_

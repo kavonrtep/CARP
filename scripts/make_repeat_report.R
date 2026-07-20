@@ -133,6 +133,34 @@ load_dante_ltr_stats <- function(outdir) {
   agg
 }
 
+# Count, per lineage, how many *complete* LTR-RTs sit inside an LTR_RT_TR tandem
+# array — a tandem stack of complete LTR retrotransposons, detected by
+# resolve_ltr_tandems and written to DANTE_LTR_tandems.gff3 as one container per
+# array (structure=LTR_RT_TR, copy_number=<members>). Used to annotate the
+# "Complete TEs" column as "N (M in LTR_RT_TR)". M is the sum of each container's
+# copy_number grouped by lineage; these copies are ALSO in the Complete-TEs total
+# (N) — the parenthetical just flags how many are arrayed. No genomic double
+# count: the arrays are disjoint and their bp is counted once via the container.
+load_ltr_rt_tr_stats <- function(outdir) {
+  gff <- file.path(outdir, "DANTE_LTR", "DANTE_LTR_tandems.gff3")
+  if (!file.exists(gff) || file.size(gff) == 0) return(NULL)
+  gr <- tryCatch(import(gff), error = function(e) NULL)
+  if (is.null(gr) || length(gr) == 0) return(NULL)
+  ct <- gr[gr$type == "transposable_element"]
+  if (!is.null(ct$structure)) ct <- ct[as.character(ct$structure) == "LTR_RT_TR"]
+  if (length(ct) == 0) return(NULL)
+  cls <- ct$Final_Classification
+  if (is.null(cls)) cls <- ct$Name
+  cls_path <- canonicalise(cls, source = "DANTE_LTR", validate = FALSE)
+  cn <- if (!is.null(ct$copy_number))
+          suppressWarnings(as.integer(as.character(ct$copy_number)))
+        else rep(NA_integer_, length(ct))
+  cn[is.na(cn)] <- 0L
+  df <- data.frame(path = cls_path, tr_members = cn, tr_arrays = 1L,
+                   stringsAsFactors = FALSE)
+  aggregate(cbind(tr_members, tr_arrays) ~ path, data = df, FUN = sum)
+}
+
 # ── B4. DANTE_TIR stats from summary txt ──────────────────────────────────
 load_dante_tir_stats <- function(outdir) {
   f <- file.path(outdir, "DANTE_TIR", "TIR_classification_summary.txt")
@@ -313,7 +341,7 @@ build_sunburst_data <- function(comp, genome_size = NULL) {
 
 # ── C3. Build composition tree for hierarchical table ─────────────────────
 build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL,
-                            genome_size = NULL) {
+                            genome_size = NULL, ltr_tr_stats = NULL) {
   # Compute the closure of all node paths (CSV rows + synthetic parents)
   csv_ids  <- comp$type
   csv_bp   <- setNames(comp$bp,  comp$type)
@@ -371,6 +399,15 @@ build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL,
       dante_counts[line_path[1]] <- as.integer(line_stats$regions)
   }
 
+  # LTR_RT_TR member counts: path → number of complete copies inside tandem arrays
+  ltr_tr_counts <- setNames(integer(0), character(0))
+  if (!is.null(ltr_tr_stats) && nrow(ltr_tr_stats) > 0) {
+    for (i in seq_len(nrow(ltr_tr_stats))) {
+      p <- ltr_tr_stats$path[i]
+      ltr_tr_counts[p] <- (ltr_tr_counts[p] %||% 0L) + ltr_tr_stats$tr_members[i]
+    }
+  }
+
   # DFS pre-order traversal
   rows <- list()
   dfs <- function(id, depth) {
@@ -382,43 +419,48 @@ build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL,
     label    <- label[length(label)]
     dc_raw   <- dante_counts[id]
     dc       <- if (length(dc_raw) > 0 && !is.na(dc_raw)) unname(dc_raw) else NA_integer_
+    trc_raw  <- ltr_tr_counts[id]
+    trc      <- if (length(trc_raw) > 0 && !is.na(trc_raw)) unname(trc_raw) else NA_integer_
 
     if (has_kids) {
       # Total row
       rows[[length(rows) + 1]] <<- list(
-        path        = id,
-        label       = label,
-        row_type    = "total",
-        depth       = depth,
-        bp          = tot_bp,
-        pct         = tot_bp / genome_size * 100,
-        dante_count = NA_integer_
+        path         = id,
+        label        = label,
+        row_type     = "total",
+        depth        = depth,
+        bp           = tot_bp,
+        pct          = tot_bp / genome_size * 100,
+        dante_count  = NA_integer_,
+        ltr_tr_count = NA_integer_
       )
       # Unspecified row (own CSV value) only if non-zero
       if (own_bp > 0) {
         rows[[length(rows) + 1]] <<- list(
-          path        = id,
-          label       = label,
-          row_type    = "unspecified",
-          depth       = depth + 1L,
-          bp          = own_bp,
-          pct         = unname(csv_pct[id] %||% 0),
-          dante_count = NA_integer_
+          path         = id,
+          label        = label,
+          row_type     = "unspecified",
+          depth        = depth + 1L,
+          bp           = own_bp,
+          pct          = unname(csv_pct[id] %||% 0),
+          dante_count  = NA_integer_,
+          ltr_tr_count = NA_integer_
         )
       }
       # Recurse into children sorted by subtree bp descending
       kids_sorted <- kids[order(-subtree_bp_cache[kids])]
       for (k in kids_sorted) dfs(k, depth + 1L)
     } else {
-      # Leaf row — show DANTE count if available
+      # Leaf row — show DANTE count (and LTR_RT_TR-member count) if available
       rows[[length(rows) + 1]] <<- list(
-        path        = id,
-        label       = label,
-        row_type    = "leaf",
-        depth       = depth,
-        bp          = own_bp,
-        pct         = unname(csv_pct[id] %||% 0),
-        dante_count = dc
+        path         = id,
+        label        = label,
+        row_type     = "leaf",
+        depth        = depth,
+        bp           = own_bp,
+        pct          = unname(csv_pct[id] %||% 0),
+        dante_count  = dc,
+        ltr_tr_count = trc
       )
     }
   }
@@ -1136,6 +1178,7 @@ html_comp_table <- function(tree_df) {
     rtype   <- r["row_type"]
     label   <- r["label"]
     dc      <- r["dante_count"]
+    trc     <- r["ltr_tr_count"]
 
     # Display label
     if (rtype == "total") {
@@ -1148,8 +1191,15 @@ html_comp_table <- function(tree_df) {
       disp <- label
     }
 
-    dante_cell <- if (!is.na(dc) && dc != "NA") {
-      sprintf('<td style="text-align:right">%s</td>', format(as.integer(dc), big.mark = ","))
+    dc_has  <- !is.na(dc) && dc != "NA"
+    trc_n   <- suppressWarnings(as.integer(trc))
+    trc_has <- !is.na(trc_n) && trc_n > 0
+    dante_cell <- if (dc_has || trc_has) {
+      dc_txt <- if (dc_has) format(as.integer(dc), big.mark = ",") else "&mdash;"
+      tr_txt <- if (trc_has)
+        sprintf(' <span class="ltr-tr-note" title="complete copies inside LTR_RT_TR tandem arrays">(%s in LTR_RT_TR)</span>',
+                format(trc_n, big.mark = ",")) else ""
+      sprintf('<td style="text-align:right">%s%s</td>', dc_txt, tr_txt)
     } else {
       '<td></td>'
     }
@@ -1167,7 +1217,7 @@ html_comp_table <- function(tree_df) {
   <th>Classification</th>
   <th style="text-align:right">Total bp</th>
   <th style="text-align:right">%% genome</th>
-  <th style="text-align:right">Complete TEs</th>
+  <th style="text-align:right">Complete TEs<sup>*</sup></th>
 </tr>
 </thead>
 <tbody>
@@ -1175,7 +1225,7 @@ html_comp_table <- function(tree_df) {
 </tbody>
 </table>
 </div>
-<p class="caption">Complete TEs: structure-based count from DANTE_LTR / DANTE_TIR where classification matches.</p>',
+<p class="caption" id="comp-note"><b>*&nbsp;Complete TEs</b>: structure-based count from DANTE_LTR / DANTE_TIR where classification matches. <b>(M in LTR_RT_TR)</b> = how many of those complete LTR-RTs sit inside an <b>LTR_RT_TR</b> array &mdash; a tandem stack of complete LTR retrotransposons (&ge;2 consecutive same-lineage full-length elements with reciprocally overlapping boundary LTRs). Those copies are also part of the Complete-TEs total; the array occupies its span once in the bp column, so there is no double count.</p>',
     paste(rows_html, collapse = "\n"))
 }
 
@@ -1364,7 +1414,8 @@ h3{color:#34495e;font-size:0.95em;margin:14px 0 8px}
 .row-tag{font-size:0.72em;padding:1px 5px;border-radius:3px;vertical-align:middle;margin-left:4px}
 .row-total{background:#d0e4f7;color:#1a4a72}
 .row-unspec{background:#f0f0f0;color:#666}
-.caption{font-size:0.8em;color:#888;margin-top:6px;font-style:italic}
+.caption{font-size:0.82em;color:#555;margin-top:6px;font-style:italic}
+.ltr-tr-note{font-size:0.85em;color:#3a6ea5;font-weight:400;white-space:nowrap}
 </style>
 %s
 <script>%s</script>
@@ -1511,6 +1562,9 @@ main <- function() {
   message("Loading DANTE_LINE stats...")
   line_stats   <- load_dante_line_stats(outdir)
 
+  message("Loading LTR_RT_TR (tandem LTR-RT array) stats...")
+  ltr_tr_stats <- load_ltr_rt_tr_stats(outdir)
+
   message("Discovering BigWig files...")
   bw_files     <- discover_bw_files(outdir, opt$bin_width)
 
@@ -1601,7 +1655,13 @@ main <- function() {
     tf <- tf[file.exists(tf)]
     if (length(tf) > 0) tf[1] else NULL   # use first; concat handled inside
   }
+  # NOTE: this panel renders the FIRST list entry at the BOTTOM (see the rev()
+  # on trc_bw_map below). LTR_RT_TR is a roll-up (overlaps Ty1/copia + Ty3/gypsy)
+  # of tandem arrays of complete LTR-RTs; it is usually low-abundance, so it is
+  # placed first here → rendered as the bottom track, directly below the
+  # Mobile-elements aggregate, where it is easy to spot.
   top_bw_map <- Filter(Negate(is.null), list(
+    "LTR_RT_TR"       = find_100k("LTR_RT_TR"),
     "Mobile elements" = find_100k("Mobile_elements"),
     "Low complexity"  = find_100k("Low_complexity"),
     "Simple repeats"  = find_100k("Simple_repeat") %||% find_100k("Simple_repeats"),
@@ -1629,7 +1689,8 @@ main <- function() {
   comp_report    <- collapse_rdna_subunits(comp)
   sb_data        <- build_sunburst_data(comp_report, genome_size = genome_size)
   tree_df        <- build_comp_tree(comp_report, ltr_stats, tir_stats, line_stats,
-                                     genome_size = genome_size)
+                                     genome_size = genome_size,
+                                     ltr_tr_stats = ltr_tr_stats)
   sunburst_chart <- safe_build("composition sunburst", json_sunburst(sb_data))
 
   comp_bar_chart <- if (nrow(cov_mat) > 0)
