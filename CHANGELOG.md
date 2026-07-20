@@ -28,6 +28,20 @@
     `tests/test_unified_gff3_spec.py`). Regression test
     `tests/test_ltr_rt_tr_no_double_count.R` locks in the L1-filter + `reduce()`
     no-double-count guards.
+- **Post-run cleanup of intermediate scratch (config `cleanup_intermediates`,
+  default `minimal`).** After a successful run (rc == 0, non-dry-run),
+  `run_pipeline.py` deletes per-tool scratch no downstream rule consumes:
+  `minimal` (default) removes staged genome copies (`RepeatMasker`/`TideCluster`
+  `genome_cleaned.fasta`), `DANTE_TIR.RData`, the `DANTE_LTR/library` mmseqs /
+  `TE*.fasta` scratch, `filter_ltr_rt_library` side-files and the DANTE tmp GFF3
+  (multiple GB on a large genome); `maximal` additionally purges the big
+  `TideCluster_tarean` / `TideCluster_kite` / `TideCluster_consensus` trees and
+  tool workdirs; `none` (or the CLI `--keep-all`) keeps everything. New
+  `scripts/cleanup_outputs.py` derives its keep-set from `manifest.py:OUTPUTS` +
+  every top-level symlink target + the CI/count-checked files + run metadata, so
+  a manifest output (or the real file a deliverable symlink points at) is never
+  deleted — validated by a real maximal cleanup of a fixture leaving every
+  manifest output intact. Test `tests/test_cleanup_outputs.py`.
 
 ## 1.1.2
 

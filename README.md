@@ -127,6 +127,7 @@ and TideCluster tuning, in **[docs/configuration.md](docs/configuration.md)**):
 | `tidecluster_reannotate_superfamily_merge` | `True` | Group sibling TRCs by superfamily when applying the RM-on-TideCluster array-length filter, so a real tandem array tiled by several near-identical satellite TRCs is recovered instead of fragmented and lost (and the result no longer depends on culling) |
 | `rm_tc_tandem_gate` | `True` | A TideCluster-RM satellite may override a TE call only where independent tandem evidence (TideHunter) supports it; an unsupported satellite tiling a non-tandem TE is demoted below the TE, preventing spurious TE→satellite over-masking |
 | `reduce_library` | `True` | Deduplicate the RepeatMasker library (smaller, faster) |
+| `cleanup_intermediates` | `minimal` | Delete per-tool scratch after a successful run: `minimal` (default), `maximal` (also the big TideCluster trees + tool workdirs), or `none`. `run_pipeline.py --keep-all` forces `none`; manifest outputs are never touched |
 
 The pipeline also screens the LTR library against `Class_II/Subclass_1` elements
 from the custom library: a `Class_I` sequence that resembles a DNA transposon is
