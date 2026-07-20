@@ -167,6 +167,15 @@ jobs:
       - name: Assert expected outputs
         run: bash scripts/assert_fixture_outputs.sh medium
 
+      # Post-run cleanup (default 'minimal') fired inside the container via
+      # run_pipeline.py. Assert it deleted the scratch and kept every manifest
+      # output — run inside the SIF so python+pyyaml are available.
+      - name: Assert post-run cleanup (in container)
+        run: |
+          SIF=$(ls images/carp_*.sif | head -n1)
+          apptainer exec -B "$PWD" "$SIF" \
+            python /opt/pipeline/scripts/assert_cleanup.py "$PWD/tests/fixtures/output_medium"
+
       - name: Upload output on failure
         if: failure()
         uses: actions/upload-artifact@v4

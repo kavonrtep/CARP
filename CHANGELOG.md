@@ -41,7 +41,13 @@
   every top-level symlink target + the CI/count-checked files + run metadata, so
   a manifest output (or the real file a deliverable symlink points at) is never
   deleted — validated by a real maximal cleanup of a fixture leaving every
-  manifest output intact. Test `tests/test_cleanup_outputs.py`.
+  manifest output intact. The applied mode is recorded in `run_provenance.json`
+  (`cleanup_intermediates`). **Tested end-to-end in CI**: the fixture jobs run
+  through `run_pipeline.py`, so cleanup fires — the small fixture uses `maximal`
+  and the medium `minimal`, and a new `scripts/assert_cleanup.py` step (in both
+  `pipeline.yml` and the in-container `release.yml`) reads the applied mode from
+  provenance and asserts the mode's scratch is gone and every manifest output
+  survived. Unit tests: `tests/test_cleanup_outputs.py`.
 
 ## 1.1.2
 

@@ -201,6 +201,12 @@ jobs:
         if: matrix.fixture == 'medium'
         run: python scripts/assert_manifest_outputs.py tests/fixtures/output_${{ matrix.fixture }}
 
+      # Post-run cleanup ran via run_pipeline.py above (small=maximal,
+      # medium=minimal). Assert it deleted the mode's scratch and kept every
+      # manifest deliverable — end-to-end coverage of both cleanup modes.
+      - name: Assert post-run cleanup (scratch gone, outputs intact)
+        run: python scripts/assert_cleanup.py tests/fixtures/output_${{ matrix.fixture }}
+
       - name: Upload output on failure
         if: failure()
         uses: actions/upload-artifact@v4
