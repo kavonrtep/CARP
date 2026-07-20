@@ -116,6 +116,7 @@ def _filter_config(config: dict) -> dict:
         "dante_tir_fallback_min_cluster_size",
         "include_dante_tir_fallback_in_library",
         "dante_tir_fallback_library_min_multiplicity",
+        "cleanup_intermediates",
     )
     return {k: config[k] for k in keys if k in config}
 
