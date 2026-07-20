@@ -45,6 +45,8 @@ invariant** below, whose breakage silently emptied the per-family BigWig outputs
 | `element_type` | DANTE_LTR individual elements (not tandem containers) | `complete` or `partial` |
 | `structure` | tandem LTR-RT **container** only (DANTE_LTR) | `LTR_RT_TR` |
 | `copy_number` | with `structure=LTR_RT_TR` only | integer (member copies in the array) |
+| `in_structure` | tandem LTR-RT **member** copy only (Level-2 DANTE_LTR) | `LTR_RT_TR` |
+| `member_of` | with `in_structure` only | the container's `UA_L1_<8 digits>` ID; **equals `Parent`** |
 | `TE_origin` | optional; only `TideCluster_default`/`_short` | a slash classification path, e.g. `Class_I/LTR/Ty1_copia/Ale` |
 | `TE_origin_structure` | optional; with `TE_origin` only | `tandem_LTR_RT` — the TE-derived satellite is a tandem of *full* LTR-RTs |
 | `Parent` | iff Level 2 (`UA_L2_…`) | an existing `UA_L1_<8 digits>` ID |

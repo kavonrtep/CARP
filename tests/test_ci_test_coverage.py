@@ -33,6 +33,8 @@ CI_EXEMPT = {
         "needs bioconductor rtracklayer (not in carp-unit); gff_cleanup is run by the fixture jobs",
     "test_resolve_tier1_overlaps.R":
         "needs bioconductor GenomicRanges (not in carp-unit); the resolver is run by the fixture jobs",
+    "test_ltr_rt_tr_no_double_count.R":
+        "needs bioconductor GenomicRanges (not in carp-unit); the L1-filter + reduce() guards are also integration-covered by the fixture density",
     "test_reduce_dimer_parallel.sh":
         "needs mmseqs2; dimer reduction is run by the fixture jobs",
     "test_reduce_library_parity.sh":

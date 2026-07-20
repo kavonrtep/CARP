@@ -10,6 +10,24 @@
   missed and the `?` default stuck. Now reads the current file/column (per-TRC
   mode) and drops the `(bp)` suffix when a size is genuinely unavailable instead
   of printing `?`. Regression test `tests/test_trc_monomer_label.R`.
+- **LTR_RT_TR (tandem arrays of complete LTR-RTs) surfaced in the report + GFF3.**
+  - Report density panel: a new **`LTR_RT_TR`** roll-up track (L1 containers only;
+    overlaps the Ty1/copia + Ty3/gypsy lineage tracks, so it is not part of the
+    disjoint partition), rendered directly below the Mobile-elements aggregate.
+    Backed by `Repeat_density_by_class_bigwig/LTR_RT_TR_{10k,100k}.bw`, written by
+    `calculate_statistics_and_make_groups.R`.
+  - Classification table: the **Complete TEs** column now shows `N (M in LTR_RT_TR)`
+    per lineage — of `N` complete LTR-RTs, `M` sit inside tandem arrays (both
+    counts are complete-only: DANTE_LTR ranks `DL/DLT/DLP/DLTP`, never `D`
+    fragments). A darkened, asterisked legend explains it. No double count: the bp
+    column counts the container span once (L1-only), members are Level-2.
+  - Unified GFF3: Level-2 tandem-member copies now carry
+    `in_structure=LTR_RT_TR;member_of=<container UA_L1 id>` (== their `Parent`), so
+    a consumer can identify a tandem member directly. New attributes added to the
+    contract (`validate_unified_gff3.py`, `docs/unified_annotation_gff3_spec.md`,
+    `tests/test_unified_gff3_spec.py`). Regression test
+    `tests/test_ltr_rt_tr_no_double_count.R` locks in the L1-filter + `reduce()`
+    no-double-count guards.
 
 ## 1.1.2
 
