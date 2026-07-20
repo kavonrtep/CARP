@@ -75,3 +75,11 @@ extra flags.
 | `tidecluster_rdna_library` | `""` (bundled) | Override for TideCluster's rDNA reference library. Empty uses the bundled `data/rdna_library.fasta`. |
 | `tidecluster_keep_trc_overlaps` | `false` | When `false`, TideCluster makes the clustering GFF3 non-overlapping across satellite TRCs (dominant-TRC-wins). `true` keeps raw overlapping regions (`--keep_overlaps`). |
 | `tidecluster_chunk_size` | `50000000` | Genome chunk size (bp) for the parallel, pooled RepeatMasker in `tc_reannotate`. Sequences below 2× this are only packed (byte-identical); larger ones split with < 0.15 % masked-bp drift. |
+
+### Output cleanup
+
+Handled by `run_pipeline.py` (not a Snakemake rule), so it applies to full-pipeline runs launched through the wrapper / container.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `cleanup_intermediates` | `minimal` | Post-run deletion of per-tool intermediate scratch, done after a **successful** run only (never on failure or `--dry-run`, since `--keep-incomplete` preserves partials). `minimal` (default) removes clearly-unconsumed scratch — staged genome copies (`RepeatMasker/genome_cleaned.fasta`, `TideCluster/genome_cleaned.fasta`), `DANTE_TIR/DANTE_TIR.RData`, `DANTE_LTR/library` mmseqs/`TE*.fasta` scratch, `filter_ltr_rt_library` side-files, the DANTE tmp GFF3. `maximal` additionally purges the large `TideCluster_tarean` / `TideCluster_kite` / `TideCluster_consensus` trees (can be multiple GB) and the tool workdirs (`Libraries/workdir`, `RepeatMasker/workdir`, `DANTE_TIR/mmseqs_combined`, …). `none` keeps everything. Files listed in `carp_manifest.json` (and their symlink targets) and the CI/count-checked outputs are **never** deleted. The CLI flag `run_pipeline.py --keep-all` forces `none`, overriding this key. |

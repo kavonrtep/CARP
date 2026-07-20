@@ -105,3 +105,10 @@ tidecluster_keep_trc_overlaps: false
 # (the requested speedup). Sequences below 2x this are only packed
 # (byte-identical); larger ones split with <0.15% masked-bp drift. Default 50 Mb.
 tidecluster_chunk_size: 50000000
+# Post-run cleanup of per-tool intermediate scratch, done by run_pipeline.py
+# after a SUCCESSFUL run (never on failure/dry-run). minimal (default) deletes
+# clearly-unconsumed scratch (staged genome copies, DANTE_TIR.RData, mmseqs
+# scratch, DANTE_LTR library TE*.fasta, …); maximal additionally purges the big
+# TideCluster tarean/kite trees and tool workdirs; none keeps everything.
+# The CLI flag --keep-all forces none. Manifest outputs are never touched.
+cleanup_intermediates: minimal

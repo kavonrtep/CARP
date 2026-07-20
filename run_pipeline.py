@@ -93,6 +93,11 @@ rDNA_45S/ITS1
              '--conda-frontend, --show-failed-logs, --cores, --snakefile, --configfile'
              'as they are set by the script.'
         )
+    parser.add_argument(
+        '--keep-all', action='store_true',
+        help='Keep all intermediate files (overrides config cleanup_intermediates, '
+             'forcing "none"). By default a successful run deletes per-tool scratch '
+             'per the cleanup_intermediates config key (default "minimal").')
 
     args = parser.parse_args()
 
@@ -256,6 +261,27 @@ rDNA_45S/ITS1
         except Exception as e:
             print(F"WARNING: failed to finalise output manifest: {e}",
                   file=sys.stderr)
+
+    # Post-run cleanup of per-tool intermediates. Runs ONLY on a clean run
+    # (rc == 0, non-dry-run) — --keep-incomplete already preserves partials on
+    # failure. Mode from config `cleanup_intermediates` (default "minimal"),
+    # forced to "none" by --keep-all. Runs after manifest/provenance finalize
+    # (both are in the keep-set) and before the exit-code / copy-back steps, so
+    # it operates on the scratch copy. Best-effort: a failure only warns.
+    cleanup_mode = "none" if args.keep_all else \
+        str(config_object.get("cleanup_intermediates", "minimal")).strip().lower()
+    if rc == 0 and not is_dry_run and cleanup_mode != "none":
+        if cleanup_mode not in ("minimal", "maximal"):
+            print(F"WARNING: unknown cleanup_intermediates '{cleanup_mode}'; "
+                  F"skipping cleanup (use minimal | maximal | none)", file=sys.stderr)
+        else:
+            try:
+                sys.path.insert(0, os.path.join(script_dir, "scripts"))
+                from cleanup_outputs import cleanup as _cleanup
+                _cleanup(output_dir, cleanup_mode,
+                         log=lambda m: print(m, file=sys.stderr))
+            except Exception as e:
+                print(F"WARNING: post-run cleanup failed: {e}", file=sys.stderr)
 
     if rc != 0:
         sys.exit(rc)
