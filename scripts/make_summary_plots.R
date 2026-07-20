@@ -191,9 +191,6 @@ read_csv_or_empty <- function(path){
 monomer_estimates_kite <- read_csv_or_empty(
   paste0(main_dir, "/TideCluster/default/TideCluster_kite/monomer_size_top3_estimats.csv"))
 
-monomer_best_estimage <- read_csv_or_empty(
-  paste0(main_dir, "/TideCluster/default/TideCluster_kite/monomer_size_best_estimate_stat.csv"))
-
 major_bigwig <- dir(
   paste0(main_dir,
          "/Tandem_repeats_TideCluster_split_by_family_bigwig/100k"),
@@ -210,13 +207,18 @@ trc_index <- trc_index[order(trc_index)]
 # read first max 20 satellites (seq_len handles the no-satellite case: N == 0)
 N <- min(20, length(major_bigwig))
 trc_bw <- list()
-have_monomer <- all(c("position", "TRC_ID") %in% names(monomer_best_estimage))
+# TideCluster kite estimate: per-array `monomer_size` (older releases used
+# `monomer_size_best_estimate_stat.csv` with a `position` column — the stale
+# schema that made labels drop their (bp) size). Take the per-TRC mode.
+have_monomer <- all(c("monomer_size", "TRC_ID") %in% names(monomer_estimates_kite))
 for (i in seq_len(N)){
   label <- trc_name[i]
   monomer_size <- NA
   if (have_monomer){
-    monomer_size <- names(sort(table(monomer_best_estimage$position[monomer_best_estimage$TRC_ID == label]),
-                          decreasing = TRUE)[1])
+    v <- as.character(monomer_estimates_kite$monomer_size[monomer_estimates_kite$TRC_ID == label])
+    v <- v[!is.na(v) & nzchar(v)]
+    if (length(v) > 0)
+      monomer_size <- names(sort(table(v), decreasing = TRUE)[1])
   }
   lab <- if (is.null(monomer_size) || is.na(monomer_size)) label else paste0(label, " (", monomer_size, "bp)")
   trc_bw[[lab]] <- import(paste0(main_dir, "/Tandem_repeats_TideCluster_split_by_family_bigwig/100k/",

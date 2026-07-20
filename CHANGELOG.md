@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Bugfix: satellite density labels in the HTML report showed `TRC_n (?bp)`.**
+  Both `make_repeat_report.R` and `make_summary_plots.R` read the monomer size
+  from the old TideCluster kite file `monomer_size_best_estimate_stat.csv` /
+  column `position`; current TideCluster (>=1.15) writes
+  `monomer_size_top3_estimats.csv` / column `monomer_size`, so the lookup always
+  missed and the `?` default stuck. Now reads the current file/column (per-TRC
+  mode) and drops the `(bp)` suffix when a size is genuinely unavailable instead
+  of printing `?`. Regression test `tests/test_trc_monomer_label.R`.
+
 ## 1.1.2
 
 - **DANTE_LTR 0.5.1.0 → 0.5.1.1** (`envs/tidecluster.yaml`): a newer DANTE_LTR

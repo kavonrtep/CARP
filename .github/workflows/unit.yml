@@ -63,6 +63,9 @@ jobs:
       - name: R provenance-header prepend (finalise_output on.exit guard)
         run: Rscript tests/test_provenance_prepend.R
 
+      - name: R TRC monomer-size label (density panel bp lookup)
+        run: Rscript tests/test_trc_monomer_label.R
+
       - name: Pre-commit hook self-test
         run: |
           git config user.email ci@example.com
