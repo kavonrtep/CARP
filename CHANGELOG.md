@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.3
 
 - **Bugfix: satellite density labels in the HTML report showed `TRC_n (?bp)`.**
   Both `make_repeat_report.R` and `make_summary_plots.R` read the monomer size
