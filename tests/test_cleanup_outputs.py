@@ -2,6 +2,7 @@
 """Test scripts/cleanup_outputs.py: the right scratch is deleted, and nothing in
 the keep-set (manifest outputs, their symlink targets, CI/count-checked files,
 run metadata) is ever touched — for minimal, maximal, dry-run, and none."""
+import json
 import os
 import shutil
 import sys
@@ -12,6 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 from cleanup_outputs import cleanup  # noqa: E402
+from assert_cleanup import check_cleanup  # noqa: E402
+from manifest import OUTPUTS  # noqa: E402
 
 
 def touch(p: Path, content: str = "x"):
@@ -136,6 +139,49 @@ class CleanupTest(unittest.TestCase):
         cleanup(self.d, "bogus", log=lambda m: None)
         for rel in MINIMAL_GONE:
             self.assertTrue(self._exists(rel), f"unknown mode deleted: {rel}")
+
+
+class AssertCleanupTest(unittest.TestCase):
+    """scripts/assert_cleanup.py — the CI check that cleanup ran (scratch gone,
+    every manifest output kept), reading the applied mode from provenance."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="assert_cleanup_test_"))
+        build_tree(self.d)
+        # create every manifest output so the presence check has a full tree
+        for rel in OUTPUTS.values():
+            p = self.d / rel.rstrip("/")
+            if rel.endswith("/"):
+                p.mkdir(parents=True, exist_ok=True)
+            else:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                if not p.exists():
+                    p.write_text("x")
+        # provenance recording the mode that "ran" (overwrites build_tree's stub)
+        (self.d / "run_provenance.json").write_text(
+            json.dumps({"config": {"cleanup_intermediates": "maximal"}}))
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_pass_after_cleanup(self):
+        cleanup(self.d, "maximal", log=lambda m: None)
+        mode, errs = check_cleanup(self.d)
+        self.assertEqual(mode, "maximal")
+        self.assertEqual(errs, [], f"clean tree flagged: {errs}")
+
+    def test_fail_if_scratch_left(self):
+        cleanup(self.d, "maximal", log=lambda m: None)
+        (self.d / "DANTE_TIR").mkdir(exist_ok=True)
+        (self.d / "DANTE_TIR/DANTE_TIR.RData").write_text("x")  # cleanup "missed" it
+        _, errs = check_cleanup(self.d)
+        self.assertTrue(any("left scratch behind" in e for e in errs), errs)
+
+    def test_fail_if_output_deleted(self):
+        cleanup(self.d, "maximal", log=lambda m: None)
+        (self.d / "Repeat_Annotation_Unified.gff3").unlink()  # a deliverable lost
+        _, errs = check_cleanup(self.d)
+        self.assertTrue(any("manifest output missing" in e for e in errs), errs)
 
 
 if __name__ == "__main__":

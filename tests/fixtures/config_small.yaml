@@ -9,3 +9,6 @@ genome_fasta: tests/fixtures/genome_small.fasta
 output_dir: tests/fixtures/output_small
 repeatmasker_sensitivity: default
 reduce_library: True
+# Exercise the heaviest post-run cleanup mode in CI (the medium fixture keeps the
+# default 'minimal'), so both modes are covered end-to-end via run_pipeline.py.
+cleanup_intermediates: maximal
