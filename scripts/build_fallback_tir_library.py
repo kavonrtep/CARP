@@ -44,6 +44,7 @@ from pathlib import Path
 # already on PATH inside the conda env (rules prepend scripts/).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from classification import canonicalise_fasta_headers  # noqa: E402
+from canonical_sort_fasta import sort_fasta_by_sequence  # noqa: E402
 
 
 def parse_class_from_header(header: str) -> str:
@@ -159,9 +160,14 @@ def main() -> int:
     # ── 1. mmseqs re-cluster ───────────────────────────────────────
     cluster_dir = args.workdir / "cluster"
     cluster_dir.mkdir(exist_ok=True)
+    # Deterministic clustering: mmseqs easy-cluster is order-sensitive, so
+    # canonically sort the input by sequence first (see canonical_sort_fasta.py).
+    sorted_input = cluster_dir / "fallback_sorted.fasta"
+    sort_fasta_by_sequence(str(args.fallback_fasta), str(sorted_input),
+                           threads=args.threads, tmpdir=str(cluster_dir))
     run([
         "mmseqs", "easy-cluster",
-        str(args.fallback_fasta),
+        str(sorted_input),
         str(cluster_dir / "cluster"),
         str(cluster_dir / "tmp"),
         "--threads", str(args.threads),

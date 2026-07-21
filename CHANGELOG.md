@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+- **Reproducible repeat libraries: canonically sort every clustering input.**
+  The greedy clustering CARP drives — `mmseqs easy-cluster` and CAP3 — is
+  order-sensitive: the *same* sequences in a different order yield different
+  representative consensi and a different cluster count (measured: ~19% of mmseqs
+  reps and the cluster count itself change under a pure input shuffle; ~3.7% for
+  CAP3; mmseqs is otherwise thread-count-invariant). Upstream tools hand CARP the
+  same sequences in a run-varying order (DANTE's ~0.1% boundary jitter;
+  environment-sensitive chunk grouping), which this amplified into large
+  run-to-run library churn — on one genome the Ty1_copia/Angela library differed
+  ~49% between runs and the LINE quantity moved, while total repeat content stayed
+  constant (a pure reclassification at the LINE↔Ty1_copia RT-ambiguity boundary).
+  Fix: a new out-of-core helper `scripts/canonical_sort_fasta.py` (GNU `sort`,
+  disk-backed, so it stays cheap on the multi-GB intermediates of 30–90 Gbp
+  genomes) sorts each clustering input by **sequence content** immediately before
+  clustering — invariant to upstream record order — at every site CARP invokes
+  the tool itself: `dante_line.py` (LINE), `concatenate_libraries` (one sort of
+  `combined_library.fasta`, which canonicalises every `reduce_library` per-class
+  CAP3/mmseqs input), `make_tir_combined_library` (TIR), and
+  `build_fallback_tir_library.py`. The reduced library — and the RepeatMasker
+  annotation — is now a reproducible function of the input *set*, not its order.
+  Regression test `tests/test_canonical_sort_fasta.py`.
+  - The Ty1_copia/Angela clustering and the DANTE boundary-jitter seed live in the
+    upstream dependencies; both fixes have now **landed** and are pinned here:
+    **dante_ltr 0.5.2.0** (canonically sorts `TE_all.fasta` before its
+    `mmseqs easy-cluster`, `envs/tidecluster.yaml`) and **dante 0.2.12**
+    (byte-deterministic domain output, `envs/dante.yaml`). With these plus the
+    CARP-side sorts above, the LINE/Angela libraries — and the RepeatMasker
+    annotation — are reproducible run-to-run. See
+    `docs/dante_ltr_deterministic_clustering_request.md` and
+    `docs/dante_deterministic_output_request.md`.
+- **Dependency bump: DANTE_TIR 0.2.7 → 0.2.8** (`envs/dante_tir.yaml`). Verified
+  annotation-neutral on the primary-TIR medium fixture: the only output change is
+  the `##DANTE_TIR version` stamp in `DANTE_TIR_final.gff3`; the TIR feature set,
+  the TIR library, the reduced RepeatMasker library and the final unified
+  annotation are all byte-identical to 0.2.7, and repeated runs are deterministic.
+
 ## 1.1.3
 
 - **Bugfix: satellite density labels in the HTML report showed `TRC_n (?bp)`.**

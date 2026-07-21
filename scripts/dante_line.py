@@ -38,6 +38,17 @@ except ImportError:
     spec.loader.exec_module(global_local_aln)
     run_all_vs_all_alignment = global_local_aln.run_all_vs_all_alignment
 
+# Import the canonical FASTA sorter (deterministic clustering input ordering)
+try:
+    from canonical_sort_fasta import sort_fasta_by_sequence
+except ImportError:
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location(
+        "canonical_sort_fasta", Path(__file__).parent / "canonical_sort_fasta.py")
+    canonical_sort_fasta = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(canonical_sort_fasta)
+    sort_fasta_by_sequence = canonical_sort_fasta.sort_fasta_by_sequence
+
 
 def load_sequence_lengths(genome_fasta: str) -> Dict[str, int]:
     """Load sequence lengths from FASTA index file (.fai).
@@ -1119,10 +1130,19 @@ def run_mmseqs_clustering(input_fasta: str, output_dir: Path, threads: int = 1) 
     print(f"  Output directory: {mmseqs_dir}")
 
     try:
+        # Deterministic clustering: mmseqs easy-cluster is order-sensitive
+        # (same sequences in a different order -> different representatives and
+        # a different cluster count). Canonically sort the input by sequence so
+        # the LINE library is a reproducible function of the input set, not its
+        # (run-varying) order. See scripts/canonical_sort_fasta.py.
+        sorted_input = mmseqs_dir / 'input_sorted.fasta'
+        sort_fasta_by_sequence(input_fasta, str(sorted_input),
+                               threads=threads, tmpdir=str(mmseqs_dir))
+
         # Run MMseqs2 easy-cluster
         cmd = [
             'mmseqs', 'easy-cluster',
-            input_fasta,
+            str(sorted_input),
             str(output_prefix),
             str(tmp_dir),
             '--threads', str(threads)

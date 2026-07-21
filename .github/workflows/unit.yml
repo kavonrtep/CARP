@@ -57,6 +57,9 @@ jobs:
       - name: Post-run output cleanup (keep-list safety)
         run: python tests/test_cleanup_outputs.py
 
+      - name: Canonical FASTA sort (deterministic clustering inputs)
+        run: python tests/test_canonical_sort_fasta.py
+
       - name: Every test is run by CI or explicitly exempted (coverage guard)
         run: python tests/test_ci_test_coverage.py
 
