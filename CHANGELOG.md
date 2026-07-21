@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.4
 
 - **Reproducible repeat libraries: canonically sort every clustering input.**
   The greedy clustering CARP drives — `mmseqs easy-cluster` and CAP3 — is
