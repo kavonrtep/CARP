@@ -10,10 +10,13 @@
 #
 # dante 0.2.11 includes the post-chunk merge-tail parallelization (parallel
 # per-chunk coordinate recalculation + `sort --parallel`) contributed from CARP.
+# dante 0.2.12 additionally makes the domain output byte-deterministic at fixed
+# input+version (deterministic best-hit / Region_Hits ordering) — see
+# docs/dante_deterministic_output_request.md.
 name: dante
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - dante=0.2.11
+  - dante=0.2.12

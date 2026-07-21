@@ -643,9 +643,17 @@ rule make_tir_combined_library:
             exit 0
         fi
 
+        # Deterministic clustering: mmseqs easy-cluster is order-sensitive
+        # (same sequences in a different order -> different representatives and
+        # a different cluster count), so canonically sort the input by sequence
+        # first. See scripts/canonical_sort_fasta.py.
+        SORTED_INPUT={params.mmseqs_dir}/primary_sorted.fasta
+        canonical_sort_fasta.py "$FILTERED_INPUT" "$SORTED_INPUT" \
+            --threads {threads} --tmpdir {params.mmseqs_dir}
+
         # Run mmseqs2 clustering on the primary-only set
         mmseqs easy-cluster \
-            "$FILTERED_INPUT" \
+            "$SORTED_INPUT" \
             {params.mmseqs_dir}/cluster \
             {params.mmseqs_dir}/tmp \
             --threads {threads}
@@ -1391,6 +1399,21 @@ rule concatenate_libraries:
         fi
         # Append rDNA library
         cat {params.rdna_library} >> {output.full_names}
+
+        # Deterministic downstream clustering: reduce_library re-clusters this
+        # library per class with CAP3 / mmseqs easy-cluster, both order-sensitive
+        # (same sequences in a different order -> different representatives). Sort
+        # the combined library canonically by sequence here — a single choke
+        # point that makes every per-class clustering input order-invariant, so
+        # the reduced library (and the RepeatMasker annotation) is reproducible
+        # run-to-run. Bare-name via PATH (see CLAUDE.md). canonical_sort_fasta.py
+        # is out-of-core (GNU sort), so this stays cheap on large libraries.
+        scripts_dir=$(realpath scripts)
+        export PATH="$scripts_dir:$PATH"
+        canonical_sort_fasta.py {output.full_names} {output.full_names}.sorted \
+            --tmpdir "$(dirname {output.full_names})"
+        mv {output.full_names}.sorted {output.full_names}
+
         # Create short names version
         awk '/^>/{{count++; split($0,a,"#"); print ">" count "#" a[2]; next}} {{print}}' {output.full_names} > {output.short_names}
         """
