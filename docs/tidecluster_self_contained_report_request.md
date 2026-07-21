@@ -1,5 +1,12 @@
 # TideCluster report v2: make `<prefix>_report/` self-contained (vendor the PNGs)
 
+**Status:** ✅ RESOLVED in **TideCluster 1.17.0** (petrnovak channel); CARP's
+`envs/tidecluster_run.yaml` pin bumped 1.16.6 → 1.17.0. The report now vendors
+its per-TRC PNGs into `<prefix>_report/img/`. Verified end-to-end on the small
+fixture: after `cleanup_intermediates: maximal` purges `TideCluster_kite` /
+`TideCluster_tarean` / `TideCluster_consensus`, 0 of 9 report PNG references are
+missing — the report is fully self-contained.
+
 ## Summary
 
 The modernised HTML report (`<prefix>_report/`, built by `tc_rerender_report.py`)

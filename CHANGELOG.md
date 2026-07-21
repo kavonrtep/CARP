@@ -37,6 +37,14 @@
   the `##DANTE_TIR version` stamp in `DANTE_TIR_final.gff3`; the TIR feature set,
   the TIR library, the reduced RepeatMasker library and the final unified
   annotation are all byte-identical to 0.2.7, and repeated runs are deterministic.
+- **Dependency bump: TideCluster 1.16.6 → 1.17.0** (`envs/tidecluster_run.yaml`).
+  1.17.0 makes the HTML report self-contained — it vendors its per-TRC PNGs into
+  `<prefix>_report/img/` instead of referencing them via `../` inside the
+  `TideCluster_kite` / `TideCluster_tarean` working trees. This makes
+  `cleanup_intermediates: maximal` (which purges those multi-GB trees) safe:
+  verified end-to-end on the small fixture that after the maximal purge, 0 of 9
+  report PNG references are missing (the report survives intact). Resolves
+  `docs/tidecluster_self_contained_report_request.md`.
 
 ## 1.1.3
 
