@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.5
 
 - **Dependency bump: TideCluster 1.17.0 → 1.18.0** (`envs/tidecluster_run.yaml`).
   A large-genome performance / scalability update, **byte-identical to 1.17.0 on
