@@ -37,13 +37,21 @@
 # report survives the purge with no broken images. Verified end-to-end on the
 # small fixture (0/9 report PNG refs missing after a maximal purge). See
 # docs/tidecluster_self_contained_report_request.md.
+#
+# 1.18.0 is a large-genome performance / scalability update, verified
+# byte-identical to 1.17.0 on the deterministic outputs (no behaviour, CLI
+# or output change): TAREAN/rDNA use a random-access IndexedFasta reader
+# instead of loading the whole genome into RAM (was OOMing large assemblies),
+# O(1) TideHunter coordinate remap, linear duplicate-array filtering, and a
+# memory-gated parallel per-part TideHunter. Purge-safety (self-contained
+# report) reconfirmed end-to-end on the small fixture.
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.17.0
+  - tidecluster=1.18.0
   # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
   # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
   # resolves (TideCluster needs r-base >= 4.2).

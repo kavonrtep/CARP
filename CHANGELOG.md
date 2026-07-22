@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Dependency bump: TideCluster 1.17.0 → 1.18.0** (`envs/tidecluster_run.yaml`).
+  A large-genome performance / scalability update, **byte-identical to 1.17.0 on
+  the deterministic outputs** (no behaviour, CLI, or output change): TAREAN/rDNA
+  now use a random-access `IndexedFasta` reader instead of loading the whole
+  genome into RAM (which was OOMing large assemblies), O(1) TideHunter
+  coordinate remap, linear duplicate-array filtering, `tidehunter --long`
+  streams rounds to disk, and a memory-gated parallel per-part TideHunter —
+  directly relevant to the 30–90 Gbp genomes. The self-contained report / maximal
+  purge safety from 1.17.0 was reconfirmed end-to-end on the small fixture (0 of 9
+  report PNG references missing after a maximal purge).
+
 ## 1.1.4
 
 - **Reproducible repeat libraries: canonically sort every clustering input.**
