@@ -5,7 +5,7 @@
 # --name-prefix TRC_ it extracts only the tandem-repeat families (Name=TRC_<n>)
 # from a larger annotation (e.g. Repeat_Annotation_Unified.gff3) and writes one
 # GFF3 per family; feeding those to calculate_density_batch.R yields one density
-# BigWig per family. See docs/bigwig_redesign_plan.md.
+# BigWig per family. See docs/archive/bigwig_redesign_plan.md.
 #
 # Robust to empty input: a missing, 0-byte, or header-only GFF3 (a legitimate
 # state — e.g. RM_on_TideCluster_Library.gff3 is truncated to 0 bytes when there

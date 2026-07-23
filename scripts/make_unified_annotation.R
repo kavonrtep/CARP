@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # make_unified_annotation.R
 # Produces a unified, tier-prioritised repeat annotation GFF3 from all pipeline layers.
-# See annotation_rules.md and unified_annotation_implementation_plan.md for design rationale.
+# See docs/archive/annotation_rules.md and docs/archive/unified_annotation_implementation_plan.md for design rationale.
 
 suppressPackageStartupMessages({
   library(optparse)

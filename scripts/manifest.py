@@ -4,7 +4,7 @@
 A machine-readable statement of the *output contract* a run conforms to, written
 at the output root so downstream consumers (e.g. the JBrowse portal) resolve
 files by a stable logical name instead of sniffing the directory layout.
-See FR-3 in ``docs/carp_feature_requests.md`` and the ``schema_version``
+See FR-3 in ``docs/archive/carp_feature_requests.md`` and the ``schema_version``
 changelog in ``docs/output_schema.md``.
 
 This is SEPARATE from ``run_provenance.json`` and is NOT a completion gate:
@@ -67,7 +67,7 @@ OUTPUTS = {
     "dante_ltr_gff3":               "DANTE_LTR.gff3",
     # Tandem LTR-RT (LTR_RT_TR) containers — one per head-to-tail shared-LTR
     # array, each listing its member element IDs. Always present; header-only
-    # when no tandems are detected. See docs/dante_ltr_tandem_feature_request.md.
+    # when no tandems are detected. See docs/archive/dante_ltr_tandem_feature_request.md.
     "dante_ltr_tandems_gff3":       "DANTE_LTR_tandems.gff3",
     "dante_tir_gff3":               "DANTE_TIR.gff3",
     "mobile_elements_gff3":         "Mobile_elements_RepeatMasker.gff3",

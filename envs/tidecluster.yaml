@@ -25,7 +25,7 @@ dependencies:
   # dante_ltr 0.5.2.0 makes its library clustering deterministic (canonically
   # sorts TE_all.fasta before mmseqs easy-cluster), so the Ty1_copia/Angela
   # library no longer churns run-to-run — see
-  # docs/dante_ltr_deterministic_clustering_request.md.
+  # docs/archive/dante_ltr_deterministic_clustering_request.md.
   - dante_ltr=0.5.2.0
   - repeatmasker=4.1.2.p1
   - seqkit=2.8.2
