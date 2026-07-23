@@ -389,14 +389,27 @@ def main():
 
     print("Number of fasta parts: ", len(fasta_parts_files))
 
-    # use multiprocessing module to run RepeatMasker in parallel
-    rm_arguments = list(zip(fasta_parts_files,
-                            [args.library] * len(fasta_parts_files),
-                            [tmp_dir] * len(fasta_parts_files),
-                            [args.sensitivity] * len(fasta_parts_files)))
+    # Dispatch order = largest part first (LPT / longest-processing-time-first
+    # scheduling). Each RepeatMasker worker is single-threaded (culling pins
+    # rmblastn to -num_threads 1 for determinism; see rmblast_culling_shim.py),
+    # so with a few big chromosome-sized parts and many small scaffolds, file
+    # order would leave a big part running alone on one core at the tail while
+    # the other cores idle. Starting the big parts first lets the small ones
+    # backfill the tail, minimising makespan. chunksize=1 so the pool hands out
+    # one part at a time in this order (the default batches the iterable, which
+    # would defeat LPT). Sort key is (-size, path) — fully deterministic.
+    # NB: this only reorders *dispatch*; the recalculation and concatenation
+    # loops below still walk fasta_parts_files in the original genome order, so
+    # the merged .out is byte-identical regardless of scheduling.
+    scheduled_parts = sorted(fasta_parts_files,
+                             key=lambda f: (-os.path.getsize(f), f))
+    rm_arguments = list(zip(scheduled_parts,
+                            [args.library] * len(scheduled_parts),
+                            [tmp_dir] * len(scheduled_parts),
+                            [args.sensitivity] * len(scheduled_parts)))
 
     with multiprocessing.Pool(args.threads) as pool:
-        pool.starmap(repeatmasker, rm_arguments)
+        pool.starmap(repeatmasker, rm_arguments, chunksize=1)
 
     # recalculate coordinates in RepeatMasker output files. RepeatMasker emits
     # no .out for a chunk with zero hits; treat a missing .out as contributing

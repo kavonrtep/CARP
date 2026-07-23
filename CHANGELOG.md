@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- **Reproducible RepeatMasker under culling: pin the culling `rmblastn` to a
+  single thread.** NCBI BLAST's `-culling_limit` is non-deterministic across
+  threads (per-thread HSPs merge in completion order, then equal-scoring
+  enveloped HSPs are culled in that order), and RepeatMasker launches `rmblastn`
+  with `-num_threads 4` even at `-pa 1` — so culling + multithreading jittered
+  ~0.03–0.07% of hits run-to-run (alignment boundaries, tied sub-consensus
+  choice, divergence %); family-level classification totals were already stable.
+  The RMBLAST_DIR shim (`scripts/rmblast_culling_shim.py`) now strips
+  RepeatMasker's `-num_threads N` and forces `-num_threads 1` on real search
+  calls (in addition to appending `-culling_limit N`; `-version` still passes
+  through), making culling bit-reproducible. This fixes **both** RepeatMasker
+  layers through the one shared shim — the main `repeatmasker` rule and the
+  `tidecluster_reannotate` rule (whose internal RepeatMasker inherits
+  `RMBLAST_DIR`; TideCluster itself is not patched). Parallelism is recovered at
+  the chunk level (`scripts/repeatmasker_wrapper.py` now dispatches chunks
+  largest-first via LPT scheduling, `Pool.starmap(chunksize=1)` — dispatch order
+  only; the merged `.out` is byte-identical), and on large genomes this also
+  removes the previous 16-workers × 4-threads CPU oversubscription. Only affects
+  runs with culling enabled (`repeatmasker_culling_limit` > 0 or
+  `tidecluster_reannotate_culling_limit` > 0; culling-off runs were already
+  deterministic) — no config parameters changed. **NOTE:** outputs shift slightly
+  (~0.3% of hits) versus prior releases and become reproducible. Verified on a
+  190 Mb genome: two runs byte-identical (were not before), RepeatMasker
+  wall-time unchanged-to-faster (322 s vs 334–379 s baseline), and TideCluster
+  reannotate byte-identical across runs (was not before).
+
 ## 1.1.5
 
 - **Dependency bump: TideCluster 1.17.0 → 1.18.0** (`envs/tidecluster_run.yaml`).
