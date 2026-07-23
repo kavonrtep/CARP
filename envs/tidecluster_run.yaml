@@ -28,7 +28,7 @@
 # could silently truncate the reannotation on a fresh env's first run: the RM
 # libraries are now built once before the pool fans out, and a failed chunk
 # makes tc_reannotate exit non-zero instead of merging a partial set. See
-# docs/tidecluster_reannotate_chunk_race_request.md.
+# docs/archive/tidecluster_reannotate_chunk_race_request.md.
 #
 # 1.17.0 makes the HTML report (<prefix>_report/) self-contained: it now vendors
 # its per-TRC PNGs into <prefix>_report/img/ instead of referencing them via ../
@@ -36,7 +36,7 @@
 # `cleanup_intermediates: maximal` (which purges those multi-GB trees) SAFE — the
 # report survives the purge with no broken images. Verified end-to-end on the
 # small fixture (0/9 report PNG refs missing after a maximal purge). See
-# docs/tidecluster_self_contained_report_request.md.
+# docs/archive/tidecluster_self_contained_report_request.md.
 #
 # 1.18.0 is a large-genome performance / scalability update, verified
 # byte-identical to 1.17.0 on the deterministic outputs (no behaviour, CLI

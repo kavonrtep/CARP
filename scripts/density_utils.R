@@ -8,7 +8,7 @@
 # importantly all-zero runs — coalesce into one interval. Sourced by
 # calculate_density.R and calculate_density_batch.R.
 #
-# See docs/carp_feature_requests.md FR-1.
+# See docs/archive/carp_feature_requests.md FR-1.
 
 suppressPackageStartupMessages({
   library(GenomicRanges)

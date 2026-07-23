@@ -807,7 +807,7 @@ rule dante_ltr:
         # which exceeds the default soft open-file limit of 1024 and aborts with
         # "OSError: [Errno 24] Too many open files". Raise the soft limit to the
         # hard limit for this rule. Durable fix is upstream —
-        # see docs/dante_ltr_too_many_open_files_request.md.
+        # see docs/archive/dante_ltr_too_many_open_files_request.md.
         ulimit -n "$(ulimit -Hn)" || true
         dante_ltr -o {params.prefix} -s {input.fasta} -g {input.gff} -c {threads} -M 1 -S 50000000
         # if exit status is 0 and gff3 file was created but html is missing, create an empty file
@@ -1071,7 +1071,7 @@ rule tidecluster_reannotate:
         # exceeding the default soft open-file limit of 1024 ("Too many open
         # files"). Same bug class as dante_ltr. Raise the soft limit to the hard
         # limit for this rule. Durable fix is upstream —
-        # see docs/tidecluster_large_genome_request.md.
+        # see docs/archive/tidecluster_large_genome_request.md.
         ulimit -n "$(ulimit -Hn)" || true
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
@@ -1623,7 +1623,7 @@ rule make_unified_annotation:
     """
     Produce a single, tier-prioritised repeat annotation GFF3 from all pipeline layers.
     Structure-based annotations (DANTE_LTR, DANTE_TIR, DANTE_LINE) take priority over
-    similarity-based ones (RepeatMasker). See annotation_rules.md for full tier hierarchy.
+    similarity-based ones (RepeatMasker). See docs/archive/annotation_rules.md for full tier hierarchy.
     """
     input:
         ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
