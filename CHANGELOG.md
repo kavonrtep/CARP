@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.6
 
 - **Reproducible RepeatMasker under culling: pin the culling `rmblastn` to a
   single thread.** NCBI BLAST's `-culling_limit` is non-deterministic across
