@@ -8,3 +8,4 @@
 
 # Upstream tool clones for scaling analysis (not part of the pipeline)
 scratch/
+carp-example-report/
