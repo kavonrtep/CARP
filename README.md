@@ -29,6 +29,18 @@ assembly, then merges everything into a single, non-overlapping annotation.
 | [**RepeatMasker**](https://www.repeatmasker.org/) | Similarity masking of the genome with the CARP-built repeat library |
 | [**REXdb**](https://github.com/repeatexplorer/rexdb) | Viridiplantae protein-domain reference database backing the DANTE family |
 
+## Example output
+
+Explore a live example of CARP's output — the
+[**interactive HTML report**](https://kavonrtep.github.io/carp-example-report/),
+produced on the *Boechera stricta* genome
+([GCA_018361405.1](https://www.ebi.ac.uk/ena/browser/view/GCA_018361405.1)) — to
+see what the pipeline produces (genome-wide repeat composition, the LTR / TIR
+structural summaries, and the tandem-repeat / satellite family drill-down)
+without running it yourself. The page hosts the HTML reports only; a full run
+also emits the complete GFF3 annotation, density tracks (BigWig) and masked
+sequence.
+
 ## Requirements
 
 - **Container runtime:** [Apptainer](https://apptainer.org/) ≥ 1.0 (recommended)
