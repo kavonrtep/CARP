@@ -86,6 +86,54 @@ def test_analyze_alignment_lengths_correct_deterministic_atomic():
     print("  test_analyze_alignment_lengths_correct_deterministic_atomic: PASS")
 
 
+def test_analyze_alignment_lengths_heap_equivalence():
+    """PR-B item 4: the bounded-heap rewrite must produce byte-identical output to
+    the old 'store every length, sort, index' reference, across random inputs."""
+    import random
+    from collections import defaultdict
+
+    def reference(rows, N):
+        gl = defaultdict(list)
+        for q, r, dq, dr in rows:
+            gl[q].append(dq)
+            gl[r].append(dr)
+        out = []
+        for g in sorted(gl):
+            lengths = sorted(gl[g], reverse=True)
+            if len(lengths) >= N:
+                sel = lengths[N - 1]
+                ns = sum(1 for x in lengths if x <= sel) - 1
+                out.append((g, sel, ns))
+        return out
+
+    rng = random.Random(1234)
+    for trial in range(300):
+        N = rng.randint(1, 4)
+        groups = [f"G{i}" for i in range(rng.randint(1, 6))]
+        rows = [
+            (rng.choice(groups), rng.choice(groups), rng.randint(1, 20), rng.randint(1, 20))
+            for _ in range(rng.randint(0, 40))
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            aln = Path(d) / "a.tsv"
+            out = Path(d) / "o.tsv"
+            with open(aln, "w") as f:
+                f.write("query_id\tref_id\tdegapped_query_len\tdegapped_ref_len\n")
+                for q, r, dq, dr in rows:
+                    f.write(f"{q}\t{r}\t{dq}\t{dr}\n")
+            dl.analyze_alignment_lengths(aln, out, N)
+            got = []
+            for line in out.read_text().splitlines()[1:]:
+                if not line:
+                    continue
+                g, sel, ns = line.split("\t")
+                got.append((g, int(sel), int(ns)))
+        assert got == reference(rows, N), (
+            f"trial {trial} N={N}: heap != reference\ngot={got}\nexp={reference(rows, N)}\nrows={rows}"
+        )
+    print("  test_analyze_alignment_lengths_heap_equivalence: PASS")
+
+
 def test_dante_line_exit_code_split():
     """Item 7: dante_line.py must exit 3 for the benign 'no LINE content' case and
     a non-3 code for a real error, so the Snakefile can tell them apart (and stop
@@ -124,5 +172,6 @@ def test_dante_line_exit_code_split():
 if __name__ == "__main__":
     test_write_results_table_atomic_and_ordered()
     test_analyze_alignment_lengths_correct_deterministic_atomic()
+    test_analyze_alignment_lengths_heap_equivalence()
     test_dante_line_exit_code_split()
     print("test_alignment_engine_hardening: ALL PASS")

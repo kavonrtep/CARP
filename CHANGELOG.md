@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Bounded memory in the shared all-vs-all alignment engine (very high-copy
+  families).** The engine used by both `dante_line` and `dante_tir_fallback` no
+  longer materialises the whole run in RAM: `run_all_vs_all_alignment` streams
+  each clustering group's records to disk as the group finishes (instead of
+  accumulating every record across all groups before one write),
+  `_compare_sequences` bounds the number of in-flight worker futures, and
+  `analyze_alignment_lengths` keeps only a size-N min-heap per group rather than
+  every alignment length. Peak memory now scales with the largest group / a fixed
+  window, not the whole family, so very high-copy LINE / TIR families no longer
+  OOM. Output is unchanged (verified byte-identical on single- and multi-group
+  paths; the length-threshold rewrite is equivalence-tested against the old
+  algorithm over randomised inputs).
+
 - **`dante_line` failures no longer silently drop the LINE layer.** The rule
   wrapper previously turned *any* `dante_line.py` non-zero exit into empty LINE
   outputs, so a genuine crash looked like a successful run with no LINEs.

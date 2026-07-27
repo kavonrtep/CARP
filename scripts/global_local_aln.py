@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import tempfile
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 # parasail is imported lazily inside pick_func()/make_matrix() so this module
 # (and its pure-Python grouping helpers) can be imported for unit testing in a
@@ -493,6 +493,17 @@ def run_single_comparison(pair_data, args):
         return None
 
 
+# Column order for the all-vs-all alignment TSV — shared by write_results_table
+# and the streaming writer in run_all_vs_all_alignment so they can never diverge.
+RESULT_COLUMNS = [
+    'query_id', 'ref_id', 'query_len', 'ref_len',
+    'parasail_score', 'max_score', 'max_pos', 'end_mode',
+    'degapped_query_len', 'degapped_ref_len',
+    'trimmed_query', 'trimmed_ref',
+    'degapped_query', 'degapped_ref'
+]
+
+
 def write_results_table(results, output_file):
     """
     Write alignment results to tab-delimited file.
@@ -507,14 +518,7 @@ def write_results_table(results, output_file):
     if not results:
         return
 
-    # Define column order
-    columns = [
-        'query_id', 'ref_id', 'query_len', 'ref_len',
-        'parasail_score', 'max_score', 'max_pos', 'end_mode',
-        'degapped_query_len', 'degapped_ref_len',
-        'trimmed_query', 'trimmed_ref',
-        'degapped_query', 'degapped_ref'
-    ]
+    columns = RESULT_COLUMNS
 
     # Atomic write: build the table under a .tmp name and rename on success, so a
     # run killed mid-write can never leave a truncated file that the next run's
@@ -826,6 +830,17 @@ def group_sequences_for_alignment(fasta_file, seq_ids, max_group_size,
     return groups
 
 
+def _run_pair(pair_data, args):
+    """Run one pairwise comparison (either pair shape) and return the result dict,
+    or None if it did not pass the score threshold. Shared by the single-thread
+    and bounded multi-thread paths so their filtering can't drift apart."""
+    if len(pair_data) == 6:
+        return run_single_comparison(pair_data, args)
+    seq1_id, seq1, seq2_id, seq2 = pair_data
+    result = run_alignment_comparison(seq1_id, seq1, seq2_id, seq2, args)
+    return result if result['max_score'] >= args.score_threshold else None
+
+
 def _compare_sequences(sequences, fasta_file, args, verbose,
                        use_prefilter, prefilter_identity):
     """Run MMseqs2 prefilter + all-vs-all parasail comparison for one set of
@@ -883,42 +898,37 @@ def _compare_sequences(sequences, fasta_file, args, verbose,
             comparison_count += 1
             if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
                 print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
-
-            if len(pair_data) == 6:
-                result = run_single_comparison(pair_data, args)
-            else:
-                seq1_id, seq1, seq2_id, seq2 = pair_data
-                result = run_alignment_comparison(seq1_id, seq1, seq2_id, seq2, args)
-                if result['max_score'] < args.score_threshold:
-                    result = None
-
+            result = _run_pair(pair_data, args)
             if result is not None:
                 results.append(result)
     else:
+        # Bound the number of in-flight Futures so memory scales with the window,
+        # not the group (item 2): at max_group_size=1000 a group has ~500k pairs;
+        # submitting them all up front holds ~500k live Futures plus their results
+        # — the very OOM the grouping was meant to avoid. Keep ~ threads*8 pairs
+        # submitted, refilling one per completion. Result ORDER is irrelevant here
+        # because run_all_vs_all_alignment sorts each group before writing.
         comparison_count = 0
+        window = max(threads * 8, threads)
+        pairs = iter(pair_generator)
         with ThreadPoolExecutor(max_workers=threads) as executor:
-            futures = []
-            for pair_data in pair_generator:
-                if len(pair_data) == 6:
-                    future = executor.submit(run_single_comparison, pair_data, args)
-                else:
-                    seq1_id, seq1, seq2_id, seq2 = pair_data
-
-                    def align_and_filter(s1_id, s1, s2_id, s2, a):
-                        res = run_alignment_comparison(s1_id, s1, s2_id, s2, a)
-                        return res if res['max_score'] >= a.score_threshold else None
-
-                    future = executor.submit(align_and_filter, seq1_id, seq1, seq2_id, seq2, args)
-                futures.append(future)
-
-            for future in as_completed(futures):
-                comparison_count += 1
-                if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
-                    print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
-
-                result = future.result()
-                if result is not None:
-                    results.append(result)
+            pending = set()
+            for pair_data in pairs:
+                pending.add(executor.submit(_run_pair, pair_data, args))
+                if len(pending) >= window:
+                    break
+            while pending:
+                done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                for future in done:
+                    comparison_count += 1
+                    if verbose and (comparison_count % 100 == 0 or comparison_count == total_comparisons):
+                        print(f"  Progress: {comparison_count}/{total_comparisons} comparisons")
+                    result = future.result()
+                    if result is not None:
+                        results.append(result)
+                    nxt = next(pairs, None)
+                    if nxt is not None:
+                        pending.add(executor.submit(_run_pair, nxt, args))
 
     return results
 
@@ -1013,55 +1023,70 @@ def run_all_vs_all_alignment(
         verbose=verbose,
     )
 
-    results = []
+    # Stream each group's records to disk as soon as that group finishes, keeping
+    # only one group in memory (item 1: peak memory scales with the largest group,
+    # not the whole run — a 168k-copy family is otherwise millions of dict rows
+    # held at once). Each group's rows are sorted by (query_id, ref_id) before
+    # writing, so the TSV is deterministic/checksum-verifiable; downstream
+    # analyze_alignment_lengths is row-order-independent, so results are unchanged.
+    # For the single-group path this is byte-identical to the old global sort.
+    # Written atomically (.tmp + rename), matching write_results_table.
+    tmp_out = f"{output_file}.tmp"
+    total = 0
+    header_written = False
 
-    if len(groups) <= 1:
-        results = _compare_sequences(
-            sequences, fasta_file, args, verbose, use_prefilter, prefilter_identity
-        )
-    else:
-        seq_dict = dict(sequences)
-        if verbose:
-            print(f"\nProcessing {len(groups)} groups independently "
-                  f"(bounded all-vs-all, max_group_size={max_group_size})...")
-        for gi, group_ids in enumerate(groups, 1):
-            group_seqs = [(sid, seq_dict[sid]) for sid in group_ids if sid in seq_dict]
-            if len(group_seqs) < 2:
-                continue
-            if verbose:
-                print(f"\n  Group {gi}/{len(groups)}: {len(group_seqs)} sequences")
-            fd, group_fasta = tempfile.mkstemp(suffix=f"_group{gi}.fasta")
-            os.close(fd)
-            try:
-                with open(group_fasta, "w") as handle:
-                    for sid, seq in group_seqs:
-                        handle.write(f">{sid}\n{seq}\n")
-                results.extend(
-                    _compare_sequences(
-                        group_seqs, group_fasta, args, verbose,
-                        use_prefilter, prefilter_identity,
-                    )
-                )
-            finally:
-                if os.path.exists(group_fasta):
-                    os.remove(group_fasta)
+    def _flush(recs, fh):
+        nonlocal total, header_written
+        if not recs:
+            return
+        recs.sort(key=lambda r: (r.get('query_id', ''), r.get('ref_id', '')))
+        if not header_written:
+            fh.write('\t'.join(RESULT_COLUMNS) + '\n')
+            header_written = True
+        for r in recs:
+            fh.write('\t'.join(str(r.get(c, '')) for c in RESULT_COLUMNS) + '\n')
+        total += len(recs)
 
-    # Deterministic row order: the multi-thread path collects results in
-    # completion order, so sort by (query_id, ref_id) — each unordered pair is
-    # compared once, so the key is unique — before writing. This makes the
-    # intermediate TSV byte-identical run-to-run (checksum-verifiable); the
-    # downstream *_aln_length.tsv already sorted, so results are unaffected.
-    results.sort(key=lambda r: (r.get('query_id', ''), r.get('ref_id', '')))
-
-    # Write results to output file
     if verbose:
         print(f"Writing results to {output_file}...")
-    write_results_table(results, output_file)
+    with open(tmp_out, 'w') as fh:
+        if len(groups) <= 1:
+            _flush(_compare_sequences(sequences, fasta_file, args, verbose,
+                                      use_prefilter, prefilter_identity), fh)
+        else:
+            seq_dict = dict(sequences)
+            if verbose:
+                print(f"\nProcessing {len(groups)} groups independently "
+                      f"(bounded all-vs-all, max_group_size={max_group_size})...")
+            for gi, group_ids in enumerate(groups, 1):
+                group_seqs = [(sid, seq_dict[sid]) for sid in group_ids if sid in seq_dict]
+                if len(group_seqs) < 2:
+                    continue
+                if verbose:
+                    print(f"\n  Group {gi}/{len(groups)}: {len(group_seqs)} sequences")
+                fd, group_fasta = tempfile.mkstemp(suffix=f"_group{gi}.fasta")
+                os.close(fd)
+                try:
+                    with open(group_fasta, "w") as handle:
+                        for sid, seq in group_seqs:
+                            handle.write(f">{sid}\n{seq}\n")
+                    _flush(_compare_sequences(group_seqs, group_fasta, args, verbose,
+                                              use_prefilter, prefilter_identity), fh)
+                finally:
+                    if os.path.exists(group_fasta):
+                        os.remove(group_fasta)
+
+    # Preserve the previous "no records -> no output file" contract
+    # (write_results_table returned early on an empty list); else publish atomically.
+    if total == 0:
+        os.remove(tmp_out)
+    else:
+        os.replace(tmp_out, output_file)
 
     if verbose:
-        print(f"Analysis complete! Generated {len(results)} alignment records.")
+        print(f"Analysis complete! Generated {total} alignment records.")
 
-    return results
+    return total
 
 
 def main():

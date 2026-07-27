@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import os
 import re
+import heapq
 from pathlib import Path
 import bisect
 from collections import defaultdict, namedtuple
@@ -1033,8 +1034,12 @@ def analyze_alignment_lengths(alignment_tsv: Path, output_tsv: Path, min_num_ali
     min_num_alignments : int
         Minimum number of alignments required (N largest alignments to consider)
     """
-    # Dictionary to store alignment lengths per group
-    group_lengths = defaultdict(list)
+    # Bounded memory: we only ever need the N largest lengths per group (to pick
+    # the Nth largest) plus a running count — not every length. Keep a size-N
+    # min-heap per group, so peak memory is groups x N instead of total records.
+    n = min_num_alignments
+    group_heap = defaultdict(list)   # min-heap holding the N largest lengths seen
+    group_count = defaultdict(int)   # total lengths seen per group
 
     # Read alignment data from TSV
     with open(alignment_tsv, 'r') as f:
@@ -1045,40 +1050,41 @@ def analyze_alignment_lengths(alignment_tsv: Path, output_tsv: Path, min_num_ali
         degapped_query_len_idx = header.index('degapped_query_len')
         degapped_ref_len_idx = header.index('degapped_ref_len')
 
-        # Read data rows
+        # Read data rows; feed each length into its group's bounded heap
         for line in f:
             fields = line.strip().split('\t')
-            query_id = fields[query_id_idx]
-            ref_id = fields[ref_id_idx]
-            degapped_query_len = int(fields[degapped_query_len_idx])
-            degapped_ref_len = int(fields[degapped_ref_len_idx])
+            for gid, length in (
+                (fields[query_id_idx], int(fields[degapped_query_len_idx])),
+                (fields[ref_id_idx], int(fields[degapped_ref_len_idx])),
+            ):
+                group_count[gid] += 1
+                heap = group_heap[gid]
+                if len(heap) < n:
+                    heapq.heappush(heap, length)
+                else:
+                    heapq.heappushpop(heap, length)  # keep the N largest
 
-            # Add query alignment length to query group
-            group_lengths[query_id].append(degapped_query_len)
-
-            # Add ref alignment length to ref group
-            group_lengths[ref_id].append(degapped_ref_len)
-
-    # Calculate threshold for each group
+    # Calculate threshold for each group. The selected length is the Nth largest
+    # (= the heap's min once the group has >= N lengths). Num_Shorter is
+    # (# lengths <= selected) - 1; every length strictly greater than the Nth
+    # largest is itself among the N largest (so it is in the heap), hence
+    # (# > selected) = n - (# heap entries == selected). This reproduces exactly
+    # what the previous sort-all-lengths code computed.
     results = []
-    for group_id in sorted(group_lengths.keys()):
-        lengths = sorted(group_lengths[group_id], reverse=True)  # Sort descending
-
-        # Only report if we have at least min_num_alignments
-        if len(lengths) >= min_num_alignments:
-            # Select the Nth largest value (index N-1)
-            selected_length = lengths[min_num_alignments - 1]
-
-            # Count alignments shorter than OR EQUAL to selected_length, excluding the selected one
-            # This gives us the number of "other" alignments that pass the threshold
-            num_shorter_or_equal = sum(1 for length in lengths if length <= selected_length) - 1
+    for group_id in sorted(group_count.keys()):
+        total = group_count[group_id]
+        if n >= 1 and total >= n:
+            heap = group_heap[group_id]
+            selected_length = heap[0]
+            num_greater = n - sum(1 for x in heap if x == selected_length)
+            num_shorter_or_equal = total - num_greater - 1
 
             results.append({
                 'Group_ID': group_id,
                 'Selected_Length': selected_length,
                 'Num_Shorter': num_shorter_or_equal
             })
-        # If less than min_num_alignments, don't report (doesn't pass threshold)
+        # If fewer than min_num_alignments, don't report (doesn't pass threshold)
 
     # Write results to TSV atomically (.tmp + rename) so a run killed mid-write
     # cannot leave a truncated file that the caller's `.exists()` checkpoint would
