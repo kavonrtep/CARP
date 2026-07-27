@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Dependency bump: DANTE_TIR 0.2.8 → 0.3.0** (`envs/dante_tir.yaml`). 0.3.0
+  pulls three new transitive dependencies — `bioconductor-rsamtools`,
+  `bioconductor-genomeinfodbdata` and `numpy` — all resolvable from the channels
+  the env already lists, so only the version pin changed.
+
 - **Bounded memory in the shared all-vs-all alignment engine (very high-copy
   families).** The engine used by both `dante_line` and `dante_tir_fallback` no
   longer materialises the whole run in RAM: `run_all_vs_all_alignment` streams
