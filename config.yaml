@@ -58,6 +58,14 @@ dante_tir_fallback_min_cluster_size: 3
 #   byte-identical to no grouping. Must be >= 2.
 dante_tir_fallback_max_group_size: 1000
 dante_line_max_group_size: 1000
+# dante_tir_cap3_max_memory_gb (default 0 = auto): CAP3 memory budget (GB) for
+#   DANTE_TIR's concurrent assemblies. 0 lets DANTE_TIR 0.3.0 auto-detect (it
+#   reads the cgroup limit, else node RAM, and uses 60%). The dante_tir rule
+#   instead derives 60% of resources.mem_mb when a scheduler/profile allocates
+#   it — so CAP3 respects the job budget even with no cgroup limit — and uses
+#   this knob as the fallback. Set > 0 (GB) to pin it (non-cgroup HPC / huge
+#   genomes). See docs/configuration.md.
+dante_tir_cap3_max_memory_gb: 0
 # DANTE_TIR primary-element library filter. Default 3 matches the
 # historical behaviour from before the DANTE_TIR_FALLBACK refactor (when
 # the library was sourced from `all_representative_elements_min3.fasta`,
