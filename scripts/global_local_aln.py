@@ -516,7 +516,11 @@ def write_results_table(results, output_file):
         'degapped_query', 'degapped_ref'
     ]
 
-    with open(output_file, 'w') as f:
+    # Atomic write: build the table under a .tmp name and rename on success, so a
+    # run killed mid-write can never leave a truncated file that the next run's
+    # `.exists()` checkpoint would accept as complete.
+    tmp_out = f"{output_file}.tmp"
+    with open(tmp_out, 'w') as f:
         # Write header
         f.write('\t'.join(columns) + '\n')
 
@@ -524,6 +528,7 @@ def write_results_table(results, output_file):
         for result in results:
             row = [str(result.get(col, '')) for col in columns]
             f.write('\t'.join(row) + '\n')
+    os.replace(tmp_out, output_file)
 
 
 def extract_end_region(fasta_file, end, region_length=30, output_file=None):
@@ -549,7 +554,9 @@ def extract_end_region(fasta_file, end, region_length=30, output_file=None):
     import tempfile
 
     if output_file is None:
-        output_file = tempfile.mktemp(suffix='_end_region.fasta')
+        # mkstemp (not the deprecated, racy mktemp): returns an open fd we close.
+        fd, output_file = tempfile.mkstemp(suffix='_end_region.fasta')
+        os.close(fd)
 
     sequences = read_fasta_sequences(fasta_file)
 
@@ -1023,7 +1030,8 @@ def run_all_vs_all_alignment(
                 continue
             if verbose:
                 print(f"\n  Group {gi}/{len(groups)}: {len(group_seqs)} sequences")
-            group_fasta = tempfile.mktemp(suffix=f"_group{gi}.fasta")
+            fd, group_fasta = tempfile.mkstemp(suffix=f"_group{gi}.fasta")
+            os.close(fd)
             try:
                 with open(group_fasta, "w") as handle:
                     for sid, seq in group_seqs:
@@ -1037,6 +1045,13 @@ def run_all_vs_all_alignment(
             finally:
                 if os.path.exists(group_fasta):
                     os.remove(group_fasta)
+
+    # Deterministic row order: the multi-thread path collects results in
+    # completion order, so sort by (query_id, ref_id) — each unordered pair is
+    # compared once, so the key is unique — before writing. This makes the
+    # intermediate TSV byte-identical run-to-run (checksum-verifiable); the
+    # downstream *_aln_length.tsv already sorted, so results are unaffected.
+    results.sort(key=lambda r: (r.get('query_id', ''), r.get('ref_id', '')))
 
     # Write results to output file
     if verbose:

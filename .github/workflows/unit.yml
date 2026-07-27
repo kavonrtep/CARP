@@ -60,6 +60,12 @@ jobs:
       - name: Canonical FASTA sort (deterministic clustering inputs)
         run: python tests/test_canonical_sort_fasta.py
 
+      - name: Alignment-engine hardening (atomic writes, length analysis)
+        run: python tests/test_alignment_engine_hardening.py
+
+      - name: dante_line pattern order is PYTHONHASHSEED-invariant
+        run: python tests/test_dante_line_order.py
+
       - name: Every test is run by CI or explicitly exempted (coverage guard)
         run: python tests/test_ci_test_coverage.py
 

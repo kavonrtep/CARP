@@ -1,6 +1,20 @@
 # Changelog
 
-## 1.1.6
+## Unreleased
+
+- **`dante_line` failures no longer silently drop the LINE layer.** The rule
+  wrapper previously turned *any* `dante_line.py` non-zero exit into empty LINE
+  outputs, so a genuine crash looked like a successful run with no LINEs.
+  `dante_line.py` now exits with a distinct code (3) only for the benign
+  "too few LINE features / no valid patterns" case; the Snakefile creates empty
+  outputs solely for that code and **fails loudly** on any other error. Also
+  hardens the shared all-vs-all alignment engine used by both `dante_line` and
+  `dante_tir_fallback`: intermediate tables are written atomically (a killed run
+  can no longer leave a truncated file that a checkpoint trusts), the mmseqs
+  clustering checkpoint is gated on a completion marker, the alignment TSV rows
+  are emitted in a deterministic order (checksum-verifiable), and the deprecated
+  `tempfile.mktemp` calls were replaced with `mkstemp`. No annotation output
+  changes.
 
 - **Reproducible RepeatMasker under culling: pin the culling `rmblastn` to a
   single thread.** NCBI BLAST's `-culling_limit` is non-deterministic across

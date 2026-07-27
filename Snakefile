@@ -762,16 +762,23 @@ rule dante_line:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
 
-        # dante_line.py exits non-zero when it can't find any valid domain
-        # patterns (happens on small CI fixtures with few LINE hits). Catch
-        # the failure and ensure all four declared outputs exist as empty
-        # files so downstream RepeatMasker / library construction continues.
+        # dante_line.py exits 3 when the genome legitimately has too few LINE
+        # features / no valid domain patterns (common on small CI fixtures). Only
+        # that benign case is turned into empty outputs so downstream continues;
+        # ANY OTHER non-zero exit is a real failure and must stop the pipeline
+        # (previously every failure was swallowed into empty LINE outputs, so a
+        # crash silently dropped the entire LINE layer genome-wide).
         mkdir -p {params.output_dir}
-        if ! dante_line.py -g {input.genome} -a {input.gff} \
+        rc=0
+        dante_line.py -g {input.genome} -a {input.gff} \
                 -o {params.output_dir} -t {threads} \
                 --max-group-size {params.max_group_size} \
-                --mask-gff3 {input.gff3_tidehunter}; then
-            echo "dante_line.py failed (likely too few LINE features); creating empty outputs"
+                --mask-gff3 {input.gff3_tidehunter} || rc=$?
+        if [ "$rc" -eq 3 ]; then
+            echo "dante_line.py: no LINE content (too few features); creating empty outputs"
+        elif [ "$rc" -ne 0 ]; then
+            echo "dante_line.py FAILED with exit code $rc" >&2
+            exit "$rc"
         fi
         [ -f {output.line_rep_lib} ]          || : > {output.line_rep_lib}
         [ -f {output.gff_out} ]               || echo "##gff-version 3" > {output.gff_out}
