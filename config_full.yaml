@@ -77,6 +77,13 @@ dante_tir_fallback_min_cluster_size: 3
 dante_tir_fallback_max_group_size: 1000
 dante_line_max_group_size: 1000
 
+# CAP3 memory budget (GB) for DANTE_TIR's concurrent assemblies. 0 = auto:
+# DANTE_TIR 0.3.0 reads the cgroup limit (else node RAM) and uses 60%. The
+# dante_tir rule instead derives 60% of resources.mem_mb when a profile allocates
+# it (so CAP3 respects the job budget even without a cgroup limit); this value is
+# the fallback when mem_mb is unset. Set > 0 (GB) to pin it. See docs.
+dante_tir_cap3_max_memory_gb: 0
+
 # DANTE_TIR primary-library Multiplicity floor (default 3).
 # Drop primary elements with Multiplicity < threshold from the library.
 # They stay in DANTE_TIR_combined.gff3 and the unified annotation.
