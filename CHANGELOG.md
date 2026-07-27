@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
 
 - **Dependency bump: DANTE_TIR 0.2.8 → 0.3.0** (`envs/dante_tir.yaml`), with a new
   CAP3 memory guard. 0.3.0 pulls three new transitive dependencies —
