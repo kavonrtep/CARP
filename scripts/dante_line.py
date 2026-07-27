@@ -1080,14 +1080,18 @@ def analyze_alignment_lengths(alignment_tsv: Path, output_tsv: Path, min_num_ali
             })
         # If less than min_num_alignments, don't report (doesn't pass threshold)
 
-    # Write results to TSV
-    with open(output_tsv, 'w') as f:
+    # Write results to TSV atomically (.tmp + rename) so a run killed mid-write
+    # cannot leave a truncated file that the caller's `.exists()` checkpoint would
+    # accept as a completed length analysis.
+    tmp_out = output_tsv.with_name(output_tsv.name + '.tmp')
+    with open(tmp_out, 'w') as f:
         # Write header
         f.write('Group_ID\tSelected_Length\tNum_Shorter\n')
 
         # Write data rows
         for result in results:
             f.write(f"{result['Group_ID']}\t{result['Selected_Length']}\t{result['Num_Shorter']}\n")
+    os.replace(tmp_out, output_tsv)
 
 
 def run_mmseqs_clustering(input_fasta: str, output_dir: Path, threads: int = 1) -> bool:
@@ -1120,9 +1124,12 @@ def run_mmseqs_clustering(input_fasta: str, output_dir: Path, threads: int = 1) 
     rep_seq_fasta = mmseqs_dir / 'cluster_rep_seq.fasta'
     cluster_tsv = mmseqs_dir / 'cluster.tsv'
     tmp_dir = mmseqs_dir / 'tmp'
+    done_marker = mmseqs_dir / 'clustering.done'
 
-    # Check if clustering already exists (checkpoint)
-    if rep_seq_fasta.exists() and cluster_tsv.exists():
+    # Checkpoint: only trust a run explicitly marked complete. A killed mmseqs
+    # can leave a partial cluster_rep_seq.fasta / cluster.tsv, which must NOT be
+    # reused as a finished clustering.
+    if done_marker.exists() and rep_seq_fasta.exists() and cluster_tsv.exists():
         print(f"  MMseqs2 clustering already exists in {mmseqs_dir}")
         return True
 
@@ -1157,6 +1164,10 @@ def run_mmseqs_clustering(input_fasta: str, output_dir: Path, threads: int = 1) 
         if cluster_tsv.exists():
             print(f"  → cluster.tsv")
 
+        # Mark complete only once both expected outputs exist, so the checkpoint
+        # above distinguishes a finished run from a killed/partial one.
+        if rep_seq_fasta.exists() and cluster_tsv.exists():
+            done_marker.write_text("ok\n")
         return True
 
     except subprocess.CalledProcessError as e:
@@ -1332,15 +1343,20 @@ Examples:
     print(f"Found {len(line_features)} LINE features")
 
     if not line_features:
+        # Exit 3 = "no LINE content" (benign): the genome legitimately has too
+        # few LINE features. The dante_line Snakefile rule treats ONLY exit 3 as
+        # the empty-output case; every other non-zero exit is a real failure that
+        # must stop the pipeline (rather than being silently turned into empty
+        # LINE outputs).
         print("No LINE features found with Final_Classification=Class_I|LINE")
-        sys.exit(1)
+        sys.exit(3)
 
     print(f"Finding domain patterns (max distance: {args.max_distance}bp)...")
     patterns = find_domain_patterns(line_features, args.max_distance)
 
     if not patterns:
         print("No valid domain patterns found")
-        sys.exit(1)
+        sys.exit(3)  # benign "no LINE content" — see above
 
     print(f"Found {len(patterns)} valid patterns:")
     pattern_counts = defaultdict(int)
