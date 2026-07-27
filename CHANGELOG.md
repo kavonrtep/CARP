@@ -2,10 +2,16 @@
 
 ## Unreleased
 
-- **Dependency bump: DANTE_TIR 0.2.8 → 0.3.0** (`envs/dante_tir.yaml`). 0.3.0
-  pulls three new transitive dependencies — `bioconductor-rsamtools`,
-  `bioconductor-genomeinfodbdata` and `numpy` — all resolvable from the channels
-  the env already lists, so only the version pin changed.
+- **Dependency bump: DANTE_TIR 0.2.8 → 0.3.0** (`envs/dante_tir.yaml`), with a new
+  CAP3 memory guard. 0.3.0 pulls three new transitive dependencies —
+  `bioconductor-rsamtools`, `bioconductor-genomeinfodbdata` and `numpy` — all
+  resolvable from the channels the env already lists, so only the version pin
+  changed. 0.3.0 also sizes its CAP3 pool to a memory budget (it auto-detects the
+  cgroup limit, falling back to node RAM, at 60 %); to keep that safe on
+  schedulers that enforce no cgroup memory limit, the `dante_tir` rule now
+  declares `resources: mem_mb` and passes `--cap3_max_memory` = 60 % of the
+  allocation, with a new `dante_tir_cap3_max_memory_gb` config knob (default `0` =
+  auto) as the fallback.
 
 - **Bounded memory in the shared all-vs-all alignment engine (very high-copy
   families).** The engine used by both `dante_line` and `dante_tir_fallback` no

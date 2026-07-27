@@ -162,6 +162,21 @@ for _key in ("dante_tir_fallback_min_alignments", "dante_tir_fallback_min_cluste
     if not isinstance(config[_key], int) or config[_key] < 1:
         raise ValueError(f"Invalid value for {_key}: must be a positive integer.")
 
+# DANTE_TIR CAP3 memory budget (GB) for concurrent assemblies. DANTE_TIR 0.3.0
+# sizes its CAP3 pool to a memory budget (a split high-copy class can want tens
+# of GB per assembly). Default 0 = let DANTE_TIR auto-detect: it reads the cgroup
+# limit (v2 memory.max / v1 limit_in_bytes), falls back to node RAM, and uses
+# 60%. That is safe under cgroup-enforced schedulers but over-detects on
+# schedulers that do NOT set a cgroup mem limit. The dante_tir rule therefore
+# also derives an explicit budget = 60% of resources.mem_mb when a profile
+# allocates that, and honours this knob as the fallback. Integer GB, >= 0.
+if "dante_tir_cap3_max_memory_gb" not in config:
+    config["dante_tir_cap3_max_memory_gb"] = 0
+if (not isinstance(config["dante_tir_cap3_max_memory_gb"], int)
+        or isinstance(config["dante_tir_cap3_max_memory_gb"], bool)
+        or config["dante_tir_cap3_max_memory_gb"] < 0):
+    raise ValueError("Invalid value for dante_tir_cap3_max_memory_gb: must be an integer >= 0.")
+
 # All-vs-all flank-alignment grouping cap for the fallback (per TIR subtype)
 # and for DANTE_LINE (LINE pattern set). When the number of anchors/patterns
 # exceeds this value, the O(N^2) parasail all-vs-all is split into
@@ -434,7 +449,8 @@ rule dante_tir:
         summary=F"{config['output_dir']}/DANTE_TIR/TIR_classification_summary.txt",
         dante_tir_lib=F"{config['output_dir']}/DANTE_TIR/all_representative_elements_min3.fasta"
     params:
-        output_dir=F"{config['output_dir']}/DANTE_TIR"
+        output_dir=F"{config['output_dir']}/DANTE_TIR",
+        cap3_max_memory_gb=config["dante_tir_cap3_max_memory_gb"]
     log:
         stdout=F"{config['output_dir']}/DANTE_TIR/dante_tir.log",
         stderr=F"{config['output_dir']}/DANTE_TIR/dante_tir.err"
@@ -443,13 +459,31 @@ rule dante_tir:
     conda:
         "envs/dante_tir.yaml"
     threads: workflow.cores
+    # mem_mb defaults to 0 (unset); an HPC profile / --set-resources allocates it.
+    # When set, the shell caps DANTE_TIR's CAP3 memory budget at 60% of it so CAP3
+    # respects the job allocation even on schedulers that enforce no cgroup limit.
+    resources:
+        mem_mb=0
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
+        # Resolve the CAP3 memory budget passed to DANTE_TIR 0.3.0's --cap3_max_memory
+        # (GB). Precedence: 60% of the scheduler allocation (resources.mem_mb) when
+        # set; else the explicit config knob; else pass nothing (0.3.0 auto-detects
+        # the cgroup/node memory itself). 0 => omit the flag.
+        cap3_mem=0
+        if [ {resources.mem_mb} -gt 0 ]; then
+            cap3_mem=$(( {resources.mem_mb} * 6 / 10 / 1024 ))
+        elif [ {params.cap3_max_memory_gb} -gt 0 ]; then
+            cap3_mem={params.cap3_max_memory_gb}
+        fi
+        cap3_arg=""
+        [ "$cap3_mem" -gt 0 ] && cap3_arg="--cap3_max_memory $cap3_mem"
+        echo "DANTE_TIR CAP3 memory budget: ${{cap3_mem}} GB (0 = tool auto-detects)"
         # Run dante_tir.py and check exit status
-        if dante_tir.py -g {input.gff} -f {input.fasta} -o {params.output_dir} -c {threads}; then
+        if dante_tir.py -g {input.gff} -f {input.fasta} -o {params.output_dir} -c {threads} $cap3_arg; then
             # dante_tir.py succeeded
             echo "DANTE_TIR completed successfully"
 
