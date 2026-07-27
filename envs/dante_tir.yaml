@@ -8,4 +8,8 @@ channels:
                  # via "defaults", so container builds worked; standalone conda
                  # setups without that fallback need it listed explicitly.
 dependencies:
-  - dante_tir=0.2.8
+  # 0.3.0 adds three transitive deps vs 0.2.8 — bioconductor-rsamtools,
+  # bioconductor-genomeinfodbdata (both bioconda) and numpy (conda-forge) — all on
+  # channels already listed, so only the pin changes. python stays unpinned
+  # (recipe: python>=3.6.0), so the solve floats to the newest python + numpy.
+  - dante_tir=0.3.0
