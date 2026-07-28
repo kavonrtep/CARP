@@ -207,11 +207,17 @@ commit.
 
 The pipeline must be **run-to-run reproducible**: the same input produces
 byte-identical manifest data outputs. This is enforced automatically — the
-`determinism` job in `.github/workflows/pipeline.yml` runs the small fixture
-twice under a different `PYTHONHASHSEED` **and** thread count and diffs the
-manifest `OUTPUTS` via `scripts/assert_run_determinism.py`; any difference fails
-the build. A deeper, full-size two-run check is manual
-(`.claude/skills/check-determinism/`), because several of these bugs only
+`determinism` job in `.github/workflows/pipeline.yml` runs the **small and
+medium** fixtures twice each under a different `PYTHONHASHSEED` **and** thread
+count and diffs the manifest `OUTPUTS` via `scripts/assert_run_determinism.py`;
+any difference fails the build. (Medium is included because it is the only
+fixture that builds a real multi-representative mmseqs LINE library — the path
+where the Class_I/LINE library-order drift lived; small alone never exercised
+it.) In addition, the `fixture` job asserts the RepeatMasker library is in
+canonical order (`scripts/assert_library_canonical_order.py`) — a deterministic
+guard that fails 100% if the sort is ever removed, independent of whether a
+two-run diff happens to trigger the drift. A deeper, full-size two-run check is
+manual (`.claude/skills/check-determinism/`), because several of these bugs only
 surfaced on a real genome.
 
 When adding or changing any rule, follow these rules — **each is a determinism

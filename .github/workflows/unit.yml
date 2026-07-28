@@ -69,6 +69,9 @@ jobs:
       - name: Determinism-gate comparator (assert_run_determinism)
         run: python tests/test_assert_run_determinism.py
 
+      - name: RepeatMasker-library canonical-order guard (assert_library_canonical_order)
+        run: python tests/test_assert_library_canonical_order.py
+
       - name: Every test is run by CI or explicitly exempted (coverage guard)
         run: python tests/test_ci_test_coverage.py
 

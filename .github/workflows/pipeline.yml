@@ -193,6 +193,16 @@ jobs:
       - name: Assert fixture outputs
         run: bash scripts/assert_fixture_outputs.sh ${{ matrix.fixture }}
 
+      # Deterministic guard for the RepeatMasker-library canonical-order invariant
+      # (the fix for the Class_I/LINE run-to-run masking drift). Gated to medium:
+      # it builds a real multi-representative mmseqs LINE library, so its natural
+      # order differs from canonical and the check is meaningful; it also keeps
+      # intermediates (cleanup 'minimal'), so the library survives to be checked.
+      # Unlike the two-run diff this fails 100% if the sort is ever removed.
+      - name: Assert RepeatMasker library is canonically ordered
+        if: matrix.fixture == 'medium'
+        run: python scripts/assert_library_canonical_order.py tests/fixtures/output_medium
+
       # Manifest sync guard: every path declared in carp_manifest.json must
       # exist in the produced output tree. Gated to the medium fixture (the
       # release gate that produces the full output set) so a renamed/removed
@@ -216,17 +226,24 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # 3. Determinism gate: run the SMALL fixture twice — the second pass under a
-  # different PYTHONHASHSEED (catches Python set / hash-order leaks) AND a
-  # different thread count (catches thread-order non-determinism) — then diff the
-  # manifest data outputs. Any difference between two runs of the same input fails
-  # the check. This is the cheap automatic guard on every push/PR; deeper
-  # non-determinism that only surfaces on full-size inputs is checked on demand
-  # with .claude/skills/check-determinism (see its SKILL.md).
+  # 3. Determinism gate: run a fixture twice — the second pass under a different
+  # PYTHONHASHSEED (catches Python set / hash-order leaks) AND a different thread
+  # count (catches thread-order non-determinism) — then diff the manifest data
+  # outputs. Any difference between two runs of the same input fails the check.
+  # Runs over both `small` (fast, broad coverage) and `medium` — medium is the
+  # one that builds a real multi-representative mmseqs LINE library and produces
+  # LINE masking, i.e. the path where the reduce_library ordering bug lived; the
+  # small fixture alone never exercised it. This is the cheap automatic guard on
+  # every push/PR; deeper non-determinism that only surfaces on full-size inputs
+  # is checked on demand with .claude/skills/check-determinism (see its SKILL.md).
   determinism:
     needs: envs
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        fixture: [small, medium]
     defaults:
       run:
         shell: bash -el {0}
@@ -267,26 +284,28 @@ jobs:
             CONDA_PREFIX="${env%/}" bash envs/tidecluster.post-deploy.sh
           done
 
-      - name: Run the small fixture twice (varied PYTHONHASHSEED + threads)
+      - name: Run the ${{ matrix.fixture }} fixture twice (varied PYTHONHASHSEED + threads)
         run: |
           set -euo pipefail
-          PYTHONHASHSEED=1 python run_pipeline.py -c tests/fixtures/config_small.yaml -t 2
-          mv tests/fixtures/output_small tests/fixtures/output_small_det_a
-          PYTHONHASHSEED=2 python run_pipeline.py -c tests/fixtures/config_small.yaml -t 4
-          mv tests/fixtures/output_small tests/fixtures/output_small_det_b
+          F=${{ matrix.fixture }}
+          PYTHONHASHSEED=1 python run_pipeline.py -c tests/fixtures/config_${F}.yaml -t 2
+          mv tests/fixtures/output_${F} tests/fixtures/output_${F}_det_a
+          PYTHONHASHSEED=2 python run_pipeline.py -c tests/fixtures/config_${F}.yaml -t 4
+          mv tests/fixtures/output_${F} tests/fixtures/output_${F}_det_b
 
       - name: Assert the two runs are byte-identical (determinism gate)
         run: |
+          F=${{ matrix.fixture }}
           python scripts/assert_run_determinism.py \
-            tests/fixtures/output_small_det_a tests/fixtures/output_small_det_b
+            tests/fixtures/output_${F}_det_a tests/fixtures/output_${F}_det_b
 
       - name: Upload both runs on failure (to diff locally)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: determinism_outputs_${{ github.run_id }}
+          name: determinism_outputs_${{ matrix.fixture }}_${{ github.run_id }}
           path: |
-            tests/fixtures/output_small_det_a
-            tests/fixtures/output_small_det_b
+            tests/fixtures/output_${{ matrix.fixture }}_det_a
+            tests/fixtures/output_${{ matrix.fixture }}_det_b
           retention-days: 7
           if-no-files-found: ignore
