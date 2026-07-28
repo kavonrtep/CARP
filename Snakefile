@@ -1551,12 +1551,32 @@ rule reduce_library_containment:
         export PATH=$scripts_dir:$PATH
         if [ "{params.enabled}" = "False" ]; then
             cp {input.library_reduced} {output.library_containment}
-            exit 0
+        else
+            workdir=$(dirname {output.library_containment})/containment_workdir
+            containment_reduce_library.py -i {input.library_reduced} -o {output.library_containment} \
+                -t {threads} -d $workdir \
+                --min-identity {params.min_identity} --min-coverage {params.min_coverage}
         fi
-        workdir=$(dirname {output.library_containment})/containment_workdir
-        containment_reduce_library.py -i {input.library_reduced} -o {output.library_containment} \
-            -t {threads} -d $workdir \
-            --min-identity {params.min_identity} --min-coverage {params.min_coverage}
+
+        # Determinism: this file is the RepeatMasker library. RepeatMasker builds
+        # its search DB with makeblastdb, which assigns OIDs by input order, and
+        # tie-breaks equal-scoring HSPs by OID — so a non-canonical library order
+        # makes masking non-reproducible run-to-run (measured: ~600 bp of Class_I/
+        # LINE flipping between two full-genome runs of identical input, because
+        # abundant near-identical LINE consensi are exactly where score ties
+        # occur). The order is unstable because reduce_library_size.py streams
+        # mmseqs cluster representatives in mmseqs' native, thread-scheduling-
+        # dependent order (deliberately, to stay byte-identical to its R
+        # reference), so combined_library_reduced.fasta — and this containment
+        # output derived from it — has stable CONTENT but an unstable ORDER.
+        # Canonically sort by sequence here, the single choke point immediately
+        # before RepeatMasker, so masking is reproducible. (concatenate_libraries
+        # does the same for the clustering input; the dimer library that feeds
+        # TideCluster's internal RepeatMasker is already canonically ordered by
+        # reduce_dimer_library.py, so no analogous fix is needed there.)
+        canonical_sort_fasta.py {output.library_containment} {output.library_containment}.sorted \
+            --tmpdir "$(dirname {output.library_containment})"
+        mv {output.library_containment}.sorted {output.library_containment}
         """
 
 rule repeatmasker:
