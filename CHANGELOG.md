@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Determinism is now enforced in CI, not just intended.** A `determinism` job
+  in `.github/workflows/pipeline.yml` runs the small fixture twice under a
+  different `PYTHONHASHSEED` and thread count and fails the build if any
+  manifest data output differs between the two runs
+  (`scripts/assert_run_determinism.py`, comparator unit-tested). A deeper
+  full-size two-run check is available on demand
+  (`.claude/skills/check-determinism/`), and a new "Determinism" section in
+  CLAUDE.md documents the rules that keep the pipeline reproducible.
+
 ## 1.2.0
 
 - **Dependency bump: DANTE_TIR 0.2.8 → 0.3.0** (`envs/dante_tir.yaml`), with a new
