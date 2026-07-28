@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.1
 
 - **Fix: non-deterministic RepeatMasker library order (Class_I/LINE base counts
   drifted run-to-run).** `reduce_library_size.py` streams mmseqs cluster
