@@ -203,6 +203,43 @@ preserves permissions, so `chmod +x` in the repo flows through to the
 container. New helper scripts must be `chmod +x`'d before the first
 commit.
 
+### Determinism (enforced)
+
+The pipeline must be **run-to-run reproducible**: the same input produces
+byte-identical manifest data outputs. This is enforced automatically — the
+`determinism` job in `.github/workflows/pipeline.yml` runs the small fixture
+twice under a different `PYTHONHASHSEED` **and** thread count and diffs the
+manifest `OUTPUTS` via `scripts/assert_run_determinism.py`; any difference fails
+the build. A deeper, full-size two-run check is manual
+(`.claude/skills/check-determinism/`), because several of these bugs only
+surfaced on a real genome.
+
+When adding or changing any rule, follow these rules — **each is a determinism
+bug this pipeline actually shipped and fixed**:
+
+- **Canonically sort inputs to order-sensitive clustering.** mmseqs / CAP3 return
+  different clusters for the same sequences in a different order. Sort by sequence
+  first (`scripts/canonical_sort_fasta.py`, `sort_fasta_by_sequence`).
+- **Force `-num_threads 1` whenever `-culling_limit` is used.** NCBI BLAST culling
+  is non-deterministic across threads; `rmblast_culling_shim.py` pins it — do not
+  add a culling path that bypasses that shim.
+- **Emit table / intermediate rows in a stable sorted order** (e.g. by
+  `(query_id, ref_id)`), never in `as_completed`/completion order and never in
+  `set`-iteration order.
+- **Never let a Python `set` (or a dict built from one) drive output / FASTA
+  order.** Python randomizes string hashing per process (`PYTHONHASHSEED`), so set
+  order varies between identical runs. Use sorted or insertion order, and add a
+  hash-seed-invariance test (pattern: `tests/test_dante_line_order.py`).
+- **No wall-clock timestamps / host / user / absolute paths in DATA outputs.**
+  Those belong only in reports and `run_provenance.json` (the gate excludes them)
+  or GFF3 `##` header lines (the gate normalizes them out).
+- **Write outputs atomically** (`.tmp` + `os.replace`) so a killed run cannot
+  leave a truncated file that a `.exists()` checkpoint then trusts.
+
+New order-producing code needs a `PYTHONHASHSEED`-invariance unit test; new
+outputs added to `scripts/manifest.py::OUTPUTS` are automatically covered by the
+gate. The comparator itself is unit-tested (`tests/test_assert_run_determinism.py`).
+
 ### Classification handling
 
 - Canonical classification form is slash-separated (e.g. `Class_I/LTR/Ty1_copia/Ale`). Underscores inside a path component are always part of the name, never separators (`Ty1_copia`, `Tc1_Mariner`, `EnSpm_CACTA`, `Class_II`, `Subclass_1`).

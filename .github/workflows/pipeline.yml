@@ -215,3 +215,78 @@ jobs:
           path: tests/fixtures/output_${{ matrix.fixture }}
           retention-days: 7
           if-no-files-found: ignore
+
+  # 3. Determinism gate: run the SMALL fixture twice — the second pass under a
+  # different PYTHONHASHSEED (catches Python set / hash-order leaks) AND a
+  # different thread count (catches thread-order non-determinism) — then diff the
+  # manifest data outputs. Any difference between two runs of the same input fails
+  # the check. This is the cheap automatic guard on every push/PR; deeper
+  # non-determinism that only surfaces on full-size inputs is checked on demand
+  # with .claude/skills/check-determinism (see its SKILL.md).
+  determinism:
+    needs: envs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: carp-snakemake
+          create-args: >-
+            python=3.11
+            snakemake>=9
+            pyyaml
+          condarc: |
+            channels:
+              - conda-forge
+              - bioconda
+            channel_priority: flexible
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Restore .snakemake/conda cache (expected hit from envs job)
+        uses: actions/cache/restore@v4
+        with:
+          path: .snakemake/conda
+          key: snakemake-conda-${{ hashFiles('envs/*.yaml', 'envs/*.post-deploy.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Prime RepeatMasker BLAST indices (belt-and-braces)
+        run: |
+          for env in "$PWD"/.snakemake/conda/*/; do
+            [[ -d "${env}share/RepeatMasker/Libraries" ]] || continue
+            CONDA_PREFIX="${env%/}" bash envs/tidecluster.post-deploy.sh
+          done
+
+      - name: Run the small fixture twice (varied PYTHONHASHSEED + threads)
+        run: |
+          set -euo pipefail
+          PYTHONHASHSEED=1 python run_pipeline.py -c tests/fixtures/config_small.yaml -t 2
+          mv tests/fixtures/output_small tests/fixtures/output_small_det_a
+          PYTHONHASHSEED=2 python run_pipeline.py -c tests/fixtures/config_small.yaml -t 4
+          mv tests/fixtures/output_small tests/fixtures/output_small_det_b
+
+      - name: Assert the two runs are byte-identical (determinism gate)
+        run: |
+          python scripts/assert_run_determinism.py \
+            tests/fixtures/output_small_det_a tests/fixtures/output_small_det_b
+
+      - name: Upload both runs on failure (to diff locally)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: determinism_outputs_${{ github.run_id }}
+          path: |
+            tests/fixtures/output_small_det_a
+            tests/fixtures/output_small_det_b
+          retention-days: 7
+          if-no-files-found: ignore
