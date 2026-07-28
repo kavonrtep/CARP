@@ -1,10 +1,11 @@
 # Full-size determinism check (manual)
 
 CARP's determinism is enforced automatically on every push/PR by the
-`determinism` job in `.github/workflows/pipeline.yml` — it runs the **small**
-fixture twice (different `PYTHONHASHSEED` + thread count) and diffs the manifest
-data outputs via `scripts/assert_run_determinism.py`. That catches most
-regressions cheaply.
+`determinism` job in `.github/workflows/pipeline.yml` — it runs the **small and
+medium** fixtures twice each (different `PYTHONHASHSEED` + thread count) and
+diffs the manifest data outputs via `scripts/assert_run_determinism.py` (plus a
+canonical-order check on the RepeatMasker library in the `fixture` job). That
+catches most regressions cheaply.
 
 But several real non-determinism bugs (clustering order, culling × threads,
 `as_completed` row order, `set`/hash-seed leaks) only became visible on a

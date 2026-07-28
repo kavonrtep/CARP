@@ -18,6 +18,14 @@
   `concatenate_libraries`, and the blastn filters make order-independent
   set decisions, so this was the only affected path.
 
+- **Regression guards for the library-order fix.** The `determinism` CI gate now
+  runs over both the `small` and `medium` fixtures (medium is the only fixture
+  that builds a multi-representative mmseqs LINE library, i.e. the path that
+  drifted). A new deterministic check, `scripts/assert_library_canonical_order.py`
+  (unit-tested), asserts the RepeatMasker library equals its own canonical sort
+  and runs in the `fixture` job — it fails 100% if the sort is ever removed,
+  independent of whether a two-run diff happens to trigger the drift.
+
 - **Determinism is now enforced in CI, not just intended.** A `determinism` job
   in `.github/workflows/pipeline.yml` runs the small fixture twice under a
   different `PYTHONHASHSEED` and thread count and fails the build if any
