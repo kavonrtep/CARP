@@ -223,6 +223,17 @@ bug this pipeline actually shipped and fixed**:
 - **Force `-num_threads 1` whenever `-culling_limit` is used.** NCBI BLAST culling
   is non-deterministic across threads; `rmblast_culling_shim.py` pins it — do not
   add a culling path that bypasses that shim.
+- **Canonically sort any FASTA before `makeblastdb`/RepeatMasker consumes it.**
+  `makeblastdb` assigns OIDs by input order and BLAST tie-breaks equal-scoring
+  HSPs by OID, so a non-canonical library order makes masking non-reproducible
+  (measured: ~600 bp of `Class_I/LINE` flipped run-to-run because
+  `reduce_library_size.py` streams mmseqs cluster reps in mmseqs' native,
+  thread-dependent order — deliberately, to stay byte-identical to its R
+  reference). The `reduce_library_containment` rule sorts the final RepeatMasker
+  library (`canonical_sort_fasta.py`), `concatenate_libraries` sorts the
+  clustering input, and `reduce_dimer_library.py` already emits the TideCluster
+  dimer library in canonical order — do not add a new library→RepeatMasker path
+  without a canonical sort at the boundary.
 - **Emit table / intermediate rows in a stable sorted order** (e.g. by
   `(query_id, ref_id)`), never in `as_completed`/completion order and never in
   `set`-iteration order.

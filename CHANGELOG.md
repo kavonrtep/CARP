@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Fix: non-deterministic RepeatMasker library order (Class_I/LINE base counts
+  drifted run-to-run).** `reduce_library_size.py` streams mmseqs cluster
+  representatives in mmseqs' native, thread-scheduling-dependent order (to stay
+  byte-identical to its R reference), so `combined_library_reduced.fasta` — and
+  the containment-reduced library RepeatMasker actually indexes — had stable
+  **content** but an unstable **order**. Because `makeblastdb` assigns OIDs by
+  input order and RepeatMasker tie-breaks equal-scoring HSPs by OID, ~600 bp of
+  `Class_I/LINE` masking flipped between two full-genome runs of identical input.
+  The `reduce_library_containment` rule now canonically sorts its output
+  (`canonical_sort_fasta.py`) — the single choke point immediately before
+  RepeatMasker — so masking is reproducible. Audited every other library→BLAST
+  path: the TideCluster dimer library is already canonically ordered
+  (`reduce_dimer_library.py`), all source libraries are sorted at
+  `concatenate_libraries`, and the blastn filters make order-independent
+  set decisions, so this was the only affected path.
+
 - **Determinism is now enforced in CI, not just intended.** A `determinism` job
   in `.github/workflows/pipeline.yml` runs the small fixture twice under a
   different `PYTHONHASHSEED` and thread count and fails the build if any
