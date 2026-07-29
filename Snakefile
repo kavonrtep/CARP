@@ -1704,7 +1704,8 @@ rule make_unified_annotation:
         validation_marker=F"{config['output_dir']}/.classifications_validated"
     output:
         gff=F"{config['output_dir']}/Repeat_Annotation_Unified.gff3",
-        overlaps=F"{config['output_dir']}/Repeat_Annotation_Unified.overlaps.tsv"
+        overlaps=F"{config['output_dir']}/Repeat_Annotation_Unified.overlaps.tsv",
+        te_derived_trc=F"{config['output_dir']}/Repeat_Annotation_Unified.te_derived_trc.csv"
     params:
         # TideCluster's authoritative per-TRC rDNA calls (45S/5S). Passed as
         # params, not inputs: they are written alongside the clustering GFF3 by
@@ -1713,6 +1714,18 @@ rule make_unified_annotation:
         # R script guards with file.exists and falls back to the rDNA_type attr.
         tc_rdna_default=F"{config['output_dir']}/TideCluster/default/TideCluster_rdna.tsv",
         tc_rdna_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_rdna.tsv",
+        # Authoritative per-TRC tandem monomer period, from TideCluster's report
+        # table (monomer_tarean -> monomer_kite founder fallback). Used both for
+        # the TE-derived TRC table's monomer column AND the domain-rhythm gate in
+        # identify_te_derived_trcs. NOT the kite `monomer_size` CSV: that is the
+        # top k-mer peak and collapses to SSR sub-periods (e.g. 79 bp for a
+        # 13 kb TIR-derived monomer), which would mis-tile the occupancy test.
+        # trc_table.tsv lives under TideCluster_report/, which — unlike the
+        # TideCluster_kite/ tree — SURVIVES `cleanup_intermediates: maximal`.
+        # Params, not inputs (written by the tc_default/tc_short rules; guarded
+        # with file.exists in the R script, which falls back gracefully).
+        tc_trc_table_default=F"{config['output_dir']}/TideCluster/default/TideCluster_report/data/trc_table.tsv",
+        tc_trc_table_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_report/data/trc_table.tsv",
         rm_tc_tandem_gate=config["rm_tc_tandem_gate"]
     log:
         stdout=F"{config['output_dir']}/Repeat_Annotation_Unified.log",
@@ -1739,6 +1752,8 @@ rule make_unified_annotation:
             --tc_rm      {input.tc_rm} \
             --tc_rdna_default {params.tc_rdna_default} \
             --tc_rdna_short   {params.tc_rdna_short} \
+            --tc_trc_table_default {params.tc_trc_table_default} \
+            --tc_trc_table_short   {params.tc_trc_table_short} \
             --rm       {input.rm} \
             --th_default {input.th_default} \
             --th_short   {input.th_short} \
@@ -2197,7 +2212,8 @@ rule make_repeat_report:
         bw_tc = F"{config['output_dir']}/Tandem_repeats_TideCluster_split_by_family_bigwig/.done",
         ltr   = F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
         tir   = F"{config['output_dir']}/DANTE_TIR/TIR_classification_summary.txt",
-        line  = F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3"
+        line  = F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
+        te_derived_trc = F"{config['output_dir']}/Repeat_Annotation_Unified.te_derived_trc.csv"
     output:
         F"{config['output_dir']}/repeat_annotation_report.html"
     params:

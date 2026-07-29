@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+- **Fix (determinism): TE-derived TRC decision is now global, not per-batch.**
+  `identify_te_derived_trcs` ran once per processing batch, and batch composition
+  is thread-count-dependent (threads=1 → one batch), so whether a multi-sequence
+  TRC was tagged `TE_origin` could differ run-to-run across thread counts. It now
+  runs once over every array of each TRC genome-wide. This also required a **robust
+  LCA**: the shared-lineage test now ignores rare stray overlaps (a class must
+  cover ≥ `TE_ORIGIN_LCA_MIN_SHARE` = 10 % of the covered bp), so a single inserted
+  element of an unrelated family (e.g. 1 Ty1_copia/SIRE among 73 Ty3_gypsy/CRM)
+  no longer collapses the LCA and drops a genuine TE-derived TRC.
+- **Fix (determinism): `resolve_tier1_overlaps` order-sensitivity.** The greedy
+  longest-first tier-1 (DANTE_LTR/TIR/LINE) overlap trim broke width ties by
+  incoming feature order, which is batch/thread-dependent — so the trimmed
+  structural annotation on multi-sequence genomes could differ run-to-run. Ties
+  now break deterministically on `(seqname, start, end, strand)`. (Pre-existing;
+  surfaced by the full-genome determinism check.)
+- **TE-derived TRC detection: domain-rhythm gate.** A Tier-3 satellite is tagged
+  `TE_origin` (TE-derived, satellite wins the region) only if — in addition to the
+  existing coverage test — the TE's DANTE domains recur **through the tandem**:
+  `identify_te_derived_trcs` now tiles each array at the TRC's true monomer period
+  and requires `domain_occupancy ≥ 0.5` across `frac_arrays_in_rhythm ≥ 0.5`
+  (`te_domain_rhythm`). This distinguishes a genuine TE-derived tandem (the TE
+  repeats as the monomer) from a plain satellite merely *interrupted* by a few TE
+  insertions — coverage alone cannot, since a degraded genuine tandem is also only
+  partially covered, whereas domain rhythm is degradation-robust. A candidate that
+  fails is not tagged and is split around the interrupting TEs by normal tier
+  resolution. Calibrated on 3 genomes (100 TE_origin TRCs).
+- **Correct tandem period source: `trc_table.tsv`.** The per-TRC monomer now comes
+  from TideCluster's report table (`monomer_tarean` → `monomer_kite` founder
+  fallback) via `--tc_trc_table_default`/`--tc_trc_table_short`, replacing the kite
+  `monomer_size` CSV. The kite peak collapses to SSR sub-periods (e.g. 79 bp for a
+  genuine 13134 bp TIR-derived monomer), which mis-tiled the occupancy test *and*
+  showed the wrong monomer in the CSV; `trc_table.tsv` is also `cleanup_intermediates:
+  maximal`-safe (the kite tree is not).
+- **New output: `Repeat_Annotation_Unified.te_derived_trc.csv`** — a per-TRC
+  summary of the tandem-repeat clusters the unified annotation tags `TE_origin`.
+  Written by `make_unified_annotation.R` beside the unified GFF3, columns `trc_id,
+  run, n_arrays, total_array_bp, monomer_length_bp, te_classification,
+  te_origin_structure, protein_domains, n_complete_elements, n_expected_monomers,
+  complete_bp_fraction, domain_occupancy, frac_arrays_in_rhythm` (header-only when
+  no such TRCs exist), registered in `scripts/manifest.py` OUTPUTS (determinism
+  gate). See [`docs/output_reference.md`](docs/output_reference.md).
+
+- **HTML report: "Tandem repeats derived from transposable elements" table** in
+  the Tandem repeats (TideCluster) section of `make_repeat_report.R`, populated
+  from the new CSV (now a rule input) and shown only when TE-derived TRCs are
+  present.
+
 ## 1.2.1
 
 - **Fix: non-deterministic RepeatMasker library order (Class_I/LINE base counts

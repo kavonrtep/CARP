@@ -12,6 +12,23 @@ Main annotation (symlinks to the per-tool files for easy access):
 
 - `Repeat_Annotation_Unified.gff3` — the authoritative non-overlapping
   annotation (see [the spec](unified_annotation_gff3_spec.md))
+- `Repeat_Annotation_Unified.te_derived_trc.csv` — per-TRC summary of the
+  tandem-repeat clusters tagged `TE_origin` (a transposable element — usually a
+  tandem stack of LTR-RTs, also TIR/LINE — abundant enough that TideCluster
+  clustered it as a satellite, so the satellite wins the region and is reported
+  as a tandem repeat). A cluster qualifies only if the TE's DANTE domains recur
+  **through the tandem** (the domain-rhythm gate); a satellite merely *interrupted*
+  by a few TE insertions is not tagged and is instead split around those TEs. One
+  row per `(trc_id, run)`; header-only when none exist. Columns: `trc_id, run,
+  n_arrays, total_array_bp, monomer_length_bp` (the authoritative tandem period —
+  TAREAN consensus, else KITE founder — from `trc_table.tsv`)`, te_classification,
+  te_origin_structure, protein_domains` (distinct DANTE domains present, `|`-joined,
+  e.g. `GAG|PROT|INT`)`, n_complete_elements, n_expected_monomers` (array bp ÷
+  monomer)`, complete_bp_fraction` (share of the array covered by complete DANTE
+  elements)`, domain_occupancy` (fraction of monomer windows carrying a DANTE
+  domain — the gate metric)`, frac_arrays_in_rhythm` (fraction of the TRC's arrays
+  individually in-rhythm). Also rendered as a table in the HTML report's
+  Tandem-repeats section.
 - `DANTE_filtered.gff3` — filtered DANTE protein-domain annotations
 - `DANTE_LTR.gff3` — complete LTR retrotransposons
 - `DANTE_LTR_tandems.gff3` — head-to-tail LTR-RT arrays (`LTR_RT_TR` containers;
