@@ -53,6 +53,10 @@ OUTPUT_SCHEMA_VERSION = "3"
 OUTPUTS = {
     # ── core annotation ──────────────────────────────────────────────
     "unified_gff3":                 "Repeat_Annotation_Unified.gff3",
+    # Per-TRC summary of the tandem-repeat clusters make_unified_annotation tagged
+    # with TE_origin (a TE — usually a tandem LTR-RT stack — clustered as a
+    # satellite). Header-only when no such TRCs exist. Deterministic row order.
+    "te_derived_trc_csv":           "Repeat_Annotation_Unified.te_derived_trc.csv",
     "cleaned_fasta":                "genome_cleaned.fasta",
     "summary_statistics":           "summary_statistics.csv",
     # ── density BigWigs (Unified-sourced; sparse) ────────────────────

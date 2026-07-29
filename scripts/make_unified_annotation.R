@@ -61,6 +61,10 @@ option_list <- list(
               help="TideCluster default rDNA TSV (TRC/rDNA_type/coverage; authoritative rDNA-TRC calls; optional)"),
   make_option("--tc_rdna_short",    type="character", default=NULL,
               help="TideCluster short-monomer rDNA TSV (authoritative rDNA-TRC calls; optional)"),
+  make_option("--tc_trc_table_default", type="character", default=NULL,
+              help="TideCluster default report trc_table.tsv (authoritative per-TRC period monomer_tarean->monomer_kite; monomer column + domain-rhythm gate; optional)"),
+  make_option("--tc_trc_table_short",   type="character", default=NULL,
+              help="TideCluster short-monomer report trc_table.tsv (authoritative per-TRC period; optional)"),
   make_option("--rm",               type="character", help="RepeatMasker+DANTE merged GFF3"),
   make_option("--th_default",       type="character", help="TideHunter default residuals GFF3"),
   make_option("--th_short",         type="character", help="TideHunter short residuals GFF3"),
@@ -267,7 +271,13 @@ load_tier2_dante <- function(path) {
 
   raw <- raw[raw$type == "protein_domain"]
   cls <- canonicalise(raw$Final_Classification, source = "DANTE")
+  # Preserve the original DANTE domain identity (GAG/PROT/INT/RT/RH/TPase/...)
+  # before set_meta overwrites Name with the classification. Kept only on the
+  # top-level t2 object (dropped by subset_seqs' .META_COLS standardisation, which
+  # the per-batch resolver uses) — write_te_derived_trc_table reads it globally.
+  dom <- if (!is.null(raw$Name)) as.character(raw$Name) else rep(NA_character_, length(raw))
   raw <- set_meta(raw, cls, cls, 2L, "DANTE")
+  raw$domain <- dom
   message("  ", length(raw), " domain features")
   raw
 }
@@ -592,6 +602,8 @@ TE_ORIGIN_MIN_LCA_DEPTH <- 3L    # shared lineage ≥ this many '/'-levels (e.g.
 # satellites with incidental TE insertions (TRC_1 11 Mb / TRC_3 1.9 Mb, both
 # ~0.00) — a wide, clean gap. 0.25 sits in it with margin on both sides.
 TE_ORIGIN_MIN_COVERAGE  <- 0.25
+TE_ORIGIN_LCA_MIN_SHARE <- 0.10   # a covered family must be >= this share of the
+                                  # covered bp to count toward the LCA (ignore strays)
 
 .cls_depth <- function(x)
   if (is.na(x) || !nzchar(x)) 0L else length(strsplit(x, "/", fixed = TRUE)[[1]])
@@ -602,25 +614,248 @@ TE_ORIGIN_MIN_COVERAGE  <- 0.25
 # (the TRC id); run separately on default vs short to avoid the TRC_<n> name
 # collision between the two clustering runs. rDNA arrays share a Name but never
 # qualify (they do not overlap structural TEs).
-identify_te_derived_trcs <- function(t3, t1) {
+#
+# A candidate must pass BOTH:
+#   (a) structural coverage — >= TE_ORIGIN_MIN_ELEMENTS same-family (LCA depth
+#       >= TE_ORIGIN_MIN_LCA_DEPTH) structural TEs covering >= TE_ORIGIN_MIN_COVERAGE
+#       of the array bp; and
+#   (b) domain rhythm — the TE's DANTE domains recur through the tandem (occupancy
+#       >= TE_RHYTHM_MIN_OCC of P-windows, in >= TE_RHYTHM_MIN_FRAC of the arrays),
+#       tiling at the authoritative period `period_map[[name]]` (trc_table
+#       monomer_tarean->monomer_kite). This is what separates a genuine TE-derived
+#       tandem (TE in ~every monomer) from a plain satellite merely INTERRUPTED by
+#       a few TE insertions (TE clumped in a few blocks); the latter is NOT tagged
+#       and falls through to normal tier resolution, which splits the satellite
+#       around the interrupting TEs. Coverage alone cannot tell these apart —
+#       a degraded genuine tandem also has low coverage — but domain rhythm is
+#       degradation-robust. No period available (rare; TRC absent from trc_table)
+#       -> the rhythm test is skipped and the coverage decision stands (we do not
+#       demote what we cannot measure).
+identify_te_derived_trcs <- function(t3, t1, t2 = GRanges(), period_map = integer(0)) {
   if (length(t3) == 0 || length(t1) == 0) return(character(0))
   t3p <- granges(t3); strand(t3p) <- "*"
   t1p <- granges(t1); strand(t1p) <- "*"
+  t2p <- if (length(t2) > 0) { g <- granges(t2); strand(g) <- "*"; g } else GRanges()
+  # Restrict domains to those overlapping any clustering array (a tiny fraction of
+  # the genome) up front, so the per-TRC te_domain_rhythm countOverlaps stays cheap
+  # when this runs globally over a multi-Gbp genome's full t2 domain set.
+  if (length(t2p) > 0)
+    t2p <- t2p[overlapsAny(t2p, t3p, ignore.strand = TRUE)]
   nm  <- as.character(t3$Name)
   out <- character(0)
+  t1cls <- as.character(t1$classification)
   for (name in unique(nm)) {
     arrays <- reduce(t3p[nm == name])
     h <- unique(subjectHits(findOverlaps(arrays, t1p)))
     if (length(h) < TE_ORIGIN_MIN_ELEMENTS) next
-    lca <- lca_classification(t1$classification[h])
-    if (.cls_depth(lca) < TE_ORIGIN_MIN_LCA_DEPTH) next
     trc_bp <- sum(as.numeric(width(arrays)))
     if (trc_bp <= 0) next
     cov_bp <- sum(as.numeric(width(intersect(arrays, t1p[h]))))
     if (cov_bp / trc_bp < TE_ORIGIN_MIN_COVERAGE) next
+    # Robust LCA over the DOMINANT covered families. Strict LCA over *every*
+    # overlapping structural TE is fragile: a single stray inserted element of an
+    # unrelated family (e.g. 1 Ty1_copia/SIRE among 73 Ty3_gypsy/CRM in a CRM
+    # array) collapses the LCA to Class_I/LTR (depth 2) and would drop a genuine
+    # TE-derived TRC — and, now that the decision is global over all of a TRC's
+    # arrays, one such stray anywhere in the family kills it. So compute the LCA
+    # only over classes that each cover >= TE_ORIGIN_LCA_MIN_SHARE of the covered
+    # bp; rare strays are ignored. Genuine multi-family stacks (all classes above
+    # the share) still take their true shared lineage.
+    cls_h <- t1cls[h]
+    ucls  <- unique(cls_h)
+    cov_c <- vapply(ucls, function(cc)
+      sum(as.numeric(width(intersect(arrays, t1p[h[cls_h == cc]])))), numeric(1))
+    keep_cls <- ucls[cov_c >= TE_ORIGIN_LCA_MIN_SHARE * sum(cov_c)]
+    if (length(keep_cls) == 0) keep_cls <- ucls
+    lca <- lca_classification(keep_cls)
+    if (.cls_depth(lca) < TE_ORIGIN_MIN_LCA_DEPTH) next
+    # Domain-rhythm gate (skipped only when no period is available for this TRC).
+    P <- if (length(period_map) > 0) period_map[[name]] else NULL
+    if (!is.null(P) && !is.na(P) && P > 0) {
+      rhy <- te_domain_rhythm(arrays, t2p, P)
+      if (!is.na(rhy$occ) &&
+          (rhy$occ < TE_RHYTHM_MIN_OCC || rhy$frac < TE_RHYTHM_MIN_FRAC)) next
+    }
     out[[name]] <- lca
   }
   out
+}
+
+# ── TE-derived tandem-repeat summary table ───────────────────────────────────
+# One row per (TRC id, run) for every TideCluster clustering satellite the
+# TR-from-structural-TE pre-pass tagged with TE_origin (identify_te_derived_trcs
+# above). Aggregates genome-wide over that TRC's tagged arrays. Written next to
+# the unified GFF3 as Repeat_Annotation_Unified.te_derived_trc.csv and rendered
+# in the Tandem-repeats section of the HTML report. All data is already in
+# memory: the final combined level1 (the TE_origin arrays), the untrimmed global
+# structural tier `t1` (covered bp + complete-element count), the global DANTE
+# domain tier `t2` (domain set via t2$domain), and the two kite monomer maps.
+
+# Canonical protein-domain order (REXdb/DANTE vocabulary). Domains not listed
+# sort after these, alphabetically — so the emitted field is stable run-to-run.
+.DOMAIN_ORDER <- c("GAG","PROT","AP","INT","RT","RH","aRH",
+                   "CHD","CHDCR","CHDII","TPase","ENDO","EN","HEL1","HEL2")
+.order_domains <- function(d) {
+  d <- unique(d[!is.na(d) & nzchar(d)])
+  if (length(d) == 0) return(character(0))
+  rnk <- match(d, .DOMAIN_ORDER)
+  d[order(ifelse(is.na(rnk), length(.DOMAIN_ORDER) + 1L, rnk), d)]
+}
+
+# Authoritative per-TRC tandem monomer period (bp) from TideCluster's report
+# table `trc_table.tsv`. Per TRC: `monomer_tarean` (TAREAN family consensus) when
+# present, else `monomer_kite` (most-frequent KITE *founder* period), else
+# `prevalent_founder`. Returns a named integer vector TRC_ID -> period; empty when
+# the file is absent/unusable (optional — `--no_rdna`/older TideCluster/purged).
+#
+# Why NOT the kite `monomer_size` CSV: that column is the top k-mer *peak*, which
+# can lock onto a short SSR sub-period (measured: 79 bp reported for a genuine
+# 13134 bp TIR-derived monomer). Tiling the domain-rhythm occupancy test at 79 bp
+# wrongly reads a real TIR tandem as sparse; the TAREAN/founder period is correct.
+# trc_table.tsv also survives `cleanup_intermediates: maximal` (the kite tree does not).
+read_trc_periods <- function(trc_table_tsv) {
+  empty <- setNames(integer(0), character(0))
+  if (is.null(trc_table_tsv) || !nzchar(trc_table_tsv) || !file.exists(trc_table_tsv))
+    return(empty)
+  tab <- tryCatch(read.table(trc_table_tsv, header = TRUE, sep = "\t", check.names = FALSE,
+                             stringsAsFactors = FALSE, quote = "", comment.char = ""),
+                  error = function(e) NULL)
+  if (is.null(tab) || nrow(tab) == 0 || !("TRC_ID" %in% names(tab))) return(empty)
+  pick <- function(row_i) {
+    for (col in c("monomer_tarean", "monomer_kite", "prevalent_founder")) {
+      if (col %in% names(tab)) {
+        v <- suppressWarnings(as.integer(as.character(tab[[col]][row_i])))
+        if (!is.na(v) && v > 0) return(v)
+      }
+    }
+    NA_integer_
+  }
+  vals <- vapply(seq_len(nrow(tab)), pick, integer(1))
+  ids  <- as.character(tab$TRC_ID)
+  keep <- !is.na(vals) & nzchar(ids)
+  setNames(vals[keep], ids[keep])
+}
+
+# Domain-rhythm of a TRC's arrays at tandem period P: is the TE signal spread
+# through the tandem (TE-derived) or clumped in a few blocks (satellite merely
+# interrupted by TE insertions)? Tile each array into P-bp windows; a window is
+# "occupied" if a DANTE protein domain overlaps it. Uses domains (not full
+# elements) because they survive element decay — a degraded TE-tandem still
+# carries its RT/INT/GAG/TPase domains in ~every monomer. Returns:
+#   occ  = pooled occupied/total windows across the TRC's arrays
+#   frac = fraction of the TRC's arrays whose own occupancy >= 0.5
+# Calibrated on 3 genomes (100 TE_origin TRCs): derived 0.67-1.0, all frac=1.0.
+te_domain_rhythm <- function(arr, doms, P) {
+  if (is.na(P) || P <= 0 || length(arr) == 0)
+    return(list(occ = NA_real_, frac = NA_real_))
+  strand(arr) <- "*"
+  totN <- 0L; totW <- 0L; per <- numeric(length(arr))
+  for (i in seq_along(arr)) {
+    wins <- suppressWarnings(unlist(tile(arr[i], width = P)))  # P-bp windows
+    strand(wins) <- "*"
+    occw <- suppressWarnings(countOverlaps(wins, doms, ignore.strand = TRUE)) > 0
+    n <- length(wins)
+    totN <- totN + n; totW <- totW + sum(occw)
+    per[i] <- if (n > 0) mean(occw) else 0
+  }
+  list(occ = if (totN > 0) totW / totN else 0,
+       frac = if (length(per) > 0) mean(per >= 0.5) else 0)
+}
+TE_RHYTHM_MIN_OCC  <- 0.5   # >= this pooled per-monomer domain occupancy
+TE_RHYTHM_MIN_FRAC <- 0.5   # AND >= this fraction of the TRC's arrays in-rhythm
+
+write_te_derived_trc_table <- function(level1, t1, t1_members, t2, period_default, period_short, out_csv) {
+  hdr <- c("trc_id","run","n_arrays","total_array_bp","monomer_length_bp",
+           "te_classification","te_origin_structure","protein_domains",
+           "n_complete_elements","n_expected_monomers","complete_bp_fraction",
+           "domain_occupancy","frac_arrays_in_rhythm")
+  write_empty <- function() { writeLines(paste(hdr, collapse = ","), out_csv)
+                              log_msg("No TE-derived TRCs; wrote header-only ", basename(out_csv)) }
+
+  if (length(level1) == 0 || is.null(level1$TE_origin)) return(write_empty())
+  te <- level1[!is.na(level1$TE_origin)]
+  if (length(te) == 0) return(write_empty())
+
+  run_of <- ifelse(as.character(te$source_tool) == "TideCluster_short", "short", "default")
+  key    <- paste(run_of, as.character(te$Name), sep = "\t")
+
+  # Complete structural element copies as plain intervals, for the covered-bp
+  # fraction and the element count: standalone DANTE_LTR/TIR/LINE elements PLUS
+  # the LTR-RT member copies of any LTR_RT_TR container — but NOT the containers
+  # themselves. A container wraps a whole tandem array; counting it as one
+  # element would tally an entire array of copies as a single element (and its
+  # member copies live in t1_members, Level 2, not in t1).
+  elem0 <- if (length(t1) > 0) {
+    st <- if (is.null(t1$structure)) rep(NA_character_, length(t1)) else as.character(t1$structure)
+    granges(t1[is.na(st) | st != "LTR_RT_TR"])
+  } else GRanges()
+  elem <- suppressWarnings(c(elem0, if (length(t1_members) > 0) granges(t1_members) else GRanges()))
+  if (length(elem) > 0) strand(elem) <- "*"
+  t2p <- if (length(t2) > 0) { g <- granges(t2); strand(g) <- "*"; g } else GRanges()
+  t2_dom <- if (length(t2) > 0 && !is.null(t2$domain)) as.character(t2$domain) else character(0)
+  mode1 <- function(v) { v <- v[!is.na(v) & nzchar(v)]
+                         if (length(v) == 0) "" else names(sort(table(v), decreasing = TRUE))[1] }
+
+  rows <- lapply(sort(unique(key)), function(k) {
+    parts <- strsplit(k, "\t", fixed = TRUE)[[1]]
+    run <- parts[1]; trc <- parts[2]
+    sel <- key == k
+    arr <- reduce(granges(te[sel]), ignore.strand = TRUE)   # union of tagged arrays
+    strand(arr) <- "*"
+    array_bp <- sum(as.numeric(width(arr)))
+
+    te_cls    <- mode1(as.character(te$TE_origin[sel]))
+    te_struct <- mode1(as.character(te$TE_origin_structure[sel]))
+
+    # Complete structural element copies overlapping the arrays -> count + covered bp.
+    n_complete <- 0L; cov_bp <- 0
+    if (length(elem) > 0 && length(arr) > 0) {
+      h <- unique(subjectHits(findOverlaps(arr, elem)))
+      n_complete <- length(h)
+      if (n_complete > 0) cov_bp <- sum(as.numeric(width(intersect(arr, elem[h]))))
+    }
+    frac <- if (array_bp > 0) cov_bp / array_bp else NA_real_
+
+    # Distinct DANTE protein domains present within the arrays.
+    dom_str <- ""
+    if (length(t2p) > 0 && length(t2_dom) > 0 && length(arr) > 0) {
+      dh <- unique(queryHits(findOverlaps(t2p, arr)))
+      if (length(dh) > 0) dom_str <- paste(.order_domains(t2_dom[dh]), collapse = "|")
+    }
+
+    # Authoritative tandem period (trc_table monomer_tarean->monomer_kite).
+    per_map  <- if (run == "short") period_short else period_default
+    mono_n   <- if (length(per_map) > 0 && !is.null(per_map[[trc]])) per_map[[trc]] else NA_integer_
+    mono_n   <- suppressWarnings(as.integer(mono_n))
+    n_exp    <- if (!is.na(mono_n) && mono_n > 0) as.integer(round(array_bp / mono_n)) else NA_integer_
+
+    # Domain-rhythm metrics at that period (the gate criterion; NA if no period).
+    rhy <- if (!is.na(mono_n) && mono_n > 0) te_domain_rhythm(arr, t2p, mono_n)
+            else list(occ = NA_real_, frac = NA_real_)
+
+    data.frame(
+      trc_id                = trc,
+      run                   = run,
+      n_arrays              = sum(sel),
+      total_array_bp        = as.integer(array_bp),
+      monomer_length_bp     = if (is.na(mono_n)) "" else format(mono_n, trim = TRUE, scientific = FALSE),
+      te_classification     = te_cls,
+      te_origin_structure   = te_struct,
+      protein_domains       = dom_str,
+      n_complete_elements   = n_complete,
+      n_expected_monomers   = if (is.na(n_exp)) "" else as.character(n_exp),
+      complete_bp_fraction  = if (is.na(frac)) "" else sprintf("%.4f", frac),
+      domain_occupancy      = if (is.na(rhy$occ))  "" else sprintf("%.4f", rhy$occ),
+      frac_arrays_in_rhythm = if (is.na(rhy$frac)) "" else sprintf("%.4f", rhy$frac),
+      stringsAsFactors = FALSE)
+  })
+  df <- do.call(rbind, rows)
+  # Deterministic order: run (default before short), then numeric TRC id.
+  trc_num <- suppressWarnings(as.integer(sub("^TRC_", "", df$trc_id)))
+  df <- df[order(df$run, trc_num, df$trc_id), , drop = FALSE]
+  write.table(df, out_csv, sep = ",", quote = FALSE, row.names = FALSE, col.names = TRUE)
+  log_msg(sprintf("Wrote %d TE-derived TRC row(s) -> %s", nrow(df), basename(out_csv)))
+  invisible()
 }
 
 # Generic tier-1 structural-overlap fallback. DANTE_LTR (tandem containers +
@@ -642,11 +877,20 @@ resolve_tier1_overlaps <- function(t1, min_len) {
   # old O(N^2) (grow `kept` by one element per feature AND trim each feature
   # against the whole growing set) into O(k^2), k = overlapping tier-1 features in
   # the batch (usually tiny; a single overlapping pair used to drag the whole
-  # batch's tier-1 set through the loop). Output order is irrelevant — the
-  # combined annotation is sorted in finalise_output.
+  # batch's tier-1 set through the loop).
   involved    <- sort(unique(c(queryHits(h), subjectHits(h))))
   passthrough <- t1[-involved]
-  t1s  <- t1[involved][order(width(t1[involved]), decreasing = TRUE)]  # longest first
+  # Process longest-first, with a FULLY deterministic tie-break on coordinates.
+  # The greedy trim RESULT depends on processing order (an earlier-kept feature
+  # trims later overlappers), so equal-width features must not be ordered by their
+  # incoming position — that position is batch-composition-dependent (batches are
+  # split by thread count), which made the trimmed output non-deterministic
+  # run-to-run on multi-sequence genomes. Ordering ties by (seqname,start,end,
+  # strand) makes the result independent of input order and thus of batching.
+  inv  <- t1[involved]
+  ord  <- order(-width(inv), as.character(seqnames(inv)), start(inv), end(inv),
+                as.character(strand(inv)))
+  t1s  <- inv[ord]
   pieces <- vector("list", length(t1s))
   pieces[[1]] <- t1s[1]
   kept <- t1s[1]
@@ -681,7 +925,7 @@ resolve_within_tier <- function(gr) {
 
 # ── 5. Per-batch resolution ───────────────────────────────────────────────────
 
-process_batch <- function(seqs, data, min_len) {
+process_batch <- function(seqs, data, min_len, trc_origin_def = character(0), trc_origin_sho = character(0)) {
   batch_label <- sprintf("batch[%s%s]",
                          paste(head(seqs, 2), collapse=","),
                          if (length(seqs) > 2) sprintf(",...+%d", length(seqs)-2) else "")
@@ -711,10 +955,15 @@ process_batch <- function(seqs, data, min_len) {
   # Flag length-qualified Tier-3 clustering TRCs that tandemly stack ≥2 same-
   # family structural TEs. Those satellites WIN: tag them TE_origin and trim the
   # covered structural Tier-1/2 features out (they remain in the DANTE_* GFF3s).
-  # Run default vs short separately (TRC_<n> names collide across the two runs).
+  # The TRC->TE_origin decision (`trc_origin_def`/`trc_origin_sho`) is computed
+  # ONCE at the top level over ALL of each TRC's arrays genome-wide, then passed
+  # in — NOT recomputed per batch. A TRC's arrays can span sequences that land in
+  # different batches, and the batch split itself is thread-count-dependent
+  # (threads=1 -> one batch, else N); a per-batch decision (coverage AND the
+  # domain-rhythm gate judged over only the arrays in one batch) would make
+  # TE_origin thread-dependent. Global judging keeps it deterministic. Here we
+  # only APPLY the decision to this batch's arrays (tagging + trimming).
   te_sat <- GRanges()
-  trc_origin_def <- if (length(t3_def) > 0 && length(t1) > 0) identify_te_derived_trcs(t3_def, t1) else character(0)
-  trc_origin_sho <- if (length(t3_sho) > 0 && length(t1) > 0) identify_te_derived_trcs(t3_sho, t1) else character(0)
   if (length(trc_origin_def) + length(trc_origin_sho) > 0) {
     # A TE-derived satellite that overlaps a tandem LTR-RT container is the
     # "full LTR-RT in tandems" sub-type (complete LTR-RTs sharing LTRs); one over
@@ -1323,12 +1572,33 @@ if (opt$threads <= 1 || length(seqlengths_vec) == 1) {
     min(batch_bp)/1e6, stats::median(batch_bp)/1e6, max(batch_bp)/1e6))
 }
 
+# Authoritative per-TRC tandem periods (trc_table monomer_tarean->monomer_kite),
+# for the domain-rhythm gate and the TE-derived TRC table's monomer column.
+# Default and short runs have independent TRC_<n> spaces.
+period_def   <- read_trc_periods(opt$tc_trc_table_default)
+period_short <- read_trc_periods(opt$tc_trc_table_short)
+log_msg("TRC periods (trc_table): ", length(period_def), " default + ",
+        length(period_short), " short")
+
+# TE-derived TRC decision — computed GLOBALLY, once, over every array of each TRC
+# genome-wide (NOT per batch). process_batch only applies the decision to its
+# arrays. This is essential for determinism: batch composition is thread-count-
+# dependent (threads=1 -> one batch), and a per-batch coverage+rhythm judgement
+# over a partial set of a TRC's arrays would flip TE_origin between thread counts.
+trc_origin_def <- if (length(tc_data$default) > 0 && length(t1) > 0)
+  identify_te_derived_trcs(tc_data$default, t1, t2, period_def) else character(0)
+trc_origin_sho <- if (length(tc_data$short) > 0 && length(t1) > 0)
+  identify_te_derived_trcs(tc_data$short, t1, t2, period_short) else character(0)
+log_msg("TE-derived TRCs (global): ", length(trc_origin_def), " default + ",
+        length(trc_origin_sho), " short")
+
 # Run resolution — always via mclapply so the code path is uniform.
 log_msg(sprintf("── Running tier resolution (%d threads, %d batch(es)) ─────",
                 opt$threads, length(batches)))
 t_resolve <- tic("tier resolution (all batches)")
 results <- mclapply(batches,
-                    function(seqs) process_batch(seqs, data, opt$min_feature_length),
+                    function(seqs) process_batch(seqs, data, opt$min_feature_length,
+                                                 trc_origin_def, trc_origin_sho),
                     mc.cores = min(opt$threads, length(batches)))
 toc(t_resolve)
 
@@ -1347,6 +1617,14 @@ level2_all <- timed("combine level2 across batches",
                     suppressWarnings(do.call(c, lapply(results, `[[`, "level2"))))
 log_msg("Combined: ", length(level1_all), " Level 1, ",
         length(level2_all), " Level 2 features")
+
+# TE-derived tandem-repeat summary (TRCs the pre-pass tagged with TE_origin).
+# Computed from the intact combined level1 + the untrimmed global t1/t2 tiers.
+timed("write TE-derived TRC table",
+      write_te_derived_trc_table(
+        level1_all, t1, ltr_data$members, t2,
+        period_def, period_short,
+        sub("\\.gff3$", ".te_derived_trc.csv", opt$output)))
 
 # Finalise and export
 log_msg("── Finalising output ──────────────────────────────────────────")

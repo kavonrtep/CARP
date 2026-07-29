@@ -1336,11 +1336,69 @@ html_sat_table <- function(sat_data, genome_size) {
 </div>', paste(rows, collapse = "\n"))
 }
 
+# ── E6b. TE-derived tandem-repeat table ────────────────────────────────────
+# Renders the TRCs that make_unified_annotation tagged with TE_origin (a tandem
+# array built from a transposable element — e.g. an LTR-RT array TideCluster
+# clustered as a satellite). Reads Repeat_Annotation_Unified.te_derived_trc.csv
+# (comma-separated; protein_domains pipe-joined). Returns "" when the file is
+# absent or header-only, so the whole panel is omitted unless such TRCs exist.
+html_te_derived_trc_table <- function(outdir) {
+  csv <- file.path(outdir, "Repeat_Annotation_Unified.te_derived_trc.csv")
+  if (!file.exists(csv)) return("")
+  df <- tryCatch(read.table(csv, header = TRUE, sep = ",", quote = "",
+                            stringsAsFactors = FALSE, comment.char = ""),
+                 error = function(e) NULL)
+  if (is.null(df) || nrow(df) == 0) return("")
+
+  esc <- function(x) { x <- as.character(x)
+    x <- gsub("&", "&amp;", x, fixed = TRUE); x <- gsub("<", "&lt;", x, fixed = TRUE)
+    gsub(">", "&gt;", x, fixed = TRUE) }
+  fmt_int <- function(x) ifelse(is.na(suppressWarnings(as.numeric(x))), "",
+                                format(as.integer(x), big.mark = ","))
+  rows <- vapply(seq_len(nrow(df)), function(i) {
+    r <- df[i, ]
+    trc <- esc(r$trc_id)
+    if (!is.null(r$run) && identical(as.character(r$run), "short")) trc <- paste0(trc, " <span style=\"color:#888;font-size:0.85em\">(short)</span>")
+    doms <- esc(gsub("|", ", ", as.character(r$protein_domains), fixed = TRUE))
+    frac <- suppressWarnings(as.numeric(r$complete_bp_fraction))
+    frac_txt <- if (is.na(frac)) "&mdash;" else sprintf("%.2f", frac)
+    occ <- suppressWarnings(as.numeric(r$domain_occupancy))
+    occ_txt <- if (is.null(r$domain_occupancy) || is.na(occ)) "&mdash;" else sprintf("%.2f", occ)
+    sprintf(paste0('<tr><td>%s</td><td style="text-align:right">%s</td><td>%s</td>',
+                   '<td>%s</td><td style="text-align:right">%s</td><td style="text-align:right">%s</td>',
+                   '<td style="text-align:right">%s</td><td style="text-align:right">%s</td></tr>'),
+            trc, esc(r$monomer_length_bp), esc(r$te_classification),
+            doms, occ_txt, frac_txt, fmt_int(r$n_complete_elements), fmt_int(r$n_expected_monomers))
+  }, character(1))
+
+  sprintf('
+<div style="margin-top:24px">
+<h3>Tandem repeats derived from transposable elements</h3>
+<p class="caption">TideCluster arrays that <b>make_unified_annotation</b> identified as built from a
+transposable element (tagged <code>TE_origin</code>): a TE (usually a tandem stack of LTR-RTs) abundant
+enough to be clustered as a satellite. The array wins the region and is reported here as a tandem repeat,
+with the TE family of origin recorded. <b>Domain rhythm</b> = fraction of monomer windows carrying a
+DANTE domain — the qualifying test: the TE must recur <i>through</i> the tandem (&ge;0.5), which
+separates a real TE-derived tandem from a satellite merely interrupted by TE insertions.
+<b>Complete fraction</b> = share of the array covered by complete DANTE structural elements (drops with
+element decay, unlike domain rhythm). <b>#&nbsp;complete</b> = complete structural element copies detected
+under the array; <b>#&nbsp;expected</b> = tandem monomer units (array&nbsp;bp&nbsp;&divide;&nbsp;monomer).</p>
+<div style="overflow-x:auto">
+<table class="data-table">
+<thead><tr><th>TRC</th><th style="text-align:right">Monomer (bp)</th><th>TE classification</th>
+<th>Protein domains</th><th style="text-align:right">Domain rhythm</th><th style="text-align:right">Complete fraction</th>
+<th style="text-align:right"># complete</th><th style="text-align:right"># expected</th></tr></thead>
+<tbody>%s</tbody>
+</table>
+</div>
+</div>', paste(rows, collapse = "\n"))
+}
+
 # ── E7. Assemble full HTML ─────────────────────────────────────────────────
 assemble_html <- function(plotly_js, cards_html, sunburst_div, comp_table_html,
                            dante_summary_html, comp_bar_div,
                            density_top_div, density_lineage_div, density_trc_div,
-                           sat_table_html, sat_bar_div,
+                           sat_table_html, sat_bar_div, te_trc_table_html,
                            outdir, bin_width, genome_avg_pct,
                            provenance_footer_html = "") {
 
@@ -1506,6 +1564,7 @@ Contigs &lt; %.0f kb are aggregated into the single Other bar.</p>
     %s
   </div>
 </div>
+%s
 </section>
 
 <!-- SECTION 6: SUB-REPORTS -->
@@ -1533,6 +1592,7 @@ Contigs &lt; %.0f kb are aggregated into the single Other bar.</p>
     density_trc_div     %||% not_generated_html("The TRC-cluster density panel"),
     sat_table_html,
     sat_bar_div %||% not_generated_html("The satellite density panel"),
+    te_trc_table_html,
     sub_links,
     provenance_footer_html
   )
@@ -1724,6 +1784,8 @@ main <- function() {
   comp_table_html  <- html_comp_table(tree_df)
   dante_summ_html  <- html_dante_summary(ltr_stats, tir_stats, line_stats, outdir)
   sat_table_html   <- html_sat_table(sat_data, genome_size)
+  te_trc_table_html <- safe_build("TE-derived TRC table",
+                                  html_te_derived_trc_table(outdir)) %||% ""
 
   sunburst_div      <- plotly_div("sunburst-plot", sunburst_chart)
   comp_bar_div      <- if (!is.null(comp_bar_chart))
@@ -1748,7 +1810,7 @@ main <- function() {
     dante_summ_html,
     comp_bar_div,
     density_top_div, density_lineage_div, density_trc_div,
-    sat_table_html, sat_bar_div,
+    sat_table_html, sat_bar_div, te_trc_table_html,
     outdir, d_bin, genome_avg_frac * 100,
     provenance_footer_html = prov_footer_html
   )

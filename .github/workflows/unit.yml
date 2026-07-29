@@ -84,6 +84,9 @@ jobs:
       - name: R TRC monomer-size label (density panel bp lookup)
         run: Rscript tests/test_trc_monomer_label.R
 
+      - name: R TE-derived TRC summary table (make_unified_annotation)
+        run: Rscript tests/test_te_derived_trc_table.R
+
       - name: Pre-commit hook self-test
         run: |
           git config user.email ci@example.com

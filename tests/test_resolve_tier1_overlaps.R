@@ -52,13 +52,22 @@ trim_to_nonoverlap <- function(lower, higher, min_len = 50L) {
   kept
 }
 
-# OLD resolver (pre-optimization)
+# Deterministic longest-first order with coordinate tie-break (matches the
+# production resolver). Ordering equal-width features by (seqname,start,end,
+# strand) makes the greedy trim independent of input order -> batch/thread
+# independent.
+det_order <- function(gr)
+  order(-width(gr), as.character(seqnames(gr)), start(gr), end(gr),
+        as.character(strand(gr)))
+
+# OLD resolver shape (pre-optimization: grows `kept` incrementally), same
+# deterministic ordering.
 resolve_old <- function(t1, min_len) {
   if (length(t1) <= 1) return(t1)
   h <- suppressWarnings(findOverlaps(t1, ignore.strand = TRUE,
                                      drop.self = TRUE, drop.redundant = TRUE))
   if (length(h) == 0) return(t1)
-  t1s  <- t1[order(width(t1), decreasing = TRUE)]
+  t1s  <- t1[det_order(t1)]
   kept <- t1s[1]
   for (i in 2:length(t1s)) {
     piece <- trim_to_nonoverlap(t1s[i], kept, min_len)
@@ -75,7 +84,8 @@ resolve_new <- function(t1, min_len) {
   if (length(h) == 0) return(t1)
   involved    <- sort(unique(c(queryHits(h), subjectHits(h))))
   passthrough <- t1[-involved]
-  t1s  <- t1[involved][order(width(t1[involved]), decreasing = TRUE)]
+  inv  <- t1[involved]
+  t1s  <- inv[det_order(inv)]
   pieces <- vector("list", length(t1s))
   pieces[[1]] <- t1s[1]
   kept <- t1s[1]
@@ -114,9 +124,9 @@ rand_t1 <- function(rng_i, n) {
 
 main <- function() {
   min_len <- 50L
-  ntrials <- 60
+  ntrials <- 30
   for (i in seq_len(ntrials)) {
-    n <- sample(2:40, 1)
+    n <- sample(2:22, 1)   # capped: the O(k^2) greedy has heavy GRanges overhead
     t1 <- rand_t1(i, n)
     a <- resolve_old(t1, min_len)
     b <- resolve_new(t1, min_len)
@@ -129,6 +139,31 @@ main <- function() {
   }
   cat(sprintf("  resolve_tier1_overlaps: new == old (%d random overlap-dense trials)\n",
               ntrials))
+
+  # Order-invariance (determinism): the greedy trim RESULT must not depend on the
+  # order features arrive in — that order is batch/thread-dependent. Use inputs
+  # dense with WIDTH TIES (where a naive width-only sort tie-breaks by position)
+  # and check the resolved SET is identical under input permutation.
+  n_inv <- 12L
+  for (i in seq_len(n_inv)) {
+    set.seed(5000 + i)
+    n  <- sample(4:7, 1)
+    # spread over a wider window so only some features overlap (keeps the O(k^2)
+    # greedy cheap) while WIDTH TIES still exercise the tie-break path
+    st <- sample.int(2600, n, replace = TRUE)
+    wd <- sample(c(400L, 400L, 600L), n, replace = TRUE)  # ties
+    gr <- GRanges("c1", IRanges(st, st + wd),
+                  strand = sample(c("+", "-"), n, replace = TRUE))
+    mcols(gr) <- DataFrame(classification = "Class_I/LTR", Name = "x",
+                           source_tier = 1L, source_tool = "DANTE")
+    ref  <- sig(resolve_new(gr, min_len))
+    perm <- sig(resolve_new(gr[sample(seq_len(n))], min_len))  # SAME features, shuffled
+    if (!identical(ref, perm)) {
+      cat("ORDER-DEPENDENT at trial", i, "\n"); print(ref); print(perm)
+      stop("resolve_tier1_overlaps: result depends on input order")
+    }
+  }
+  cat(sprintf("  resolve_tier1_overlaps: order-invariant (%d tie permutation trials)\n", n_inv))
   cat("test_resolve_tier1_overlaps: PASSED\n")
 }
 
