@@ -1,0 +1,2 @@
+##gff-version 3
+seq_pad	RepeatMasker	transposable_element	500000	501000	.	+	.	Name=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM

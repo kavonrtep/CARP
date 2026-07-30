@@ -299,6 +299,17 @@ jobs:
           python scripts/assert_run_determinism.py \
             tests/fixtures/output_${F}_det_a tests/fixtures/output_${F}_det_b
 
+      # make_unified batch-invariance: the small/medium fixtures are single-batch
+      # regardless of thread count, so the diff above cannot catch a per-batch
+      # resolution bug (e.g. the te_sat pre-disjoin). This drives make_unified
+      # directly on a fixture whose .fai forces a >1-batch split and asserts the
+      # unified GFF3 is byte-identical single-batch vs multi-batch. Runs once
+      # (gated to `small`) using the bioconductor R stack from the restored
+      # .snakemake/conda cache.
+      - name: make_unified multi-batch determinism gate
+        if: matrix.fixture == 'small'
+        run: bash tests/test_unified_multibatch_determinism.sh
+
       - name: Upload both runs on failure (to diff locally)
         if: failure()
         uses: actions/upload-artifact@v4
