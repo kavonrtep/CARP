@@ -96,7 +96,7 @@ def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], cwd=REPO, text=True)
 
 
-def main() -> int:
+def check_files_coverage() -> int:
     added = [p for p in git("diff", "--cached", "--diff-filter=A",
                              "--name-only").splitlines() if p]
     if not added:
@@ -147,6 +147,42 @@ def main() -> int:
     print("  3. Bypass: `git commit --no-verify`  (use sparingly).", file=sys.stderr)
     print("", file=sys.stderr)
     return 1
+
+
+def check_runner_deps() -> int:
+    """Run the CI runner-deps guard when a workflow or test file is staged, so a
+    test wired into a job whose env lacks its dependency is caught at commit time
+    (not just as a red CI job). Non-fatal if the guard itself cannot run locally
+    (e.g. pyyaml missing) — CI enforces it regardless."""
+    staged = [p for p in git("diff", "--cached", "--name-only").splitlines() if p]
+    if not any(p.startswith(".github/workflows/") or p.startswith("tests/test_")
+               for p in staged):
+        return 0
+    guard = REPO / "tests" / "test_ci_runner_deps.py"
+    if not guard.exists():
+        return 0
+    proc = subprocess.run([sys.executable, str(guard)], cwd=REPO,
+                          capture_output=True, text=True)
+    if proc.returncode == 0:
+        return 0
+    if "FAIL:" in proc.stdout:
+        print("", file=sys.stderr)
+        print("pre-commit: a test is wired to a CI job that lacks its dependency",
+              file=sys.stderr)
+        print("-" * 65, file=sys.stderr)
+        sys.stderr.write(proc.stdout)
+        print("Fix the workflow (move the test / add the package), or bypass with",
+              file=sys.stderr)
+        print("`git commit --no-verify` (use sparingly).", file=sys.stderr)
+        return 1
+    # Guard could not run (missing pyyaml, etc.) — don't block; CI still checks.
+    print("[pre-commit] runner-deps guard skipped (could not run locally); "
+          "CI will still check.", file=sys.stderr)
+    return 0
+
+
+def main() -> int:
+    return max(check_files_coverage(), check_runner_deps())
 
 
 if __name__ == "__main__":

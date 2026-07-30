@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **CI: runner-deps guard.** New `tests/test_ci_runner_deps.py` (wired into the
+  `unit` job and the pre-commit hook) asserts every test is wired into a CI job
+  whose environment actually provides the packages it imports — deriving each
+  job's package set from its `create-args`. Catches "a test runs on a runner
+  without its dependency" (e.g. a `library(GenomicRanges)` R test in the
+  lightweight `carp-unit` env) at commit / PR time instead of as a red CI job.
+  Also moved the two GenomicRanges R unit tests into a dedicated bioconductor
+  `unit_r_bioc` job so they actually run.
 - **Fix (determinism): `trim_to_nonoverlap` always decomposes internal overlaps.**
   It had two `return(lower)` short-circuits that left `lower`'s internal overlaps
   intact, while the main path disjoined them — and which ran was batch-dependent
