@@ -1,66 +1,7 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
-- **CI: runner-deps guard.** New `tests/test_ci_runner_deps.py` (wired into the
-  `unit` job and the pre-commit hook) asserts every test is wired into a CI job
-  whose environment actually provides the packages it imports — deriving each
-  job's package set from its `create-args`. Catches "a test runs on a runner
-  without its dependency" (e.g. a `library(GenomicRanges)` R test in the
-  lightweight `carp-unit` env) at commit / PR time instead of as a red CI job.
-  Also moved the two GenomicRanges R unit tests into a dedicated bioconductor
-  `unit_r_bioc` job so they actually run.
-- **Fix (determinism): `trim_to_nonoverlap` always decomposes internal overlaps.**
-  It had two `return(lower)` short-circuits that left `lower`'s internal overlaps
-  intact, while the main path disjoined them — and which ran was batch-dependent
-  (`higher = reduce(level1)`). So same-tier features overlapping only each other
-  (e.g. two DANTE domains far from any tier-1) came out with min-index metadata /
-  kept strand in one batching but LCA / strand `*` in another (a tier-2/4/5 twin of
-  the te_sat pre-disjoin bug; run116 never hit it — tier-1 is dense — but the
-  `unified_multibatch` fixture does). It now always decomposes `lower` (disjoining
-  `lower` alone when nothing overlaps `higher`, so the fast path stays cheap),
-  matching what a single-batch `threads=1` run already produced — run116 output is
-  unchanged, the multi-batch fixture is now byte-identical.
-- **CI (determinism): multi-batch gate for `make_unified_annotation`.** The
-  full-pipeline determinism gate runs only single-batch fixtures, so it cannot
-  catch per-batch resolution bugs (like the te_sat pre-disjoin above). New test
-  `tests/test_unified_multibatch_determinism.sh` drives make_unified directly on
-  `tests/fixtures/unified_multibatch/` — a fixture whose `.fai` declares 3× 2 Mb
-  sequences (make_unified reads only lengths) so `--batch_size` forces a 3-batch
-  split at `--threads 3` while `--threads 1` stays single-batch — and asserts the
-  unified GFF3 is byte-identical across the two. Wired into the `determinism` job;
-  FAILS against the pre-fix code, PASSES on the fix.
-- **Fix (determinism): TE-derived TRC decision is now global, not per-batch.**
-  `identify_te_derived_trcs` ran once per processing batch, and batch composition
-  is thread-count-dependent (threads=1 → one batch), so whether a multi-sequence
-  TRC was tagged `TE_origin` could differ run-to-run across thread counts. It now
-  runs once over every array of each TRC genome-wide. This also required a **robust
-  LCA**: the shared-lineage test now ignores rare stray overlaps (a class must
-  cover ≥ `TE_ORIGIN_LCA_MIN_SHARE` = 10 % of the covered bp), so a single inserted
-  element of an unrelated family (e.g. 1 Ty1_copia/SIRE among 73 Ty3_gypsy/CRM)
-  no longer collapses the LCA and drops a genuine TE-derived TRC.
-- **Fix (determinism + quality): tier-1/2 overlap resolution corrupted by the
-  te_sat pre-pass.** The TE-derived-satellite pre-pass trimmed `t1`/`t2` against the
-  satellite regions with `trim_to_nonoverlap` **before** those tiers' own overlap
-  resolution ran. `trim_to_nonoverlap` does `disjoin(c(lower, higher))`, which
-  silently decomposes `lower`'s *internal* overlaps into disjoint pieces — so the
-  subsequent greedy `resolve_tier1_overlaps` saw an already-non-overlapping `t1` and
-  did nothing. Because `te_sat` is non-empty only in a batch that contains a
-  TE-derived-TRC array (and batching is thread-count-dependent), overlapping
-  structural TEs were resolved greedy-longest-first in some runs and naively
-  disjoined (over-fragmented, arbitrary metadata) in others — 816/2.82 M tier-1
-  features differed run116 threads 1 vs N, and the result was also lower quality
-  when it triggered. Fixes: (a) run `resolve_tier1_overlaps` **before** the te_sat
-  trim so `t1` is non-overlapping when carved; (b) fold the te_sat carve of `t2`
-  into Step 2 (trim vs `reduce(level1)` = te_sat ∪ tier-1, disjoined once by
-  `resolve_within_tier`) instead of a separate pre-pass trim — identical to today
-  when there are no TE-derived TRCs; (c) extend the greedy's deterministic tie-break
-  to `(seqname,start,end,strand,classification,source_tool)`; (d) canonicalise the
-  GFF3 mcols column order before export, so column-9 attribute order (e.g. `ID`
-  position) is byte-identical across thread counts, not just data-identical. Full
-  A/B on run116: 816 → 0 differing features, byte-identical unified GFF3. (Supersedes
-  the earlier `(seqname,start,end,strand)`-only tie-break; see
-  `docs/archive/tier1_resolution_determinism_audit.md`.)
 - **TE-derived TRC detection: domain-rhythm gate.** A Tier-3 satellite is tagged
   `TE_origin` (TE-derived, satellite wins the region) only if — in addition to the
   existing coverage test — the TE's DANTE domains recur **through the tandem**:
@@ -87,11 +28,69 @@
   complete_bp_fraction, domain_occupancy, frac_arrays_in_rhythm` (header-only when
   no such TRCs exist), registered in `scripts/manifest.py` OUTPUTS (determinism
   gate). See [`docs/output_reference.md`](docs/output_reference.md).
-
 - **HTML report: "Tandem repeats derived from transposable elements" table** in
   the Tandem repeats (TideCluster) section of `make_repeat_report.R`, populated
   from the new CSV (now a rule input) and shown only when TE-derived TRCs are
   present.
+- **Fix (determinism + quality): tier-1/2 overlap resolution corrupted by the
+  te_sat pre-pass.** The TE-derived-satellite pre-pass trimmed `t1`/`t2` against the
+  satellite regions with `trim_to_nonoverlap` **before** those tiers' own overlap
+  resolution ran. `trim_to_nonoverlap` does `disjoin(c(lower, higher))`, which
+  silently decomposes `lower`'s *internal* overlaps into disjoint pieces — so the
+  subsequent greedy `resolve_tier1_overlaps` saw an already-non-overlapping `t1` and
+  did nothing. Because `te_sat` is non-empty only in a batch that contains a
+  TE-derived-TRC array (and batching is thread-count-dependent), overlapping
+  structural TEs were resolved greedy-longest-first in some runs and naively
+  disjoined (over-fragmented, arbitrary metadata) in others — 816/2.82 M tier-1
+  features differed run116 threads 1 vs N, and the result was also lower quality
+  when it triggered. Fixes: (a) run `resolve_tier1_overlaps` **before** the te_sat
+  trim so `t1` is non-overlapping when carved; (b) fold the te_sat carve of `t2`
+  into Step 2 (trim vs `reduce(level1)` = te_sat ∪ tier-1, disjoined once by
+  `resolve_within_tier`) instead of a separate pre-pass trim — identical to today
+  when there are no TE-derived TRCs; (c) extend the greedy's deterministic tie-break
+  to `(seqname,start,end,strand,classification,source_tool)`; (d) canonicalise the
+  GFF3 mcols column order before export, so column-9 attribute order (e.g. `ID`
+  position) is byte-identical across thread counts, not just data-identical. Full
+  A/B on run116: 816 → 0 differing features, byte-identical unified GFF3. (Supersedes
+  the earlier `(seqname,start,end,strand)`-only tie-break; see
+  `docs/archive/tier1_resolution_determinism_audit.md`.)
+- **Fix (determinism): `trim_to_nonoverlap` always decomposes internal overlaps.**
+  It had two `return(lower)` short-circuits that left `lower`'s internal overlaps
+  intact, while the main path disjoined them — and which ran was batch-dependent
+  (`higher = reduce(level1)`). So same-tier features overlapping only each other
+  (e.g. two DANTE domains far from any tier-1) came out with min-index metadata /
+  kept strand in one batching but LCA / strand `*` in another (a tier-2/4/5 twin of
+  the te_sat pre-disjoin bug; run116 never hit it — tier-1 is dense — but the
+  `unified_multibatch` fixture does). It now always decomposes `lower` (disjoining
+  `lower` alone when nothing overlaps `higher`, so the fast path stays cheap),
+  matching what a single-batch `threads=1` run already produced — run116 output is
+  unchanged, the multi-batch fixture is now byte-identical.
+- **Fix (determinism): TE-derived TRC decision is now global, not per-batch.**
+  `identify_te_derived_trcs` ran once per processing batch, and batch composition
+  is thread-count-dependent (threads=1 → one batch), so whether a multi-sequence
+  TRC was tagged `TE_origin` could differ run-to-run across thread counts. It now
+  runs once over every array of each TRC genome-wide. This also required a **robust
+  LCA**: the shared-lineage test now ignores rare stray overlaps (a class must
+  cover ≥ `TE_ORIGIN_LCA_MIN_SHARE` = 10 % of the covered bp), so a single inserted
+  element of an unrelated family (e.g. 1 Ty1_copia/SIRE among 73 Ty3_gypsy/CRM)
+  no longer collapses the LCA and drops a genuine TE-derived TRC.
+- **CI (determinism): multi-batch gate for `make_unified_annotation`.** The
+  full-pipeline determinism gate runs only single-batch fixtures, so it cannot
+  catch per-batch resolution bugs (like the te_sat pre-disjoin above). New test
+  `tests/test_unified_multibatch_determinism.sh` drives make_unified directly on
+  `tests/fixtures/unified_multibatch/` — a fixture whose `.fai` declares 3× 2 Mb
+  sequences (make_unified reads only lengths) so `--batch_size` forces a 3-batch
+  split at `--threads 3` while `--threads 1` stays single-batch — and asserts the
+  unified GFF3 is byte-identical across the two. Wired into the `determinism` job;
+  FAILS against the pre-fix code, PASSES on the fix.
+- **CI: runner-deps guard.** New `tests/test_ci_runner_deps.py` (wired into the
+  `unit` job and the pre-commit hook) asserts every test is wired into a CI job
+  whose environment actually provides the packages it imports — deriving each
+  job's package set from its `create-args`. Catches "a test runs on a runner
+  without its dependency" (e.g. a `library(GenomicRanges)` R test in the
+  lightweight `carp-unit` env) at commit / PR time instead of as a red CI job.
+  Also moved the two GenomicRanges R unit tests into a dedicated bioconductor
+  `unit_r_bioc` job so they actually run.
 
 ## 1.2.1
 
