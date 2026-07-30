@@ -75,6 +75,9 @@ jobs:
       - name: Every test is run by CI or explicitly exempted (coverage guard)
         run: python tests/test_ci_test_coverage.py
 
+      - name: Every test runs on a runner that provides its deps (runner-deps guard)
+        run: python tests/test_ci_runner_deps.py
+
       - name: R classification vector
         run: Rscript tests/test_classification.R
 
