@@ -1377,16 +1377,17 @@ html_te_derived_trc_table <- function(outdir) {
 <p class="caption">TideCluster arrays that <b>make_unified_annotation</b> identified as built from a
 transposable element (tagged <code>TE_origin</code>): a TE (usually a tandem stack of LTR-RTs) abundant
 enough to be clustered as a satellite. The array wins the region and is reported here as a tandem repeat,
-with the TE family of origin recorded. <b>Domain rhythm</b> = fraction of monomer windows carrying a
-DANTE domain — the qualifying test: the TE must recur <i>through</i> the tandem (&ge;0.5), which
-separates a real TE-derived tandem from a satellite merely interrupted by TE insertions.
+with the TE family of origin recorded. <b>Domain occupancy</b> = fraction of monomer-period windows that
+contain a DANTE domain &mdash; i.e. the TE&rsquo;s domains recur <i>through</i> the tandem rather than
+sitting in one spot; the qualifying test requires &ge;&nbsp;0.5, which separates a real TE-derived tandem
+from a satellite merely interrupted by TE insertions.
 <b>Complete fraction</b> = share of the array covered by complete DANTE structural elements (drops with
-element decay, unlike domain rhythm). <b>#&nbsp;complete</b> = complete structural element copies detected
+element decay, unlike domain occupancy). <b>#&nbsp;complete</b> = complete structural element copies detected
 under the array; <b>#&nbsp;expected</b> = tandem monomer units (array&nbsp;bp&nbsp;&divide;&nbsp;monomer).</p>
 <div style="overflow-x:auto">
 <table class="data-table">
 <thead><tr><th>TRC</th><th style="text-align:right">Monomer (bp)</th><th>TE classification</th>
-<th>Protein domains</th><th style="text-align:right">Domain rhythm</th><th style="text-align:right">Complete fraction</th>
+<th>Protein domains</th><th style="text-align:right">Domain occupancy</th><th style="text-align:right">Complete fraction</th>
 <th style="text-align:right"># complete</th><th style="text-align:right"># expected</th></tr></thead>
 <tbody>%s</tbody>
 </table>
