@@ -35,23 +35,22 @@ sequence in its own batch (3 batches); at `--threads 1` it is one batch.
   (100000–107030 and 105557–115187), far from any `te_sat`. In the single batch
   they share the batch with seq_te's `te_sat` (pre-fix: pre-disjoined → 3 pieces);
   in the multi-batch run they are alone (no `te_sat` → correct greedy 2 pieces).
-  This is the exact shape that differed on the real genome.
+  This is the exact shape that differed on the real genome (the **tier-1**
+  te_sat-pre-disjoin bug). seq_ovl also carries two overlapping-each-other DANTE
+  domains far from any tier-1 (120000–121000 `+`, 120500–121500 `−`) — the
+  **tier-2** twin: pre-fix their strand flips with batching because
+  `trim_to_nonoverlap` only decomposed `t2`'s internal overlaps when some `t2`
+  feature happened to overlap a higher tier in that batch.
 - **seq_pad** — a lone RepeatMasker hit, padding to a third batch.
 
 The test asserts the fixture actually triggers `te_sat` and a real >1-batch split
 (so a future edit that stops exercising the path fails loudly rather than
-silently passing), then diffs the two unified GFF3s. It PASSES on the fixed code
-and FAILS (9 differing lines) against the pre-fix code (commit 67acf4c).
+silently passing), then diffs the two unified GFF3s. It PASSES on the fixed code;
+it FAILS against pre-fix code — the tier-1 shape differs against commit 67acf4c,
+and the tier-2 shape differs against commit 00a971c (tier-1 fixed, `trim`
+internal-overlap not yet).
 
 ## Regenerating
 
 `python3 generate.py <outdir>` rewrites every file here. Edit `generate.py`, not
 the GFF3s, and keep this README in sync.
-
-## Out of scope
-
-The fixture deliberately avoids isolated same-tier features that overlap *each
-other* but no higher tier (e.g. two overlapping DANTE domains far from any
-tier-1). Those trip a separate, rarer, pre-existing strand (`*` vs source)
-non-determinism in the `trim_to_nonoverlap` / `resolve_within_tier` interaction
-that is noted in the audit doc and not addressed here.

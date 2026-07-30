@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Fix (determinism): `trim_to_nonoverlap` always decomposes internal overlaps.**
+  It had two `return(lower)` short-circuits that left `lower`'s internal overlaps
+  intact, while the main path disjoined them — and which ran was batch-dependent
+  (`higher = reduce(level1)`). So same-tier features overlapping only each other
+  (e.g. two DANTE domains far from any tier-1) came out with min-index metadata /
+  kept strand in one batching but LCA / strand `*` in another (a tier-2/4/5 twin of
+  the te_sat pre-disjoin bug; run116 never hit it — tier-1 is dense — but the
+  `unified_multibatch` fixture does). It now always decomposes `lower` (disjoining
+  `lower` alone when nothing overlaps `higher`, so the fast path stays cheap),
+  matching what a single-batch `threads=1` run already produced — run116 output is
+  unchanged, the multi-batch fixture is now byte-identical.
 - **CI (determinism): multi-batch gate for `make_unified_annotation`.** The
   full-pipeline determinism gate runs only single-batch fixtures, so it cannot
   catch per-batch resolution bugs (like the te_sat pre-disjoin above). New test

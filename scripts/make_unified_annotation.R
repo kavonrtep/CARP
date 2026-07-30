@@ -456,41 +456,59 @@ make_batches <- function(seqlengths, batch_target_bp = 200e6) {
 
 # ── 4. Resolution helpers ─────────────────────────────────────────────────────
 
-# Trim each feature in `lower` to its non-overlapping portion against `higher`.
-# Metadata is propagated from the first overlapping source feature to each
-# resulting fragment (within-tier overlaps are resolved later by
-# resolve_within_tier via disjoin+LCA).
+# Clip each feature in `lower` to its portion not covered by `higher`, AND
+# decompose `lower`'s own internal overlaps into disjoint pieces at the same
+# time. Metadata (and strand) for each resulting piece come from its lowest-index
+# source feature in `lower` (an order-stable, deterministic choice); pieces from
+# a feature that actually overlapped `higher` get strand "*".
 #
-# Implementation: single vectorized disjoin() over the union of lower+higher
-# with a revmap, then mask-filter to keep pieces that come from a lower feature
-# but NOT from any higher feature. Avoids the per-feature lapply + keepSeqlevels
-# + setdiff that dominated the previous runtime.
+# DETERMINISM — why the two former `return(lower)` short-circuits are gone: they
+# returned `lower` with its INTERNAL overlaps INTACT (when `higher` was empty, or
+# when no lower feature overlapped higher), whereas the main path disjoined those
+# overlaps. Which path ran depended on the batch's feature mix — `higher` is
+# `reduce(level1)`, batch-composition-dependent, and batches are split by thread
+# count. So the SAME `lower` could come out disjoined-with-min-index-metadata in
+# one run but left internally-overlapping (and then disjoined by resolve_within_tier
+# with LCA + strand "*") in another — a strand/classification flip on same-tier
+# features that overlap only each other (surfaced by the unified_multibatch
+# fixture; see docs/archive/tier1_resolution_determinism_audit.md). We now ALWAYS
+# decompose `lower`, so `resolve_within_tier(trim_to_nonoverlap(...))` is
+# batch-invariant and `lower` is always returned internally non-overlapping
+# (matching what a single-batch threads=1 run already produced). When nothing
+# overlaps `higher` we disjoin `lower` ALONE (never against a large `higher`), so
+# the fast path stays cheap.
 #
-# min_len semantics (matching the legacy per-feature implementation): the
-# filter only applies to pieces that came from a feature that actually got
-# trimmed. Features that don't overlap any higher region pass through
-# unchanged — even if they are shorter than min_len.
+# min_len semantics (unchanged): the filter applies only to pieces whose source
+# feature actually overlapped higher; features not overlapping higher pass
+# through even if shorter than min_len.
 trim_to_nonoverlap <- function(lower, higher, min_len = 50L) {
-  if (length(lower) == 0 || length(higher) == 0) return(lower)
+  if (length(lower) == 0) return(lower)
 
-  higher_r <- reduce(higher, ignore.strand = TRUE)
+  n_lower     <- length(lower)
+  lower_plain <- granges(lower)
+  strand(lower_plain) <- "*"
 
+  higher_r <- if (length(higher) > 0) reduce(higher, ignore.strand = TRUE) else GRanges()
   # Which lower features actually overlap something in higher? Pieces derived
-  # from features NOT in this set are "intact" — skip the min_len filter.
-  lower_overlaps_higher <- overlapsAny(lower, higher_r, ignore.strand = TRUE)
+  # from features NOT in this set are "intact" — skip the min_len filter and keep
+  # their original strand.
+  lower_overlaps_higher <- if (length(higher_r) > 0)
+    overlapsAny(lower, higher_r, ignore.strand = TRUE) else logical(n_lower)
 
-  # Fast exit: no lower feature overlaps any higher region → return as-is.
-  if (!any(lower_overlaps_higher)) return(lower)
-
-  n_lower      <- length(lower)
-  lower_plain  <- granges(lower)
-  higher_plain <- granges(higher_r)
-  strand(lower_plain)  <- "*"
-  strand(higher_plain) <- "*"
-  combined <- c(lower_plain, higher_plain)
+  if (any(lower_overlaps_higher)) {
+    higher_plain <- granges(higher_r)
+    strand(higher_plain) <- "*"
+    combined <- c(lower_plain, higher_plain)   # trim against higher + decompose lower
+  } else {
+    # Nothing to trim: still decompose lower's internal overlaps so the result is
+    # identical whether or not this batch placed any higher-tier feature next to
+    # `lower`. Disjoining lower alone (not lower+higher) gives the same pieces —
+    # no piece is higher-covered — at a fraction of the cost.
+    combined <- lower_plain
+  }
 
   # Single disjoin with revmap: indices 1..n_lower are lower features,
-  # indices n_lower+1..end are higher regions.
+  # indices n_lower+1..end (if any) are higher regions.
   dis    <- disjoin(combined, with.revmap = TRUE, ignore.strand = TRUE)
   revmap <- dis$revmap  # IntegerList
 

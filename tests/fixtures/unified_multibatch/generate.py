@@ -55,14 +55,17 @@ for i in range(4):
     c = 103000 + i * 10000
     dante.append(gff("seq_te", "DANTE", "protein_domain", c, c + 400, "+",
                      f"Final_Classification={CRM};Name=RT"))
-# seq_ovl: one DANTE domain INSIDE tier-1 element TE_ovl_B (so it is trimmed away
-# by tier-1 in both batchings -> exercises the tier-2 vs placed-tier-1 trim
-# consistently). We deliberately do NOT place isolated overlapping-each-other
-# domains here: that would trip a separate, rarer, pre-existing strand
-# non-determinism (same-tier features overlapping each other but no higher tier)
-# that is out of scope for this fixture -- see README / the audit doc.
-dante.append(gff("seq_ovl", "DANTE", "protein_domain", 108000, 109000, "+",
+# seq_ovl: two DANTE domains that OVERLAP EACH OTHER but no higher tier, far from
+# the tier-1 elements. This is the tier-2 twin of the tier-1 bug: pre-fix their
+# strand flips between the single batch (which contains seq_te's te_sat, so
+# trim_to_nonoverlap disjoins ALL of t2 -> these keep their source strand) and
+# seq_ovl's own batch (no te_sat overlap -> trim short-circuited, leaving the
+# overlap for resolve_within_tier -> strand '*'). The trim_to_nonoverlap fix
+# (always decompose lower's internal overlaps) makes both batchings identical.
+dante.append(gff("seq_ovl", "DANTE", "protein_domain", 120000, 121000, "+",
                  f"Final_Classification={CRM};Name=RT"))
+dante.append(gff("seq_ovl", "DANTE", "protein_domain", 120500, 121500, "-",
+                 f"Final_Classification={CRM};Name=INT"))
 w("DANTE_filtered.gff3", dante)
 
 # ── TideCluster clustering (default): TRC_1 array on seq_te ────────────────────

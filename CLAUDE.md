@@ -273,7 +273,14 @@ bug this pipeline actually shipped and fixed**:
   tier first, then trim (t1); or fold the carve into the tier's own
   `resolve_within_tier` step (t2). Also canonicalise the GFF3 mcols column order
   before `export` — rtracklayer emits column-9 attributes in mcols order, which was
-  inherited from whichever batch combined first (thread-dependent). Full write-up:
+  inherited from whichever batch combined first (thread-dependent). **`trim_to_nonoverlap`
+  now ALWAYS decomposes `lower`'s internal overlaps deterministically** (it used to
+  short-circuit and return `lower` untouched when nothing overlapped `higher`, which
+  was itself batch-dependent — a tier-2/4/5 strand/classification flip); so calling it
+  on a self-overlapping tier is now batch-safe, but for tier-1 you still resolve first
+  because you want greedy-longest-first, not a disjoin. This whole class is guarded by
+  the multi-batch gate `tests/test_unified_multibatch_determinism.sh` (the single-batch
+  CI fixtures can't reach it). Full write-up:
   `docs/archive/tier1_resolution_determinism_audit.md`.
 - **Never let a Python `set` (or a dict built from one) drive output / FASTA
   order.** Python randomizes string hashing per process (`PYTHONHASHSEED`), so set
