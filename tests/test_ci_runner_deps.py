@@ -26,6 +26,13 @@ Scope (documented so a gap is a known gap, not a surprise):
 - Shell (.sh) tests are skipped: they locate their own toolchain and skip
   gracefully when it is absent (e.g. test_unified_multibatch_determinism.sh).
 
+What this CANNOT catch (only running the test does): a package that a test never
+`library()`s but that its ops lazy-load at RUNTIME — e.g. GenomicRanges pulling
+XVector via range()/revmap on CompressedIntegerList, when bioconda's
+bioconductor-genomicranges did not install XVector. That is a conda-recipe
+incompleteness, not a wiring mistake, and is invisible to static analysis; the
+job must list such deps explicitly and the test run is what verifies the env.
+
 To satisfy the guard: put the test in a job whose env installs its deps, or add
 the dep to that job's create-args. If a package is provided by an install command
 this parser doesn't recognise, extend it — don't weaken the check.
@@ -48,12 +55,13 @@ BASE_R = {
     "datasets", "grid", "splines", "tools", "tcltk", "parallel", "compiler",
     "MASS", "Matrix",
 }
-# Core Bioconductor infrastructure: importable whenever ANY bioconductor-* conda
-# package is installed (they are hard dependencies of essentially all of them).
-BIOC_CORE = {
-    "BiocGenerics", "S4Vectors", "IRanges", "GenomeInfoDb", "XVector", "Biobase",
-    "GenomicRanges",
-}
+# Core Bioconductor infrastructure that IS a hard dependency of essentially every
+# bioconductor-* conda package (verified: bioconductor-genomicranges pulls exactly
+# these). Deliberately does NOT include XVector / GenomeInfoDb / Biobase: those are
+# NOT reliably co-installed (bioconductor-genomicranges does not pull XVector on
+# bioconda), so a test that library()'s one of them needs its package listed
+# explicitly and the guard must flag its absence rather than assume it.
+BIOC_CORE = {"BiocGenerics", "S4Vectors", "IRanges"}
 # Python import name -> conda package name, where they differ.
 PY_IMPORT_TO_CONDA = {
     "yaml": "pyyaml", "Bio": "biopython", "sklearn": "scikit-learn",
