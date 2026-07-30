@@ -113,18 +113,28 @@ byte-identical across the two batchings (and that the fixture still triggers `te
 FAILS (9 differing lines) against the pre-fix commit. Wired into the `determinism`
 job (gated to `small`, once) where the bioconductor R stack is available.
 
-## Known residual (separate, minor)
+## Fix 5 — `trim_to_nonoverlap` always decomposes `lower`'s internal overlaps
 
-The multi-batch fixture surfaced a **narrower, pre-existing** batch-dependence not
-addressed by the four fixes above: a *same-tier* set of features that overlap **each
-other** but no higher tier (e.g. two overlapping DANTE domains far from any tier-1)
-gets strand `*` when `resolve_within_tier` disjoins them, but the source strand when
-`trim_to_nonoverlap` disjoined them first — and which happens depends on the
-batch-global `any(lower overlaps higher)` guard. run116 never triggered it (tier-1 is
-dense enough that every batch has overlaps, so `trim` always disjoins consistently);
-it needs an isolated overlapping cluster in a batch with no higher-tier overlap at
-all. It is a strand-only difference on tier-2/4/5 *resolved* fallback features. A
-complete fix means making `trim_to_nonoverlap` preserve `lower`'s internal overlaps
-(so `resolve_within_tier` is the sole, consistent within-tier resolver) — a rewrite of
-a hot function that needs its own full-size re-validation, so it is deliberately left
-out of this change. The fixture avoids this shape on purpose.
+The multi-batch fixture surfaced a **narrower** twin of the same root cause, on the
+tier-2/4/5 `resolve_within_tier(trim_to_nonoverlap(...))` path. `trim_to_nonoverlap`
+had two `return(lower)` short-circuits — `length(higher)==0`, and
+`!any(lower_overlaps_higher)` — that returned `lower` with its **internal overlaps
+intact**, whereas the main path disjoined them. Which path ran was batch-dependent
+(`higher = reduce(level1)` is batch-composition-dependent). So a set of same-tier
+features that overlap **each other** but no higher tier came out disjoined with
+min-index metadata (strand kept) when some *other* feature in the batch overlapped
+higher, but was left for `resolve_within_tier` to disjoin (LCA + strand `*`) when it
+did not — a strand/classification flip with batching. run116 never triggered it
+(tier-1 is dense, so every batch takes the disjoin path), which is why the
+byte-identical A/B above did not catch it; it needs an isolated overlapping cluster in
+a batch with no higher-tier overlap at all.
+
+Fix: `trim_to_nonoverlap` now **always** decomposes `lower`'s internal overlaps —
+when nothing overlaps `higher` it disjoins `lower` alone (same pieces, a fraction of
+the cost; the fast path is preserved), so `lower` is always returned internally
+non-overlapping and `resolve_within_tier` is a consistent no-op safety net. This is
+exactly what a single-batch (`threads=1`) run already produced, so run116 output is
+**unchanged** (verified: the fixed threads=1 run is byte-identical to the pre-fix
+threads=1 run) while the fixture's tier-2 overlapping-domain case becomes
+byte-identical across batchings. The `unified_multibatch` fixture now carries that
+shape and fails against the pre-Fix-5 code (commit 00a971c).

@@ -17,17 +17,24 @@
 suppressPackageStartupMessages(library(GenomicRanges))
 
 # ---- copied verbatim from make_unified_annotation.R -------------------------
+# Always decomposes `lower`'s internal overlaps (disjoin lower alone when nothing
+# overlaps higher) so the result is independent of the batch's feature mix. Keep
+# in sync with the source.
 trim_to_nonoverlap <- function(lower, higher, min_len = 50L) {
-  if (length(lower) == 0 || length(higher) == 0) return(lower)
-  higher_r <- reduce(higher, ignore.strand = TRUE)
-  lower_overlaps_higher <- overlapsAny(lower, higher_r, ignore.strand = TRUE)
-  if (!any(lower_overlaps_higher)) return(lower)
-  n_lower      <- length(lower)
-  lower_plain  <- granges(lower)
-  higher_plain <- granges(higher_r)
-  strand(lower_plain)  <- "*"
-  strand(higher_plain) <- "*"
-  combined <- c(lower_plain, higher_plain)
+  if (length(lower) == 0) return(lower)
+  n_lower     <- length(lower)
+  lower_plain <- granges(lower)
+  strand(lower_plain) <- "*"
+  higher_r <- if (length(higher) > 0) reduce(higher, ignore.strand = TRUE) else GRanges()
+  lower_overlaps_higher <- if (length(higher_r) > 0)
+    overlapsAny(lower, higher_r, ignore.strand = TRUE) else logical(n_lower)
+  if (any(lower_overlaps_higher)) {
+    higher_plain <- granges(higher_r)
+    strand(higher_plain) <- "*"
+    combined <- c(lower_plain, higher_plain)
+  } else {
+    combined <- lower_plain
+  }
   dis    <- disjoin(combined, with.revmap = TRUE, ignore.strand = TRUE)
   revmap <- dis$revmap
   has_higher <- any(revmap > n_lower)

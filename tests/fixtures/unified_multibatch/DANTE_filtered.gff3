@@ -3,4 +3,5 @@ seq_te	DANTE	protein_domain	103000	103400	.	+	.	Final_Classification=Class_I|LTR
 seq_te	DANTE	protein_domain	113000	113400	.	+	.	Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=RT
 seq_te	DANTE	protein_domain	123000	123400	.	+	.	Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=RT
 seq_te	DANTE	protein_domain	133000	133400	.	+	.	Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=RT
-seq_ovl	DANTE	protein_domain	108000	109000	.	+	.	Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=RT
+seq_ovl	DANTE	protein_domain	120000	121000	.	+	.	Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=RT
+seq_ovl	DANTE	protein_domain	120500	121500	.	-	.	Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=INT
