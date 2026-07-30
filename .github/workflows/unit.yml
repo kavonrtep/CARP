@@ -84,9 +84,6 @@ jobs:
       - name: R TRC monomer-size label (density panel bp lookup)
         run: Rscript tests/test_trc_monomer_label.R
 
-      - name: R TE-derived TRC summary table (make_unified_annotation)
-        run: Rscript tests/test_te_derived_trc_table.R
-
       - name: Pre-commit hook self-test
         run: |
           git config user.email ci@example.com
@@ -101,3 +98,38 @@ jobs:
           echo "OK: pre-commit hook correctly rejected uncovered file"
           git reset --quiet HEAD .ci_hook_sentinel.yaml
           rm -f .ci_hook_sentinel.yaml
+
+  # R unit tests that need the bioconductor stack (GenomicRanges) — too heavy for
+  # the lightweight `carp-unit` env above, but they are true unit tests (they copy
+  # the target functions verbatim and assert on them), so they run here in a
+  # dedicated GenomicRanges env rather than only being integration-covered by the
+  # full-pipeline fixture jobs. Keep this env minimal (GenomicRanges only): these
+  # tests deliberately avoid rtracklayer / the vocabulary so it stays fast.
+  unit_r_bioc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: carp-unit-bioc
+          create-args: >-
+            r-base
+            bioconductor-genomicranges
+          condarc: |
+            channels:
+              - conda-forge
+              - bioconda
+            channel_priority: flexible
+          cache-environment: true
+          cache-downloads: true
+
+      - name: R tier-1 greedy resolver + te_sat-trim ordering
+        run: Rscript tests/test_resolve_tier1_overlaps.R
+
+      - name: R TE-derived TRC summary table (make_unified_annotation)
+        run: Rscript tests/test_te_derived_trc_table.R
