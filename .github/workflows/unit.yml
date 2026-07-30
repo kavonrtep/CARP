@@ -108,6 +108,10 @@ jobs:
   # dedicated GenomicRanges env rather than only being integration-covered by the
   # full-pipeline fixture jobs. Keep this env minimal (GenomicRanges only): these
   # tests deliberately avoid rtracklayer / the vocabulary so it stays fast.
+  # NB: bioconductor-genomicranges on bioconda does NOT pull bioconductor-xvector,
+  # yet GenomicRanges lazy-loads XVector at runtime (e.g. range()/revmap ops on
+  # CompressedIntegerList), so it is listed explicitly — a missing runtime dep like
+  # this is only catchable by running the test, not by the static runner-deps guard.
   unit_r_bioc:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -123,6 +127,7 @@ jobs:
           create-args: >-
             r-base
             bioconductor-genomicranges
+            bioconductor-xvector
           condarc: |
             channels:
               - conda-forge
