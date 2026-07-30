@@ -1,0 +1,7 @@
+##gff-version 3
+seq_te	DANTE_LTR	transposable_element	100001	110000	.	+	.	ID=TE_te_0;Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Rank=DL
+seq_te	DANTE_LTR	transposable_element	110001	120000	.	+	.	ID=TE_te_1;Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Rank=DL
+seq_te	DANTE_LTR	transposable_element	120001	130000	.	+	.	ID=TE_te_2;Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Rank=DL
+seq_te	DANTE_LTR	transposable_element	130001	140000	.	+	.	ID=TE_te_3;Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Rank=DL
+seq_ovl	DANTE_LTR	transposable_element	100000	107030	.	+	.	ID=TE_ovl_A;Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Rank=DL
+seq_ovl	DANTE_LTR	transposable_element	105557	115187	.	+	.	ID=TE_ovl_B;Final_Classification=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Name=Class_I|LTR|Ty3/gypsy|chromovirus|CRM;Rank=DL

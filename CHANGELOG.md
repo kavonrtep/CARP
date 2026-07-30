@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **CI (determinism): multi-batch gate for `make_unified_annotation`.** The
+  full-pipeline determinism gate runs only single-batch fixtures, so it cannot
+  catch per-batch resolution bugs (like the te_sat pre-disjoin above). New test
+  `tests/test_unified_multibatch_determinism.sh` drives make_unified directly on
+  `tests/fixtures/unified_multibatch/` — a fixture whose `.fai` declares 3× 2 Mb
+  sequences (make_unified reads only lengths) so `--batch_size` forces a 3-batch
+  split at `--threads 3` while `--threads 1` stays single-batch — and asserts the
+  unified GFF3 is byte-identical across the two. Wired into the `determinism` job;
+  FAILS against the pre-fix code, PASSES on the fix.
 - **Fix (determinism): TE-derived TRC decision is now global, not per-batch.**
   `identify_te_derived_trcs` ran once per processing batch, and batch composition
   is thread-count-dependent (threads=1 → one batch), so whether a multi-sequence

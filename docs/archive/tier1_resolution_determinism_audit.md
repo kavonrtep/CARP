@@ -96,11 +96,35 @@ resolve — a batch that merely *contains* a te_sat array must not change a far-
 sequence's tier-1 result (fixed = 2 greedy pieces; the old trim-before-resolve
 over-fragments to 3).
 
-## Still worth doing (separate, optional)
+## CI gate (done)
 
-The determinism CI gate (`.github/workflows/pipeline.yml`) runs the **small** and
-**medium** fixtures, both single-batch regardless of thread count, so this class of
-bug could never manifest there. Adding a small **multi-sequence** fixture large enough
-to split into >1 batch (or a threads-varying full-size check) would catch a regression
-of any of the four fixes above automatically. This bug was found only by a manual
-full-size A/B.
+The full-pipeline determinism gate (`.github/workflows/pipeline.yml`) runs the
+**small** and **medium** fixtures, both single-batch regardless of thread count, so
+this class of bug could never manifest there. It is now backed by a dedicated
+**multi-batch gate**: `tests/test_unified_multibatch_determinism.sh` drives
+`make_unified_annotation.R` directly on `tests/fixtures/unified_multibatch/`, whose
+`.fai` declares 3× 2 Mb sequences (make_unified reads only lengths, not the FASTA) so
+`--batch_size 1000000 --threads 3` forces a 3-batch split while `--threads 1` stays
+single-batch. The fixture puts a TE-derived-TRC array (the `te_sat` trigger) on one
+sequence and overlapping tier-1 elements on another, in a different batch — the exact
+shape that differed on the real genome. The test asserts the unified GFF3 is
+byte-identical across the two batchings (and that the fixture still triggers `te_sat`
++ a real split, so it can't silently stop guarding). It PASSES on the fixed code and
+FAILS (9 differing lines) against the pre-fix commit. Wired into the `determinism`
+job (gated to `small`, once) where the bioconductor R stack is available.
+
+## Known residual (separate, minor)
+
+The multi-batch fixture surfaced a **narrower, pre-existing** batch-dependence not
+addressed by the four fixes above: a *same-tier* set of features that overlap **each
+other** but no higher tier (e.g. two overlapping DANTE domains far from any tier-1)
+gets strand `*` when `resolve_within_tier` disjoins them, but the source strand when
+`trim_to_nonoverlap` disjoined them first — and which happens depends on the
+batch-global `any(lower overlaps higher)` guard. run116 never triggered it (tier-1 is
+dense enough that every batch has overlaps, so `trim` always disjoins consistently);
+it needs an isolated overlapping cluster in a batch with no higher-tier overlap at
+all. It is a strand-only difference on tier-2/4/5 *resolved* fallback features. A
+complete fix means making `trim_to_nonoverlap` preserve `lower`'s internal overlaps
+(so `resolve_within_tier` is the sole, consistent within-tier resolver) — a rewrite of
+a hot function that needs its own full-size re-validation, so it is deliberately left
+out of this change. The fixture avoids this shape on purpose.
