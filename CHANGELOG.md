@@ -11,12 +11,28 @@
   cover ≥ `TE_ORIGIN_LCA_MIN_SHARE` = 10 % of the covered bp), so a single inserted
   element of an unrelated family (e.g. 1 Ty1_copia/SIRE among 73 Ty3_gypsy/CRM)
   no longer collapses the LCA and drops a genuine TE-derived TRC.
-- **Fix (determinism): `resolve_tier1_overlaps` order-sensitivity.** The greedy
-  longest-first tier-1 (DANTE_LTR/TIR/LINE) overlap trim broke width ties by
-  incoming feature order, which is batch/thread-dependent — so the trimmed
-  structural annotation on multi-sequence genomes could differ run-to-run. Ties
-  now break deterministically on `(seqname, start, end, strand)`. (Pre-existing;
-  surfaced by the full-genome determinism check.)
+- **Fix (determinism + quality): tier-1/2 overlap resolution corrupted by the
+  te_sat pre-pass.** The TE-derived-satellite pre-pass trimmed `t1`/`t2` against the
+  satellite regions with `trim_to_nonoverlap` **before** those tiers' own overlap
+  resolution ran. `trim_to_nonoverlap` does `disjoin(c(lower, higher))`, which
+  silently decomposes `lower`'s *internal* overlaps into disjoint pieces — so the
+  subsequent greedy `resolve_tier1_overlaps` saw an already-non-overlapping `t1` and
+  did nothing. Because `te_sat` is non-empty only in a batch that contains a
+  TE-derived-TRC array (and batching is thread-count-dependent), overlapping
+  structural TEs were resolved greedy-longest-first in some runs and naively
+  disjoined (over-fragmented, arbitrary metadata) in others — 816/2.82 M tier-1
+  features differed run116 threads 1 vs N, and the result was also lower quality
+  when it triggered. Fixes: (a) run `resolve_tier1_overlaps` **before** the te_sat
+  trim so `t1` is non-overlapping when carved; (b) fold the te_sat carve of `t2`
+  into Step 2 (trim vs `reduce(level1)` = te_sat ∪ tier-1, disjoined once by
+  `resolve_within_tier`) instead of a separate pre-pass trim — identical to today
+  when there are no TE-derived TRCs; (c) extend the greedy's deterministic tie-break
+  to `(seqname,start,end,strand,classification,source_tool)`; (d) canonicalise the
+  GFF3 mcols column order before export, so column-9 attribute order (e.g. `ID`
+  position) is byte-identical across thread counts, not just data-identical. Full
+  A/B on run116: 816 → 0 differing features, byte-identical unified GFF3. (Supersedes
+  the earlier `(seqname,start,end,strand)`-only tie-break; see
+  `docs/archive/tier1_resolution_determinism_audit.md`.)
 - **TE-derived TRC detection: domain-rhythm gate.** A Tier-3 satellite is tagged
   `TE_origin` (TE-derived, satellite wins the region) only if — in addition to the
   existing coverage test — the TE's DANTE domains recur **through the tandem**:

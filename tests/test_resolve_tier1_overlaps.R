@@ -54,11 +54,13 @@ trim_to_nonoverlap <- function(lower, higher, min_len = 50L) {
 
 # Deterministic longest-first order with coordinate tie-break (matches the
 # production resolver). Ordering equal-width features by (seqname,start,end,
-# strand) makes the greedy trim independent of input order -> batch/thread
-# independent.
+# strand,classification,source_tool) makes the greedy trim independent of input
+# order -> batch/thread independent. The last two keys break the residual tie
+# between genuinely identical intervals from different tools/classes.
 det_order <- function(gr)
   order(-width(gr), as.character(seqnames(gr)), start(gr), end(gr),
-        as.character(strand(gr)))
+        as.character(strand(gr)), as.character(gr$classification),
+        as.character(gr$source_tool))
 
 # OLD resolver shape (pre-optimization: grows `kept` incrementally), same
 # deterministic ordering.
@@ -164,6 +166,60 @@ main <- function() {
     }
   }
   cat(sprintf("  resolve_tier1_overlaps: order-invariant (%d tie permutation trials)\n", n_inv))
+
+  # ── Regression: te_sat trim must run AFTER resolve, never before ──────────
+  # process_batch's TE-derived-satellite pre-pass trims t1 against te_sat_r with
+  # trim_to_nonoverlap, which disjoins c(lower, higher). If t1 still carries its
+  # INTERNAL overlaps at that point, they are silently decomposed into disjoint
+  # pieces (both overlappers kept, split at the overlap) — defeating the greedy
+  # longest-first resolution. Because te_sat is non-empty only in batches that
+  # contain a TE-derived-TRC array, whether a given sequence's t1 got pre-disjoined
+  # depended on the thread-count batching -> non-deterministic on large genomes
+  # (measured: 816 tier-1 features flipped, run116 threads 1 vs N). The fix runs
+  # resolve_tier1_overlaps BEFORE the te_sat trim. This test locks that ordering.
+  mk1 <- function(seq, s, e, strand, cls = "Class_I/LTR/Ty3_gypsy/chromovirus/CRM",
+                  tool = "DANTE_LTR") {
+    g <- GRanges(seq, IRanges(s, e), strand = strand)
+    mcols(g) <- DataFrame(classification = cls, Name = cls,
+                          source_tier = 1L, source_tool = tool)
+    g
+  }
+  keep_c1 <- function(g) sig(g[as.character(seqnames(g)) == "c1"])
+  # On c1: two overlapping tier-1 elements (the CFRUME023 shape) — a 7031 bp and a
+  # wider 9631 bp CRM element overlapping in 5557-7405. These are FAR from any
+  # te_sat and never overlap one.
+  pair <- suppressWarnings(c(mk1("c1", 375, 7405, "+"), mk1("c1", 5557, 15187, "+")))
+  # On c2: a structural TE that DOES sit under a te_sat array. Its presence makes
+  # trim_to_nonoverlap's global `any(lower_overlaps_higher)` TRUE, so the disjoin
+  # path runs over the WHOLE batch — decomposing c1's untouched overlapping pair
+  # if the trim runs before the greedy. This is exactly how a te_sat elsewhere in
+  # a single (thread=1) batch corrupted far-away sequences' tier-1 resolution.
+  trigger  <- mk1("c2", 50100, 50500, "+")
+  t1       <- suppressWarnings(c(pair, trigger))
+  te_sat_r <- reduce(granges(mk1("c2", 50000, 51000, "+")), ignore.strand = TRUE)
+
+  # BUGGY order (trim then resolve): the global disjoin pre-splits c1's pair -> 3.
+  buggy <- resolve_new(trim_to_nonoverlap(t1, te_sat_r, min_len), min_len)
+  # FIXED order (resolve then trim): greedy longest-first on c1 -> 2 pieces.
+  fixed <- trim_to_nonoverlap(resolve_new(t1, min_len), te_sat_r, min_len)
+  # Baseline: no te_sat present at all (a batch with no TE-derived array).
+  none  <- resolve_new(pair, min_len)
+
+  if (length(fixed[as.character(seqnames(fixed)) == "c1"]) != 2)
+    stop(sprintf("regression: fixed order must yield 2 greedy c1 pieces, got %d",
+                 length(fixed[as.character(seqnames(fixed)) == "c1"])))
+  # The whole point of the fix: c1's tier-1 result is INVARIANT to whether the
+  # batch also contains a te_sat-covered TE elsewhere (i.e. to batching).
+  if (!identical(keep_c1(fixed), keep_c1(none)))
+    stop("regression: c1 tier-1 result changed when a te_sat exists elsewhere in the batch")
+  # And it demonstrably differs from the buggy pre-disjoin (guards against a
+  # future refactor silently reintroducing the trim-before-resolve ordering).
+  if (identical(keep_c1(buggy), keep_c1(fixed)))
+    stop("regression: buggy pre-disjoin should over-fragment c1 vs the fixed order")
+  cat(sprintf("  te_sat-trim-after-resolve: fixed c1=%d pieces (batch-invariant), buggy c1=%d\n",
+              length(fixed[as.character(seqnames(fixed)) == "c1"]),
+              length(buggy[as.character(seqnames(buggy)) == "c1"])))
+
   cat("test_resolve_tier1_overlaps: PASSED\n")
 }
 

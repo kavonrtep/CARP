@@ -886,10 +886,13 @@ resolve_tier1_overlaps <- function(t1, min_len) {
   # incoming position — that position is batch-composition-dependent (batches are
   # split by thread count), which made the trimmed output non-deterministic
   # run-to-run on multi-sequence genomes. Ordering ties by (seqname,start,end,
-  # strand) makes the result independent of input order and thus of batching.
+  # strand) — then classification,source_tool for genuinely identical intervals
+  # (e.g. a DANTE_LTR complete + a DANTE_TIR call at the same span) — makes the
+  # result independent of input order and thus of batching.
   inv  <- t1[involved]
   ord  <- order(-width(inv), as.character(seqnames(inv)), start(inv), end(inv),
-                as.character(strand(inv)))
+                as.character(strand(inv)), as.character(inv$classification),
+                as.character(inv$source_tool))
   t1s  <- inv[ord]
   pieces <- vector("list", length(t1s))
   pieces[[1]] <- t1s[1]
@@ -951,6 +954,28 @@ process_batch <- function(seqs, data, min_len, trc_origin_def = character(0), tr
   level1 <- GRanges()
   level2 <- GRanges()
 
+  # ── Tier-1 structural-overlap resolution (greedy longest-first) ──────────
+  # MUST run BEFORE any trim_to_nonoverlap(t1, ...) call below. trim_to_nonoverlap
+  # disjoins `c(lower, higher)`, so if `lower` (t1) still carries INTERNAL overlaps
+  # it is silently decomposed into disjoint pieces — both overlapping elements kept
+  # and split at the overlap, with the contested span assigned by input index
+  # (min(revmap)) — which defeats the greedy AND is batch-composition-dependent.
+  # The te_sat pre-pass below trims t1 against te_sat_r, and te_sat is non-empty
+  # only in batches that happen to contain a TE-derived-TRC array; whether a given
+  # sequence's t1 got pre-disjoined therefore depended on the thread-count batching
+  # (single batch always has te_sat; a per-thread batch may not) — the source of
+  # the residual tier-1 non-determinism on large multi-sequence genomes. Resolving
+  # here first makes t1 internally non-overlapping, so the te_sat trim only carves
+  # (never disjoins) and the greedy result is batch-invariant. No-op when nothing
+  # overlaps (the common case). Clean tandem LTR-RT arrays were already collapsed
+  # upstream (resolve_ltr_tandems.py); this handles residual cross-lineage /
+  # cross-tool / partial overlaps.
+  n_t1_before <- length(t1)
+  t1 <- resolve_tier1_overlaps(t1, min_len)
+  if (length(t1) != n_t1_before)
+    log_msg(sprintf("  %s  tier1 overlap resolve: %d → %d features",
+                    batch_label, n_t1_before, length(t1)))
+
   # ── Pre-pass: TR-from-structural-TE (Item 3) ─────────────────────────────
   # Flag length-qualified Tier-3 clustering TRCs that tandemly stack ≥2 same-
   # family structural TEs. Those satellites WIN: tag them TE_origin and trim the
@@ -994,26 +1019,28 @@ process_batch <- function(seqs, data, min_len, trc_origin_def = character(0), tr
     # Dropping members here is essential: otherwise a member whose container is
     # trimmed away orphans (its parent is gone), producing a malformed feature.
     te_sat_r <- reduce(granges(te_sat), ignore.strand = TRUE)
+    # t1 is already internally non-overlapping (resolved above), so this trim only
+    # carves te_sat out — it does NOT disjoin t1's structure. t2 is deliberately
+    # NOT trimmed here: trim_to_nonoverlap would disjoin t2's INTERNAL overlaps,
+    # and te_sat is present only in batches that contain a TE-derived array, so a
+    # pre-disjoin here would make the Step-2 resolve_within_tier a no-op in some
+    # batches but not others (batch-dependent strand/geometry — the tier-2 twin of
+    # the tier-1 bug). Instead te_sat is folded into Step 2's `higher` set (it is
+    # in level1 by then), so t2 is trimmed-and-resolved exactly once, batch-invariantly.
     t1 <- trim_to_nonoverlap(t1, te_sat_r, min_len)
-    t2 <- trim_to_nonoverlap(t2, te_sat_r, min_len)
     if (length(t1_members) > 0)
       t1_members <- t1_members[!overlapsAny(t1_members, te_sat_r, ignore.strand = TRUE)]
     t1_ltr <- if (length(t1) > 0) t1[t1$source_tool == "DANTE_LTR"] else GRanges()
-    log_msg(sprintf("  %s  pre-pass: %d TE-derived TRC(s) → te_sat=%d feats; t1→%d t2→%d t1_members→%d",
+    log_msg(sprintf("  %s  pre-pass: %d TE-derived TRC(s) → te_sat=%d feats; t1→%d t1_members→%d",
                     batch_label, length(trc_origin_def) + length(trc_origin_sho),
-                    length(te_sat), length(t1), length(t2), length(t1_members)))
+                    length(te_sat), length(t1), length(t1_members)))
   }
 
-  # Generic tier-1 structural-overlap fallback (always): no two tier-1 elements
-  # overlap in the output. Clean tandem LTR-RT arrays were already collapsed
-  # upstream (resolve_ltr_tandems.py); this handles any residual cross-lineage /
-  # cross-tool / partial overlap. No-op when nothing overlaps (the common case).
-  n_t1_before <- length(t1)
-  t1 <- resolve_tier1_overlaps(t1, min_len)
+  # t1 is now fully resolved (greedy longest-first, above) and te_sat-carved
+  # (pre-pass, above); both preserve internal non-overlap, so no second
+  # resolve pass is needed. Refresh the DANTE_LTR view used for within-LTR
+  # nesting in Steps 3 and 8.
   t1_ltr <- if (length(t1) > 0) t1[t1$source_tool == "DANTE_LTR"] else GRanges()
-  if (length(t1) != n_t1_before)
-    log_msg(sprintf("  %s  tier1 overlap resolve: %d → %d features",
-                    batch_label, n_t1_before, length(t1)))
 
   # ── Step 1: Tier 1 — structure-based elements ────────────────────────────
   # TE-derived satellites win their region: seed Level 1 with them, then add the
@@ -1031,10 +1058,16 @@ process_batch <- function(seqs, data, min_len, trc_origin_def = character(0), tr
                   batch_label, length(level1), length(te_sat), length(t1),
                   length(t1_members)))
 
-  # ── Step 2: Tier 2 — DANTE domains, trim against Tier 1 ──────────────────
-  t2_trimmed <- timed(sprintf("  %s  step2: trim Tier2 (%d) vs Tier1 (%d)",
-                               batch_label, length(t2), length(t1)),
-                       resolve_within_tier(trim_to_nonoverlap(t2, t1, min_len)))
+  # ── Step 2: Tier 2 — DANTE domains, trim against placed Tier 1 (+ te_sat) ─
+  # Trim against reduce(level1) — i.e. te_sat ∪ Tier-1 — NOT bare t1. Folding the
+  # te_sat carve in here (rather than a separate pre-pass trim) means t2 is
+  # disjoined exactly once, by resolve_within_tier, so its geometry/strand is
+  # batch-invariant. When there are no TE-derived TRCs, level1 == t1 here, so this
+  # is identical to the previous `trim_to_nonoverlap(t2, t1)`.
+  higher_2 <- if (length(level1) > 0) suppressWarnings(reduce(level1, ignore.strand = TRUE)) else GRanges()
+  t2_trimmed <- timed(sprintf("  %s  step2: trim Tier2 (%d) vs placed (%d regions)",
+                               batch_label, length(t2), length(higher_2)),
+                       resolve_within_tier(trim_to_nonoverlap(t2, higher_2, min_len)))
   if (length(t2_trimmed) > 0) level1 <- suppressWarnings(c(level1, t2_trimmed))
   log_msg(sprintf("  %s  step2 done: +%d → level1=%d",
                   batch_label, length(t2_trimmed), length(level1)))
@@ -1298,6 +1331,31 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
   seqlengths(all_feats) <- seqlengths_vec
   all_feats <- timed(sprintf("final sort (L1+L2 = %d features)", length(all_feats)),
                      sort(sortSeqlevels(all_feats)))
+
+  # Canonicalise the mcols columns before export so the GFF3 is BYTE-identical
+  # across thread counts, not just data-identical. Two batch-dependent effects:
+  #   1. Column ORDER — rtracklayer emits column-9 attributes in mcols order, which
+  #      was inherited from whichever batch combined first (e.g. `ID` landed first
+  #      under multi-batch but after source_tool under a single batch).
+  #   2. Column SET — a c()-combine across batches can carry an entirely-NA column
+  #      that a single batch does not (all its features lacked that field). An
+  #      all-NA column emits no key=value, but if it sorts AFTER the last real
+  #      attribute rtracklayer still writes a trailing ';' for it (verified), so the
+  #      raw line differs by a stray ';' (seen only on LTR_RT_TR containers, where
+  #      copy_number is last). Dropping all-NA columns removes that ambiguity and
+  #      is loss-free — those columns contribute nothing to the output.
+  {
+    keep <- vapply(mcols(all_feats), function(v) !all(is.na(v)), logical(1))
+    keep <- keep | names(keep) %in% c("type", "source")  # never drop GFF3 reserved cols
+    mcols(all_feats) <- mcols(all_feats)[, keep, drop = FALSE]
+    cur  <- colnames(mcols(all_feats))
+    pref <- c("source", "type", "score", "phase", "ID", "Parent", "Name",
+              "classification", "source_tier", "source_tool", "element_type",
+              "in_structure", "member_of", "TE_origin", "TE_origin_structure",
+              "structure", "copy_number")
+    ord  <- c(intersect(pref, cur), sort(setdiff(cur, pref)))
+    mcols(all_feats) <- mcols(all_feats)[, ord, drop = FALSE]
+  }
 
   timed(sprintf("export GFF3 to %s", output_path),
         export(all_feats, output_path, format = "gff3"))

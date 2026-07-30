@@ -248,14 +248,33 @@ bug this pipeline actually shipped and fixed**:
   splits the genome into batches whose composition depends on the thread count
   (threads=1 → a single batch), so any per-batch computation whose result depends
   on *which* features are grouped together, or on their arrival order, is
-  thread-dependent. Two instances fixed: `resolve_tier1_overlaps`'s greedy
-  longest-first trim broke width ties by input order → now ties break on
-  `(seqname,start,end,strand)` (test: `tests/test_resolve_tier1_overlaps.R`
-  asserts order-invariance); and the TE-derived TRC decision
-  (`identify_te_derived_trcs`) ran per batch over only a TRC's arrays in that batch
-  → now runs once globally over all of a TRC's arrays. When you add a per-batch
-  step, ask "would this differ if these sequences were split into different
-  batches?" — if yes, hoist it to global or make it order-invariant.
+  thread-dependent. Instances fixed: `resolve_tier1_overlaps`'s greedy longest-first
+  trim broke width ties by input order → ties now break on
+  `(seqname,start,end,strand,classification,source_tool)` (test:
+  `tests/test_resolve_tier1_overlaps.R` asserts order-invariance); and the
+  TE-derived TRC decision (`identify_te_derived_trcs`) ran per batch over only a
+  TRC's arrays in that batch → now runs once globally over all of a TRC's arrays.
+  When you add a per-batch step, ask "would this differ if these sequences were
+  split into different batches?" — if yes, hoist it to global or make it
+  order-invariant.
+- **`trim_to_nonoverlap(lower, higher)` DISJOINS `lower`'s internal overlaps —
+  never call it on a self-overlapping tier before that tier is resolved.** It
+  computes `disjoin(c(lower, higher))`, so any internal overlap in `lower` is
+  silently decomposed into disjoint pieces (both kept, split at the overlap,
+  contested span assigned by input index). This is fine at the call sites where
+  `lower` is already non-overlapping or is immediately re-resolved by
+  `resolve_within_tier`, but it silently defeated `resolve_tier1_overlaps`: the
+  te_sat pre-pass trimmed `t1` (still self-overlapping) against the satellite
+  regions *before* the greedy ran, so the greedy then saw a non-overlapping `t1`
+  and no-op'd. And because `te_sat` is non-empty only in a batch containing a
+  TE-derived-TRC array, whether a sequence's `t1` got pre-disjoined was
+  batch(thread)-dependent — 816/2.82 M tier-1 features differed run116 threads 1 vs
+  N, *and* the annotation was over-fragmented when it triggered. Fix: resolve the
+  tier first, then trim (t1); or fold the carve into the tier's own
+  `resolve_within_tier` step (t2). Also canonicalise the GFF3 mcols column order
+  before `export` — rtracklayer emits column-9 attributes in mcols order, which was
+  inherited from whichever batch combined first (thread-dependent). Full write-up:
+  `docs/archive/tier1_resolution_determinism_audit.md`.
 - **Never let a Python `set` (or a dict built from one) drive output / FASTA
   order.** Python randomizes string hashing per process (`PYTHONHASHSEED`), so set
   order varies between identical runs. Use sorted or insertion order, and add a
