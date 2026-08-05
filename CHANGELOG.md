@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: the DANTE_TIR library was empty on every run.**
+  `filter_dante_tir_by_multiplicity.py` joined the GFF3 `ID`
+  (`Class_II_Subclass_1_TIR_hAT_2`) against the FASTA name (`hAT_2`) verbatim.
+  DANTE_TIR derives the FASTA name by stripping that classification prefix, so the
+  comparison was unsatisfiable and the filter kept **0 records on every input**
+  (0/7233 on a 90 Gb genome; 0/N on all 18 runs checked locally). Because
+  `dante_tir_min_multiplicity` defaults to `3`, the filter runs by default, so
+  `all_representative_elements_combined.fasta` was **0 bytes in every run** since the
+  script was introduced (1.0.0 and all 0.9.0rc*). The rule then `touch`ed an empty
+  library and exited 0, making it silent. Downstream this also emptied
+  `class_ii_library.fasta`, left **zero `Class_II` sequences** in the RepeatMasker
+  library, and degraded `filter_ltr_rt_library` to a plain `cp` — so the Class_II
+  screen that removes DNA-transposon-like sequence from the LTR library had never
+  actually run. The join now keys on `Name=` (DANTE_TIR ≥ 0.3.1, which publishes the
+  FASTA name explicitly) and falls back to stripping the prefix off `ID=` for older
+  outputs.
+- **Fail loudly on a total join failure.** A join matching nothing is a bug, not an
+  empty result; the script now reports a join census (rows parsed / joined /
+  unjoined / missing `Multiplicity`) and exits non-zero when no record joins, so the
+  calling rule cannot silently emit an empty library.
+- **`Multiplicity` absent is no longer silently treated as 1.** DANTE_TIR < 0.3.1
+  clustered before `round4()`, so round-4 elements carried no `Multiplicity` at all
+  (25% of elements on a real run) and were dropped at any threshold ≥ 2 for a reason
+  unrelated to their copy number. Missing is now a distinct state: still dropped by
+  default, but counted, warned about, and recoverable with
+  `--keep-missing-multiplicity`.
+- **DANTE_TIR 0.3.0 → 0.3.1** (pin-only; same dependency set). Upstream release
+  driven by this bug: `DANTE_TIR_final.gff3` is now byte-deterministic at fixed
+  input+version (the fragment order handed to CAP3 no longer inherits mmseqs'
+  thread-dependent output order); every element carries `Multiplicity`
+  (`cluster_tir_sequences()` re-runs on the final set after `round4()`); and each
+  `sequence_feature` row carries `Name=`, an explicit GFF3↔FASTA join key. Two
+  deliberate result changes: `Multiplicity` values rise because they are now computed
+  over the complete element set (maize: elements passing a `>= 3` floor 806 → 978),
+  and the element set shifts slightly with the fixed fragment order (maize: −4 curated
+  loci of 1927, −0.2 points) — the cost of reproducibility.
+- **New test** `tests/test_filter_dante_tir_multiplicity.py` (wired into `unit.yml`):
+  covers the join on both the raw and canonicalised header forms, the `Name=` path,
+  numeric threshold comparison, missing-`Multiplicity` handling and the fail-loud
+  behaviour. The `output_medium` fixture cannot catch this regression — all its
+  records are `Multiplicity=1`, so the broken and correct results are both 0 kept.
+
 ## 1.3.0
 
 - **TE-derived TRC detection: domain-rhythm gate.** A Tier-3 satellite is tagged

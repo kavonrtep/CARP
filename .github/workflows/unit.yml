@@ -45,6 +45,9 @@ jobs:
       - name: Containment library-reduction logic
         run: python tests/test_containment_reduce.py
 
+      - name: DANTE_TIR multiplicity filter GFF3<->FASTA join
+        run: python tests/test_filter_dante_tir_multiplicity.py
+
       - name: All-vs-all alignment grouping (OOM-guard) logic
         run: python tests/test_aln_grouping.py
 
