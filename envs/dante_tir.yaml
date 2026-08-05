@@ -12,4 +12,21 @@ dependencies:
   # bioconductor-genomeinfodbdata (both bioconda) and numpy (conda-forge) — all on
   # channels already listed, so only the pin changes. python stays unpinned
   # (recipe: python>=3.6.0), so the solve floats to the newest python + numpy.
-  - dante_tir=0.3.0
+  #
+  # 0.3.1 is a determinism + join-key release with the same dependency set as
+  # 0.3.0 (pin-only change). Three things the pipeline consumes:
+  #   * DANTE_TIR_final.gff3 is now byte-deterministic at fixed input+version
+  #     (group_sequences_by_clusters imposed a total order, absorbing mmseqs'
+  #     thread-dependent output order that CAP3 was inheriting) — feeds the
+  #     repo determinism gate.
+  #   * Every element now carries Multiplicity: cluster_tir_sequences() re-runs
+  #     on the final set after round4(), which previously left round-4 elements
+  #     with no Multiplicity at all (25% of elements on a real run). Values also
+  #     shift, since they are now computed over the complete element set.
+  #   * Each sequence_feature row carries Name= holding exactly the FASTA name,
+  #     the explicit GFF3<->FASTA join key that
+  #     scripts/filter_dante_tir_by_multiplicity.py keys on.
+  # Deliberate result change: the fragment-order fix shifts the element set
+  # slightly (maize: -4 curated loci of 1927, -0.2 points) — the cost of
+  # reproducibility.
+  - dante_tir=0.3.1
