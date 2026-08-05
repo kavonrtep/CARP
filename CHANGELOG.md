@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 1.4.0
+
+> **Upgrade note — annotations change.** Every release from 1.0.0 through 1.3.0
+> produced a RepeatMasker library containing **zero `Class_II` sequences**, so DNA
+> transposons were annotated only where DANTE_TIR found a complete structural
+> element and never by similarity. Re-running is advisable if DNA-transposon
+> content matters for your assembly. Measured end-to-end on an 80 Mbp genome:
+> unified `Class_II/Subclass_1/TIR/EnSpm_CACTA` **481,962 → 880,445 bp (+83%)**,
+> `Class_II` total **+25%**, whole annotation 66.16% → 66.65% of the genome; every
+> other `Class_II` subfamily moved exactly 0 bp and the largest non-target shift was
+> `Tandem_repeats` −6.8 kb. On a 2.82 Gbp genome the library gained 23 TIR consensi
+> (114 kb) and the newly-functional `Class_II` screen removed 26 LTR-RT consensi.
 
 - **Fix: the DANTE_TIR library was empty on every run.**
   `filter_dante_tir_by_multiplicity.py` joined the GFF3 `ID`
@@ -43,6 +54,14 @@
   numeric threshold comparison, missing-`Multiplicity` handling and the fail-loud
   behaviour. The `output_medium` fixture cannot catch this regression — all its
   records are `Multiplicity=1`, so the broken and correct results are both 0 kept.
+- **The `filter_ltr_rt_library` Class_II screen runs again.** Because
+  `class_ii_library.fasta` was empty, the rule took its `[ ! -s ]` branch and degraded to
+  a plain `cp` — the screen that removes DNA-transposon-like sequence from the LTR
+  library (a documented "Critical step") had never actually executed. Validated on a
+  2.82 Gbp genome: 58 blastn hits, **26 LTR-RT consensi removed** across nine lineages
+  (Tekay, Tork, Ale, Reina, SIRE, CRM, Retand, Ikeros, Alesia), e.g. a `Ty1_copia/SIRE`
+  consensus matching `PIF_Harbinger` at 92.8% identity over 332 bp (e-140). Small
+  genomes may see no hits (the 80 Mbp test genome returns zero).
 
 ## 1.3.0
 
