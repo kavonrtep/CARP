@@ -21,6 +21,42 @@ elapsed <- function() sprintf("[+%6.1fs]", proc.time()[3] - .script_start)
 
 log_msg <- function(...) message(elapsed(), " ", ...)
 
+# ── memory instrumentation ───────────────────────────────────────────────────
+# Added after run-000156 (94 Gbp) died in this rule with 15 of 55 mclapply workers
+# killed and no memory figures to size a fix from: the rule's benchmark file is
+# only written on success, so a failing run leaves nothing behind. These read
+# /proc directly so every run records what it actually used.
+#
+#   VmRSS  current resident set
+#   VmHWM  peak resident set for THIS process. A forked mclapply child inherits
+#          the parent's counters, so a child's peak is its whole footprint
+#          (shared parent pages + its own) — which is the number to divide the
+#          host budget by when sizing the pool.
+#   MemAvailable  host headroom, so a run heading for the OOM killer is visible
+#          in the log before it dies rather than only in dmesg.
+#
+# All return NA off Linux; every call site degrades to printing nothing.
+.mem_field_mb <- function(path, field) {
+  if (!file.exists(path)) return(NA_real_)
+  ln <- grep(paste0("^", field, ":"), readLines(path, warn = FALSE), value = TRUE)
+  if (length(ln) == 0) return(NA_real_)
+  suppressWarnings(as.numeric(sub("^[^0-9]*([0-9]+).*$", "\\1", ln[1])) / 1024)
+}
+mem_rss_mb   <- function() .mem_field_mb("/proc/self/status", "VmRSS")
+mem_hwm_mb   <- function() .mem_field_mb("/proc/self/status", "VmHWM")
+mem_avail_mb <- function() .mem_field_mb("/proc/meminfo",     "MemAvailable")
+
+mem_str <- function() {
+  r <- mem_rss_mb(); h <- mem_hwm_mb(); a <- mem_avail_mb()
+  if (is.na(r)) return(NA_character_)
+  sprintf("rss=%.1fG peak=%.1fG host_avail=%.1fG", r/1024, h/1024, a/1024)
+}
+# label is padded so the columns line up when grepping '[mem]' out of the log.
+log_mem <- function(label) {
+  s <- mem_str()
+  if (!is.na(s)) log_msg(sprintf("[mem] %-44s %s", label, s))
+}
+
 # Time a single expression: x <- timed("label", expr); x is the result.
 timed <- function(label, expr) {
   t0 <- proc.time()[3]
@@ -912,6 +948,15 @@ resolve_tier1_overlaps <- function(t1, min_len) {
                 as.character(strand(inv)), as.character(inv$classification),
                 as.character(inv$source_tool))
   t1s  <- inv[ord]
+  # NOTE (run-000156, 94 Gbp): this loop was suspected of an O(k^2) blowup because
+  # each batch spent ~17,045 s of its ~17,050 s between the "input sizes" and
+  # "tier1 overlap resolve" log lines. Measured against the real tier-1 features of
+  # that run's largest chromosome (28,022 features, 139 overlap pairs, involved=259
+  # i.e. 0.9%, max degree 2) it runs in ~21 s — the observed 17,045 s was the host
+  # thrashing under 55 concurrent workers, not this function. A candidate-bounded
+  # variant was written and measured at 18 s on the same data (12% faster) and
+  # reverted as not worth the added branching in a determinism-critical path. Do
+  # not "optimise" this loop without first measuring `involved` on real data.
   pieces <- vector("list", length(t1s))
   pieces[[1]] <- t1s[1]
   kept <- t1s[1]
@@ -1238,8 +1283,14 @@ process_batch <- function(seqs, data, min_len, trc_origin_def = character(0), tr
                     batch_label, length(t6_rest), length(level1), length(level2)))
   }
 
-  toc(t_batch, sprintf("final: level1=%d, level2=%d", length(level1), length(level2)))
-  list(level1 = level1, level2 = level2)
+  # Report this worker's peak RSS back to the parent. In a forked child VmHWM
+  # covers the inherited (copy-on-write) parent pages as well as the child's own
+  # allocations, so it is the per-worker footprint to divide a host budget by.
+  peak <- mem_hwm_mb()
+  toc(t_batch, sprintf("final: level1=%d, level2=%d%s",
+                       length(level1), length(level2),
+                       if (is.na(peak)) "" else sprintf(", peak_rss=%.1fG", peak/1024)))
+  list(level1 = level1, level2 = level2, peak_rss_mb = peak)
 }
 
 # ── 6. Output assembly ────────────────────────────────────────────────────────
@@ -1602,6 +1653,7 @@ if (rm_tc_tandem_gate) {
   log_msg("RM_TC tandem gate: OFF")
 }
 toc(t_load)
+log_mem("after loading all tiers")
 
 # Read genome FAI
 log_msg("── Reading FAI ────────────────────────────────────────────────")
@@ -1669,20 +1721,70 @@ log_msg("TE-derived TRCs (global): ", length(trc_origin_def), " default + ",
         length(trc_origin_sho), " short")
 
 # Run resolution — always via mclapply so the code path is uniform.
+n_workers <- min(opt$threads, length(batches))
 log_msg(sprintf("── Running tier resolution (%d threads, %d batch(es)) ─────",
                 opt$threads, length(batches)))
+# The fork point is where this rule's memory is decided: every worker starts as a
+# copy-on-write clone of the parent, so the ceiling is roughly
+# parent_rss + n_workers * per_worker_growth. Record both sides of that equation
+# so a failed run can be sized from its own log (run-000156 could not be).
+log_mem(sprintf("at fork (%d worker(s))", n_workers))
+{
+  p_rss <- mem_rss_mb(); avail <- mem_avail_mb()
+  if (!is.na(p_rss) && !is.na(avail))
+    log_msg(sprintf("[mem] parent rss %.1fG, host avail %.1fG -> %.2fG per worker if all %d run concurrently",
+                    p_rss/1024, avail/1024, (avail/1024)/max(n_workers, 1), n_workers))
+}
 t_resolve <- tic("tier resolution (all batches)")
 results <- mclapply(batches,
                     function(seqs) process_batch(seqs, data, opt$min_feature_length,
                                                  trc_origin_def, trc_origin_sho),
-                    mc.cores = min(opt$threads, length(batches)))
+                    mc.cores = n_workers)
 toc(t_resolve)
+log_mem("after tier resolution (parent)")
 
-# Check for worker errors (mclapply returns error objects on failure)
-err_idx <- which(vapply(results, function(r) inherits(r, "try-error"), logical(1)))
-if (length(err_idx) > 0) {
-  for (i in err_idx) message("Batch ", i, " failed: ", as.character(results[[i]]))
-  stop("One or more batches failed — see messages above")
+# Per-worker peaks reported back by the children (NA where /proc is unreadable).
+{
+  peaks <- suppressWarnings(as.numeric(vapply(results, function(r)
+    if (is.list(r) && !is.null(r$peak_rss_mb)) r$peak_rss_mb else NA_real_, numeric(1))))
+  peaks <- peaks[is.finite(peaks)]
+  if (length(peaks) > 0)
+    log_msg(sprintf("[mem] worker peak rss: min=%.1fG median=%.1fG max=%.1fG over %d batch(es)",
+                    min(peaks)/1024, median(peaks)/1024, max(peaks)/1024, length(peaks)))
+}
+
+# Validate every batch result POSITIVELY.
+#
+# An mclapply child that dies on a signal (OOM killer, segfault) does NOT come
+# back as a "try-error" — mclapply only warns "scheduled cores ... did not
+# deliver results" and leaves a non-conforming element in its place. The old
+# try-error-only check therefore passed with 15 of 55 workers dead on the 94 Gbp
+# run-000156; execution continued, do.call(c, ...) degraded to a plain list
+# ("Combined: 40 Level 1" — batches, not features), and the run died much later
+# in finalise_output with a misleading S4 dispatch error. Had the survivors
+# happened to concatenate cleanly it would have written an annotation missing
+# 27% of the genome and exited 0. So: require the expected count, and require
+# every element to actually carry GRanges level1/level2.
+if (length(results) != length(batches))
+  stop(sprintf("mclapply returned %d result(s) for %d batch(es) — worker loss",
+               length(results), length(batches)))
+bad_idx <- which(!vapply(results, function(r) {
+  is.list(r) && !is.null(r$level1) && !is.null(r$level2) &&
+    is(r$level1, "GRanges") && is(r$level2, "GRanges")
+}, logical(1)))
+if (length(bad_idx) > 0) {
+  for (i in bad_idx) {
+    detail <- if (inherits(results[[i]], "try-error")) as.character(results[[i]])
+              else sprintf("no result returned (worker died — check for OOM); got %s",
+                           paste(class(results[[i]]), collapse = "/"))
+    seqs_i <- batches[[i]]
+    label  <- paste0(paste(head(seqs_i, 3), collapse = ","),
+                     if (length(seqs_i) > 3) sprintf(",...+%d", length(seqs_i) - 3) else "")
+    message("Batch ", i, " [", label, "] failed: ", detail)
+  }
+  stop(sprintf("%d of %d batch(es) did not return a usable result — refusing to ",
+               length(bad_idx), length(results)),
+       "write a truncated annotation. See the per-batch messages above.")
 }
 
 # Combine batch results
@@ -1703,6 +1805,8 @@ timed("write TE-derived TRC table",
         sub("\\.gff3$", ".te_derived_trc.csv", opt$output)))
 
 # Finalise and export
+log_mem("after combining batch results")
+
 log_msg("── Finalising output ──────────────────────────────────────────")
 all_feats <- finalise_output(level1_all, level2_all, seqlengths_vec, opt$output)
 
@@ -1710,5 +1814,6 @@ all_feats <- finalise_output(level1_all, level2_all, seqlengths_vec, opt$output)
 sanity_check(all_feats, seqlengths_vec,
              overlaps_tsv = sub("\\.gff3$", ".overlaps.tsv", opt$output))
 
+log_mem("final (whole-run peak)")
 log_msg("Done. Output: ", opt$output,
         sprintf("  (total wall time: %.1fs)", proc.time()[3] - .script_start))

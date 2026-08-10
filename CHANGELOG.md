@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- **`make_unified_annotation`: detect dead `mclapply` workers instead of writing a
+  truncated annotation.** On a 94 Gbp genome (run-000156) 15 of 55 forked workers
+  were killed; the guard only tested `inherits(r, "try-error")`, which a
+  signal-killed child never returns, so the run continued, concatenated 40 list
+  elements instead of millions of features, and died much later in
+  `finalise_output` with a misleading `seqinfo … signature '"list"'`. Had the
+  survivors concatenated cleanly it would have written an annotation missing
+  **27 % of the genome and exited 0**. The check is now positive — expected result
+  count, and every element carrying `GRanges` `level1`/`level2` — and names the
+  failed batches.
+- **`make_unified_annotation`: per-phase and per-worker RSS logging.** `/proc`-based
+  `[mem]` lines at load / fork / resolve / combine / final, with each worker
+  reporting its own `VmHWM` (which covers inherited copy-on-write pages, so it is
+  the per-worker footprint to size a pool against) and the parent summarising
+  min/median/max. The rule's benchmark file is only written on success, so a failed
+  run previously left no memory data at all — which is exactly what happened on
+  run-000156. Degrades silently off Linux.
+- **`tests/test_resolve_tier1_overlaps.R` now tests the shipped code.** It compared
+  two *local copies* of the resolver carrying a "keep in sync" comment, so it passed
+  regardless of what `make_unified_annotation.R` actually did. It now extracts the
+  real `trim_to_nonoverlap` / `resolve_tier1_overlaps` from the script.
+
 ## 1.4.1
 
 > **No output change.** This release is dependency pins only — both upstream

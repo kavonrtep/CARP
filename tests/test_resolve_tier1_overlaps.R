@@ -85,29 +85,42 @@ resolve_old <- function(t1, min_len) {
   kept
 }
 
-# NEW resolver (copied from make_unified_annotation.R)
-resolve_new <- function(t1, min_len) {
-  if (length(t1) <= 1) return(t1)
-  h <- suppressWarnings(findOverlaps(t1, ignore.strand = TRUE,
-                                     drop.self = TRUE, drop.redundant = TRUE))
-  if (length(h) == 0) return(t1)
-  involved    <- sort(unique(c(queryHits(h), subjectHits(h))))
-  passthrough <- t1[-involved]
-  inv  <- t1[involved]
-  t1s  <- inv[det_order(inv)]
-  pieces <- vector("list", length(t1s))
-  pieces[[1]] <- t1s[1]
-  kept <- t1s[1]
-  for (i in 2:length(t1s)) {
-    piece <- trim_to_nonoverlap(t1s[i], kept, min_len)
-    if (length(piece) > 0) {
-      pieces[[i]] <- piece
-      kept <- suppressWarnings(c(kept, piece))
+# NEW resolver: loaded from the REAL script, not copied.
+#
+# This used to be a verbatim copy with a "keep in sync" comment. That silently
+# stopped testing the shipped code — the candidate-bounded rewrite of
+# resolve_tier1_overlaps (the fix for the 94 Gbp run-000156 blowup, where one
+# batch spent 4.7 h in this function) left the copy untouched and the test still
+# passed. Extract the real definition instead: parse the script and eval only the
+# top-level assignments we need, so the script's unguarded main never runs.
+load_from_script <- function(names_wanted) {
+  here <- tryCatch(dirname(normalizePath(sub("^--file=", "",
+             grep("^--file=", commandArgs(FALSE), value = TRUE)[1]))),
+           error = function(e) ".")
+  src <- file.path(here, "..", "scripts", "make_unified_annotation.R")
+  if (!file.exists(src)) stop("cannot locate make_unified_annotation.R at ", src)
+  env <- new.env(parent = globalenv())
+  found <- character(0)
+  for (e in parse(src)) {
+    if (is.call(e) && length(e) >= 3 &&
+        as.character(e[[1]])[1] %in% c("<-", "=") &&
+        is.name(e[[2]]) && as.character(e[[2]]) %in% names_wanted) {
+      eval(e, envir = env)
+      found <- c(found, as.character(e[[2]]))
     }
   }
-  pieces <- pieces[!vapply(pieces, is.null, logical(1))]
-  suppressWarnings(c(passthrough, do.call(c, pieces)))
+  missing <- setdiff(names_wanted, found)
+  if (length(missing) > 0)
+    stop("not found in make_unified_annotation.R: ", paste(missing, collapse = ", "))
+  env
 }
+
+.real <- load_from_script(c("trim_to_nonoverlap", "resolve_tier1_overlaps"))
+resolve_new <- .real$resolve_tier1_overlaps
+# The naive reference above must trim with the SAME primitive as the real
+# resolver, or a difference in trim_to_nonoverlap would masquerade as a resolver
+# difference. Point the local copy at the real one.
+trim_to_nonoverlap <- .real$trim_to_nonoverlap
 
 # ---- canonical, order-independent signature of a GRanges --------------------
 sig <- function(gr) {
