@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.4.1
+
+> **No output change.** This release is dependency pins only — both upstream
+> releases are output-neutral, verified on tiny_pea against the 1.4.0 baseline
+> under a different `PYTHONHASHSEED` and thread count: all **196 manifest outputs
+> byte-identical**. It is a performance release for large genomes; on small ones
+> nothing changes but the wall clock of three rules.
 
 - **DANTE_LTR 0.5.2.0 → 0.5.3.0 and TideCluster 1.18.0 → 1.19.0** (pin-only; both
   dependency sets are unchanged, both envs re-solve clean). Two upstream releases
