@@ -26,7 +26,20 @@ dependencies:
   # sorts TE_all.fasta before mmseqs easy-cluster), so the Ty1_copia/Angela
   # library no longer churns run-to-run — see
   # docs/archive/dante_ltr_deterministic_clustering_request.md.
-  - dante_ltr=0.5.2.0
+  #
+  # 0.5.3.0 parallelises the per-chunk detection loop, which was strictly serial:
+  # `for i in range(number_of_temp_files): subprocess.check_call(...)` ran one
+  # detect_putative_ltr.R at a time, so `dante_ltr -c 96` used 1.0 core for 24.2 h
+  # on a 94 Gbp genome (1,889 chunks at `-S 50000000`). The chunks are now run in
+  # a pool: largest chunk first as a memory probe, remaining chunks longest-first
+  # via imap_unordered, each child at `-c 1`, with the pool size capped by
+  # min(cpu, 0.8 * MemAvailable / per-chunk peak RSS) so a big `-c` cannot OOM.
+  # Requested by this project — docs/archive/dante_ltr_chunk_parallelism_request.md.
+  # Output is unchanged: per-chunk results go to index-keyed files and are
+  # concatenated in index order, so completion order cannot reach the output. The
+  # change is confined to that loop (plus the `-S` help text); the fd-budget guard
+  # from the too-many-open-files fix is retained.
+  - dante_ltr=0.5.3.0
   - repeatmasker=4.1.2.p1
   - seqkit=2.8.2
   - cap3=10.2011
