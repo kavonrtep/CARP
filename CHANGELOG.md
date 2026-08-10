@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+- **DANTE_LTR 0.5.2.0 → 0.5.3.0 and TideCluster 1.18.0 → 1.19.0** (pin-only; both
+  dependency sets are unchanged, both envs re-solve clean). Two upstream releases
+  driven by a parallelism audit of a 94 Gbp run on 96 cores, where the pipeline
+  spent **199 h of wall clock at an average of well under 10 of 96 cores**. Both
+  are reported output-neutral, and TideCluster verified byte-identical to 1.18.0 on
+  the deterministic outputs.
+  - **`dante_ltr` was strictly serial**: `for i in range(number_of_temp_files):
+    subprocess.check_call(...)` ran one `detect_putative_ltr.R` at a time, so
+    `dante_ltr -c 96` used **1.0 core for 24.2 h** over 1,889 chunks. 0.5.3.0 runs
+    the chunks in a pool — largest chunk first as a memory probe, the rest
+    longest-first via `imap_unordered`, children at `-c 1` — sized by
+    `min(cpu, 0.8 × MemAvailable / per-chunk peak RSS)`. Per-chunk outputs are still
+    index-keyed and concatenated in index order, so completion order cannot reach
+    the output, and the fd-budget guard from the too-many-open-files fix is retained.
+  - **TideCluster `tc_reannotate` was bracketed by serial phases**: its 96-worker
+    pool was correct, but the parent then re-read every chunk `.out`, built a
+    `Gff3Feature` per hit, accumulated all hits and sorted — holding the stage to
+    **2.3 of 96 cores over 43.3 h**. 1.19.0 parses and remaps in the workers and
+    k-way merges sorted fragments in the parent; parent memory now scales with
+    chunk count rather than hit count.
+  - **TideCluster TAREAN was gated by one straggler**: jobs were always launched at
+    `-n 1`, so on the 94 Gbp genome 441 of 445 finished within ~2 h and `TRC_1` then
+    ran **~55 h alone on a single core** — 74 % of that stage — while 95 cores idled.
+    1.19.0 dispatches longest-first and gives large TRCs multiple threads
+    (memory-gated); `tarean.R` output is thread-count-independent.
+  - Write-ups: `docs/archive/dante_ltr_chunk_parallelism_request.md`,
+    `docs/archive/tidecluster_parallelism_request.md`.
+
 ## 1.4.0
 
 > **Upgrade note — annotations change.** Every release from 1.0.0 through 1.3.0

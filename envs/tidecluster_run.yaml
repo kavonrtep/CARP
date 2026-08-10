@@ -45,13 +45,30 @@
 # O(1) TideHunter coordinate remap, linear duplicate-array filtering, and a
 # memory-gated parallel per-part TideHunter. Purge-safety (self-contained
 # report) reconfirmed end-to-end on the small fixture.
+#
+# 1.19.0 fixes three parallelism collapses measured on a 94 Gbp genome at -c 96,
+# all requested by this project (docs/archive/tidecluster_parallelism_request.md).
+# Verified byte-identical to 1.18.0 on the deterministic outputs (per change and
+# end-to-end on an A. thaliana run_all --long); no behaviour, CLI or output change.
+#   * tc_reannotate: each chunk worker now parses its own RepeatMasker .out, remaps
+#     to genome coordinates and writes a sorted fragment; the parent streams a
+#     k-way merge. The old serial parent pass (re-read every chunk, one
+#     Gff3Feature object per hit, accumulate all hits, sort) dominated the stage —
+#     measured 2.3 of 96 cores over 43.3 h. Parent memory now scales with chunk
+#     count rather than hit count.
+#   * TAREAN dispatches longest-first (LPT) instead of in arbitrary order, so a
+#     large TRC can no longer start late and strand the pool.
+#   * TAREAN gives large TRCs multiple threads. Jobs were always `-n 1`, so one
+#     huge TRC ran alone on a single core at the tail: on the 94 Gbp genome 441 of
+#     445 jobs finished within ~2 h and TRC_1 then ran ~55 h by itself, 74 % of the
+#     stage. Thread count is memory-gated; tarean.R output is thread-independent.
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.18.0
+  - tidecluster=1.19.0
   # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
   # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
   # resolves (TideCluster needs r-base >= 4.2).
