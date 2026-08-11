@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.5.0
+
+> **Annotations are unchanged** — verified byte-identical on tiny_pea end-to-end,
+> and at 1 vs 3 workers and 1 vs 5 workers with batching held fixed. What changes
+> is that `make_unified_annotation` now caps its own concurrency (default 8
+> workers, previously up to `workflow.cores`), and that a partial worker failure
+> aborts instead of silently writing a truncated annotation. Large genomes are the
+> reason: on a 94.26 Gbp assembly this rule was OOM-killed after 5 h 50 m at 96
+> threads, and completes in under 2 h once the pool is capped.
 
 - **New config parameter `make_unified_max_workers` (default `8`) + a cgroup-aware
   memory gate on `make_unified_annotation`'s worker pool.** Both cap **concurrency
