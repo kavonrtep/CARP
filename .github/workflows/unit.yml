@@ -144,3 +144,9 @@ jobs:
 
       - name: R TE-derived TRC summary table (make_unified_annotation)
         run: Rscript tests/test_te_derived_trc_table.R
+
+      # density_track() reproduces tileGenome's whole-genome bin phasing in closed
+      # form so it can tile one sequence at a time. Needs only GenomicRanges, so it
+      # runs here rather than being deferred to the fixture jobs.
+      - name: R per-sequence tile grid == tileGenome (density_utils)
+        run: Rscript tests/test_density_tiling.R

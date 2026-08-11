@@ -85,6 +85,15 @@ dante_line_max_group_size: 1000
 dante_tir_cap3_max_memory_gb: 0
 make_unified_max_workers: 8
 
+# Hard ceiling on concurrent workers in the BigWig density rules
+# (make_bigwig_density and the two per-family rules). 0 = no ceiling: those
+# rules size the pool by MEASURING the heaviest task (it runs first, alone) and
+# dividing the memory budget by its peak RSS — the budget being resources.mem_mb
+# when a profile sets it, else the tightest of the cgroup limit and MemAvailable.
+# Caps concurrency only; every task writes its own .bw, so no track can change.
+# Set > 0 to pin the worker count (e.g. no detectable memory budget).
+bigwig_max_workers: 0
+
 # DANTE_TIR primary-library Multiplicity floor (default 3).
 # Drop primary elements with Multiplicity < threshold from the library.
 # They stay in DANTE_TIR_combined.gff3 and the unified annotation.

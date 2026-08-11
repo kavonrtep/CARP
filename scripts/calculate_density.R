@@ -12,49 +12,6 @@ library(optparse)
 })
 source(file.path(.density_script_dir, "density_utils.R"))
 
-get_density <- function(x, chr_size=NULL, tw=1000000){
-  cvg <- coverage(x)
-  bins <- tileGenome(chr_size, tilewidth = tw)
-  d <- binnedAverage(unlist(bins), cvg, "score")
-  d
-}
-max_chr_length <- function(g){
-  x <- split(g, ~seqnames)
-  L <- sapply(x, function(x)max(end(x), na.rm=TRUE))
-  L
-}
-
-
-get_density2 <- function(x, chr_size=NULL, N_for_mean = 10,step_size=100000){
-  cvg <- coverage(x)
-  bins <- tileGenome(chr_size, tilewidth = step_size)
-  d <- binnedAverage(unlist(bins), cvg, "score")
-  s_part <- split(d$score, seqnames(d))
-  s_part_smooth <- lapply(s_part, function(x)smooth_score2(x, N_for_mean))
-  d$score <- unlist(s_part_smooth)
-  d
-}
-
-
-smooth_score <- function(x, N_for_mean = 10){
-  # extend the score in each direction by N_for_mean-1 zeros
-  sc <- c(rep(0, N_for_mean-1), x$score, rep(0, N_for_mean-1))
-  sc_smooth <- filter(sc, rep(1/N_for_mean, N_for_mean), sides=2)
-  # remove the first N_for_mean-1 and the last N_for_mean-1 elements
-  x$score <- sc_smooth[(N_for_mean):(length(sc_smooth)-N_for_mean+1)]
-  x
-}
-
-smooth_score2 <- function(x, N_for_mean = 10){
-  # extend the score in each direction by N_for_mean-1 zeros
-  sc <- c(rep(0, N_for_mean-1), x, rep(0, N_for_mean-1))
-  sc_smooth <- filter(sc, rep(1/N_for_mean, N_for_mean), sides=2)
-  # remove the first N_for_mean-1 and the last N_for_mean-1 elements
-  out <- sc_smooth[(N_for_mean):(length(sc_smooth)-N_for_mean+1)]
-  out
-}
-
-
 # get input arguments
 # bed file
 # window size
@@ -91,32 +48,22 @@ if (length(g)==0){
   quit()
 }
 
-# Density tracks are UNION coverage: every base is either repeat-covered or
-# not, so a score must never exceed 1.0. The unified annotation deliberately
-# tolerates overlap — L1 Simple_repeat / Low_complexity sitting on top of a TE,
-# and ALL L2 nested children (tandem-array members inside an LTR_RT_TR
-# container, simple repeats nested in a satellite). Feeding those straight to
-# coverage() counts stacking depth (>1) and pushed the total track to ~3.5x.
-# reduce() to a non-overlapping union first. ignore.strand=TRUE is essential: a
-# '*'-strand simple repeat must merge with the +/- element it overlaps. The
-# legacy --merge flag is now implied (always on) and kept only so existing
-# invocations that pass it keep working.
-g <- reduce(g, ignore.strand = TRUE)
 print(opt)
 chr_size_all <- readRDS(opt$genome)
 
-# add missing seqlevels to g
-chr_size <- chr_size_all[seqlevels(g)]
-not_used <- setdiff(names(chr_size_all), names(chr_size))
-chr_size_not_used <- chr_size_all[not_used]
-seqlevels(g) <- c(seqlevels(g), names(chr_size_not_used))
-chr_size_in_order <- chr_size_all[seqlevels(g)]
-
-
 window_size <- opt$window/10 # 10 bins per window
-d <- get_density2(g, chr_size_in_order, N_for_mean = 10, step_size = window_size)
 
-# FR-1: write the BigWig run-length-merged (adjacent equal-value tiles,
-# incl. zero runs, collapsed into one interval) instead of one entry per
-# window. Lossless; non-zero values unchanged at every position.
-export(rle_merge_granges(d), opt$output, format="bigwig")
+# density_track():
+#  - union coverage (overlaps reduced away, so a score is a fraction in [0,1] —
+#    the unified annotation deliberately tolerates overlap and feeding that
+#    straight to coverage() counts stacking depth, which pushed this total track
+#    to ~3.5x; the legacy --merge flag is now implied);
+#  - keep_unoccupied = TRUE: this is the genome-wide TOTAL track, so scaffolds
+#    with no annotation stay in the output as zero-score intervals;
+#  - FR-1 run-length merge (adjacent equal-value tiles, incl. zero runs,
+#    collapsed into one interval) — lossless, non-zero values unchanged at
+#    every position.
+d <- density_track(g, chr_size_all, window_size, N_for_mean = 10,
+                   keep_unoccupied = TRUE)
+
+export(d, opt$output, format="bigwig")
