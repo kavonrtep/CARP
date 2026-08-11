@@ -66,6 +66,16 @@ dante_line_max_group_size: 1000
 #   this knob as the fallback. Set > 0 (GB) to pin it (non-cgroup HPC / huge
 #   genomes). See docs/configuration.md.
 dante_tir_cap3_max_memory_gb: 0
+# make_unified_max_workers (default 8, 0 = no ceiling): hard cap on concurrent
+#   mclapply workers in make_unified_annotation. Caps CONCURRENCY ONLY — batch
+#   composition comes from threads, so this cannot change the annotation. Each
+#   forked worker's peak RSS converges on the PARENT heap (measured on a 94 Gbp
+#   genome: 48.3 GB per worker for all 55 batches, vs a 48.4 GB parent), so 96
+#   workers demanded ~2.66 TB on a 768 GB host and the rule was OOM-killed; the
+#   same work at 4 workers took 885 s. Tier resolution is only ~13% of this
+#   rule's wall time, so a low ceiling costs little. A memory gate (cgroup- and
+#   resources.mem_mb-aware) applies on top. See docs/configuration.md.
+make_unified_max_workers: 8
 # DANTE_TIR primary-element library filter. Default 3 matches the
 # historical behaviour from before the DANTE_TIR_FALLBACK refactor (when
 # the library was sourced from `all_representative_elements_min3.fasta`,

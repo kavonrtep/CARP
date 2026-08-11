@@ -83,6 +83,7 @@ dante_line_max_group_size: 1000
 # it (so CAP3 respects the job budget even without a cgroup limit); this value is
 # the fallback when mem_mb is unset. Set > 0 (GB) to pin it. See docs.
 dante_tir_cap3_max_memory_gb: 0
+make_unified_max_workers: 8
 
 # DANTE_TIR primary-library Multiplicity floor (default 3).
 # Drop primary elements with Multiplicity < threshold from the library.

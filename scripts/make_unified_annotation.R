@@ -57,6 +57,84 @@ log_mem <- function(label) {
   if (!is.na(s)) log_msg(sprintf("[mem] %-44s %s", label, s))
 }
 
+# ── memory budget (cgroup-aware) ─────────────────────────────────────────────
+# /proc/meminfo reports the HOST. Under PBS/Slurm (or any container) the limit
+# that will actually kill this job is the cgroup's, and it is typically set on an
+# ANCESTOR scope — the job scope — not on the leaf the process sits in. So walk
+# from the leaf up to the root and take the tightest effective limit. Falls back
+# to MemAvailable when no cgroup limit applies, and returns NA when neither can
+# be read (callers then skip gating rather than guess).
+.read_cgroup_num <- function(path) {
+  if (!file.exists(path)) return(NA_real_)
+  v <- tryCatch(trimws(readLines(path, warn = FALSE)[1]),
+                error = function(e) NA_character_, warning = function(w) NA_character_)
+  if (is.na(v) || !nzchar(v)) return(NA_real_)
+  if (identical(v, "max")) return(Inf)                       # cgroup v2 unlimited
+  n <- suppressWarnings(as.numeric(v))
+  if (is.na(n)) return(NA_real_)
+  # cgroup v1 spells "unlimited" as a huge sentinel (PAGE_COUNTER_MAX).
+  if (n > 1e15) return(Inf)
+  n
+}
+
+# Headroom (MB) inside a single cgroup directory: limit - current usage.
+.cgroup_dir_avail_mb <- function(dir, lim_file, cur_file) {
+  lim <- .read_cgroup_num(file.path(dir, lim_file))
+  if (is.na(lim) || !is.finite(lim)) return(NA_real_)         # absent or unlimited
+  cur <- .read_cgroup_num(file.path(dir, cur_file))
+  if (is.na(cur) || !is.finite(cur)) cur <- 0
+  max(0, (lim - cur) / 1048576)
+}
+
+cgroup_avail_mb <- function() {
+  lines <- tryCatch(readLines("/proc/self/cgroup", warn = FALSE),
+                    error = function(e) character(0))
+  cands <- numeric(0)
+
+  # cgroup v2: "0::/user.slice/.../job.scope"
+  v2 <- grep("^0::", lines, value = TRUE)
+  if (length(v2) > 0) {
+    parts <- Filter(nzchar, strsplit(sub("^0::", "", v2[1]), "/", fixed = TRUE)[[1]])
+    # leaf -> root, so an ancestor job-scope limit is picked up
+    for (i in rev(seq_along(parts))) {
+      d <- file.path("/sys/fs/cgroup", paste(parts[seq_len(i)], collapse = "/"))
+      cands <- c(cands, .cgroup_dir_avail_mb(d, "memory.max", "memory.current"))
+    }
+  }
+  # Namespaced container: the job's own limits appear at the mount root.
+  cands <- c(cands, .cgroup_dir_avail_mb("/sys/fs/cgroup", "memory.max", "memory.current"))
+
+  # cgroup v1
+  v1 <- grep(":memory:", lines, value = TRUE)
+  if (length(v1) > 0) {
+    rel <- sub("^.*:memory:", "", v1[1])
+    parts <- Filter(nzchar, strsplit(rel, "/", fixed = TRUE)[[1]])
+    for (i in rev(seq_along(parts))) {
+      d <- file.path("/sys/fs/cgroup/memory", paste(parts[seq_len(i)], collapse = "/"))
+      cands <- c(cands, .cgroup_dir_avail_mb(d, "memory.limit_in_bytes",
+                                             "memory.usage_in_bytes"))
+    }
+  }
+  cands <- c(cands, .cgroup_dir_avail_mb("/sys/fs/cgroup/memory",
+                                         "memory.limit_in_bytes", "memory.usage_in_bytes"))
+
+  cands <- cands[!is.na(cands)]
+  if (length(cands) == 0) NA_real_ else min(cands)
+}
+
+# Budget in MB. Explicit override wins; otherwise the tightest signal, because
+# exceeding ANY of them kills the job.
+mem_budget_mb <- function(explicit_gb = 0) {
+  if (!is.na(explicit_gb) && explicit_gb > 0)
+    return(list(mb = explicit_gb * 1024, src = "--mem_budget_gb"))
+  cg   <- cgroup_avail_mb()
+  host <- mem_avail_mb()
+  cands <- c(cgroup = cg, host = host)
+  cands <- cands[!is.na(cands)]
+  if (length(cands) == 0) return(list(mb = NA_real_, src = "unavailable"))
+  list(mb = min(cands), src = names(cands)[which.min(cands)])
+}
+
 # Time a single expression: x <- timed("label", expr); x is the result.
 timed <- function(label, expr) {
   t0 <- proc.time()[3]
@@ -114,6 +192,21 @@ option_list <- list(
   make_option("--output",           type="character", help="Output unified GFF3"),
   make_option("--threads",          type="integer",   default=4L,
               help="Number of parallel threads [4]"),
+  # --threads sets BATCH COMPOSITION (batch target = genome_bp / threads); the two
+  # options below cap only the number of CONCURRENT WORKERS, so tuning them can
+  # never change the result — see the memory-gating block near the mclapply call.
+  make_option("--max_workers",      type="integer",   default=8L,
+              help=paste("Hard ceiling on concurrent mclapply workers, independent of",
+                         "--threads. Each forked worker's peak RSS converges on the",
+                         "PARENT heap (measured: 48.3 GB workers vs a 48.4 GB parent,",
+                         "identical across batches spanning 143 Mb to 2.15 Gb), so",
+                         "workers are expensive while tier resolution is only ~13% of",
+                         "this rule's wall time. 0 = no ceiling. [8]")),
+  make_option("--mem_budget_gb",    type="double",    default=0,
+              help=paste("Memory budget (GB) for sizing the worker pool. 0 = detect:",
+                         "the tightest of the cgroup limit (walking up the hierarchy,",
+                         "so a PBS/Slurm job scope limit is honoured) and /proc/meminfo",
+                         "MemAvailable. [0]")),
   make_option("--batch_size",       type="double",    default=200e6,
               help="Target genome bp per processing batch [200000000]"),
   make_option("--chunk_threshold",  type="double",    default=500e6,
@@ -1721,20 +1814,58 @@ log_msg("TE-derived TRCs (global): ", length(trc_origin_def), " default + ",
         length(trc_origin_sho), " short")
 
 # Run resolution — always via mclapply so the code path is uniform.
-n_workers <- min(opt$threads, length(batches))
 log_msg(sprintf("── Running tier resolution (%d threads, %d batch(es)) ─────",
                 opt$threads, length(batches)))
-# The fork point is where this rule's memory is decided: every worker starts as a
-# copy-on-write clone of the parent, so the ceiling is roughly
-# parent_rss + n_workers * per_worker_growth. Record both sides of that equation
-# so a failed run can be sized from its own log (run-000156 could not be).
-log_mem(sprintf("at fork (%d worker(s))", n_workers))
-{
-  p_rss <- mem_rss_mb(); avail <- mem_avail_mb()
-  if (!is.na(p_rss) && !is.na(avail))
-    log_msg(sprintf("[mem] parent rss %.1fG, host avail %.1fG -> %.2fG per worker if all %d run concurrently",
-                    p_rss/1024, avail/1024, (avail/1024)/max(n_workers, 1), n_workers))
+
+# ── Worker-pool sizing ───────────────────────────────────────────────────────
+# NOTE: this caps CONCURRENCY ONLY. Batch composition is fixed above from
+# --threads/--batch_size, so nothing here can change the result — only how many
+# batches run at once.
+#
+# Why a cap is needed at all (measured on run-000156, 94.26 Gbp, 768 GB host):
+# mclapply forks, and R's GC writes to object headers in the child, so the
+# inherited parent heap gets privately copied. Each worker's peak RSS therefore
+# converges on the PARENT's, regardless of how much data its own batch holds —
+# measured 48.3 GB for every one of 55 batches (min = median = max) against a
+# 48.4 GB parent, for batches spanning 143 Mb to 2.15 Gb of sequence. At 55
+# workers that demands ~2.66 TB on a 768 GB box: the run thrashed (388 M minor
+# faults at only 4 workers ≈ 1.5 TB of page copying), 15 workers were OOM-killed
+# and the rule died after 5h50m. The same work at 4 workers took 885 s.
+n_workers <- min(opt$threads, length(batches))
+parent_rss <- mem_rss_mb()
+log_mem(sprintf("at fork (before gating: %d worker(s))", n_workers))
+
+# 1. Hard ceiling — this rule gains little from wide parallelism (tier resolution
+#    was 885 s of a 6,949 s run; loading and GFF3 export are serial), while each
+#    worker costs a parent-heap copy. 0 disables.
+if (opt$max_workers > 0 && n_workers > opt$max_workers) {
+  log_msg(sprintf("[mem] capping workers %d -> %d (--max_workers)",
+                  n_workers, opt$max_workers))
+  n_workers <- opt$max_workers
 }
+
+# 2. Memory gate — budget / per-worker cost, using the parent RSS as the
+#    per-worker estimate (justified by the measurement above). Leave 20% headroom
+#    for the parent's own growth during combine/finalise, which peaked well above
+#    the fork-point RSS (121.9 GB vs 48.4 GB on run-000156).
+{
+  bud <- mem_budget_mb(opt$mem_budget_gb)
+  if (!is.na(bud$mb) && !is.na(parent_rss) && parent_rss > 0) {
+    cap <- max(1L, as.integer(floor((bud$mb * 0.8) / parent_rss)))
+    log_msg(sprintf("[mem] budget %.1fG (%s), parent rss %.1fG -> room for %d worker(s)",
+                    bud$mb/1024, bud$src, parent_rss/1024, cap))
+    if (cap < n_workers) {
+      log_msg(sprintf("[mem] capping workers %d -> %d (memory gate)", n_workers, cap))
+      n_workers <- cap
+    }
+  } else {
+    log_msg(sprintf("[mem] no memory gate applied (budget=%s, parent rss=%s)",
+                    ifelse(is.na(bud$mb), "unknown", sprintf("%.1fG", bud$mb/1024)),
+                    ifelse(is.na(parent_rss), "unknown", sprintf("%.1fG", parent_rss/1024))))
+  }
+}
+log_msg(sprintf("── Worker pool: %d concurrent worker(s) for %d batch(es) ─────",
+                n_workers, length(batches)))
 t_resolve <- tic("tier resolution (all batches)")
 results <- mclapply(batches,
                     function(seqs) process_batch(seqs, data, opt$min_feature_length,

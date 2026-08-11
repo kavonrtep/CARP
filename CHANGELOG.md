@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **New config parameter `make_unified_max_workers` (default `8`) + a cgroup-aware
+  memory gate on `make_unified_annotation`'s worker pool.** Both cap **concurrency
+  only** — batch composition still comes from `threads`/`batch_size`, so neither can
+  change the annotation (verified byte-identical at 1 vs 5 workers).
+  **Why:** `mclapply` forks, and R's GC dirties the inherited parent heap, so each
+  worker's peak RSS converges on the *parent's* regardless of its own batch size —
+  measured on a 94 Gbp genome at **48.3 GB per worker for every one of 55 batches**
+  (min = median = max) against a 48.4 GB parent, for batches spanning 143 Mb to
+  2.15 Gb of sequence. At `threads: workflow.cores` = 96 that demanded ~2.66 TB on a
+  768 GB host: 388 M minor page faults (≈1.5 TB of copy-on-write copying) *at only 4
+  workers*, 15 workers OOM-killed, rule dead after 5 h 50 m. The identical work at 4
+  workers took **885 s**, and produced the full annotation (69.7 M features, 80.44 %
+  genome coverage, zero overlap violations). Because per-worker cost tracks the
+  parent heap rather than the batch, splitting oversized batches would not have
+  helped — the cap is the fix.
+  The memory gate uses `budget × 0.8 / parent RSS`, where the budget is
+  `resources.mem_mb` when a scheduler/profile sets it, else the tightest of the
+  **cgroup limit — walking up the hierarchy, so a PBS/Slurm job-scope limit is
+  honoured rather than the node's free memory** (v2 `memory.max`/`memory.current`,
+  v1 `limit_in_bytes`/`usage_in_bytes`, plus the namespaced-container case) — and
+  `/proc/meminfo MemAvailable`. `--mem_budget_gb` overrides. Note this rule gains
+  little from wide parallelism anyway: tier resolution was 885 s of a 6,949 s run,
+  the rest (65 min loading, 20 min GFF3 export) being serial.
 - **`make_unified_annotation`: detect dead `mclapply` workers instead of writing a
   truncated annotation.** On a 94 Gbp genome (run-000156) 15 of 55 forked workers
   were killed; the guard only tested `inherits(r, "try-error")`, which a

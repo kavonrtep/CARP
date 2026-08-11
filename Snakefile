@@ -203,6 +203,22 @@ if "dante_tir_min_multiplicity" not in config:
 if not isinstance(config["dante_tir_min_multiplicity"], int) or config["dante_tir_min_multiplicity"] < 1:
     raise ValueError("Invalid value for dante_tir_min_multiplicity: must be a positive integer.")
 
+# Hard ceiling on concurrent mclapply workers inside make_unified_annotation.
+# Caps CONCURRENCY only -- batch composition is set from `threads`, so this can
+# never change the annotation, only how many batches run at once. Needed because
+# mclapply forks and R's GC dirties the inherited parent heap, so each worker's
+# peak RSS converges on the PARENT's regardless of its batch size (measured on a
+# 94 Gbp genome: 48.3 GB per worker for every one of 55 batches, against a 48.4 GB
+# parent). At `threads: workflow.cores` = 96 that demanded ~2.66 TB on a 768 GB
+# host: the run thrashed, 15 workers were OOM-killed and the rule died after
+# 5h50m; the same work at 4 workers took 885 s. Tier resolution is only ~13% of
+# this rule's wall time (loading and GFF3 export are serial), so a low ceiling
+# costs almost nothing. 0 = no ceiling.
+if "make_unified_max_workers" not in config:
+    config["make_unified_max_workers"] = 8
+if not isinstance(config["make_unified_max_workers"], int) or config["make_unified_max_workers"] < 0:
+    raise ValueError("Invalid value for make_unified_max_workers: must be a non-negative integer (0 = no ceiling).")
+
 # Optional inclusion of DANTE_TIR_FALLBACK reps in the RepeatMasker
 # library. Default OFF to preserve previous behaviour byte-for-byte.
 # When ON, build_fallback_tir_library re-clusters fallback survivors,
@@ -1726,7 +1742,8 @@ rule make_unified_annotation:
         # with file.exists in the R script, which falls back gracefully).
         tc_trc_table_default=F"{config['output_dir']}/TideCluster/default/TideCluster_report/data/trc_table.tsv",
         tc_trc_table_short=F"{config['output_dir']}/TideCluster/short_monomer/TideCluster_report/data/trc_table.tsv",
-        rm_tc_tandem_gate=config["rm_tc_tandem_gate"]
+        rm_tc_tandem_gate=config["rm_tc_tandem_gate"],
+        max_workers=config["make_unified_max_workers"]
     log:
         stdout=F"{config['output_dir']}/Repeat_Annotation_Unified.log",
         stderr=F"{config['output_dir']}/Repeat_Annotation_Unified.err"
@@ -1735,13 +1752,30 @@ rule make_unified_annotation:
     conda:
         "envs/tidecluster.yaml"
     threads: workflow.cores
+    # mem_mb defaults to 0 (unset); an HPC profile / --set-resources allocates it.
+    # When set it is the authoritative budget for sizing the worker pool — under
+    # PBS/Slurm the scheduler's allocation, not the node's free memory, is what
+    # gets enforced. When unset the script detects the budget itself (tightest of
+    # the cgroup limit, walking up to the job scope, and /proc/meminfo).
+    resources:
+        mem_mb=0
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
+
+        # 0 => let the script auto-detect (cgroup-aware); otherwise pass the
+        # scheduler allocation through as the budget.
+        mem_budget_gb=0
+        if [ {resources.mem_mb} -gt 0 ]; then
+            mem_budget_gb=$(( {resources.mem_mb} / 1024 ))
+        fi
+
         make_unified_annotation.R \
+            --max_workers   {params.max_workers} \
+            --mem_budget_gb "$mem_budget_gb" \
             --ltr      {input.ltr} \
             --ltr_tandems {input.ltr_tandems} \
             --tir      {input.tir} \
