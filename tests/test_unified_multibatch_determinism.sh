@@ -48,7 +48,8 @@ fi
 export PATH="$REPO/scripts:$PATH"
 export CARP_VOCABULARY="$REPO/classification_vocabulary.yaml"
 
-run() {  # tag threads batch_size
+run() {  # tag threads batch_size [extra args...]
+  local tag="$1" threads="$2" bsize="$3"; shift 3
   "$RSCRIPT" "$REPO/scripts/make_unified_annotation.R" \
     --ltr        "$FX/DANTE_LTR.gff3" \
     --ltr_tandems "$FX/DANTE_LTR_tandems.gff3" \
@@ -69,14 +70,20 @@ run() {  # tag threads batch_size
     --th_raw_short   "$FX/TideHunter_raw_short.gff3" \
     --rm_tc_tandem_gate TRUE \
     --fai        "$FX/genome.fai" \
-    --output     "$OUT/unified_$1.gff3" \
-    --threads    "$2" \
-    --batch_size "$3" \
-    > "$OUT/log_$1.txt" 2>&1
+    --output     "$OUT/unified_${tag}.gff3" \
+    --threads    "$threads" \
+    --batch_size "$bsize" \
+    "$@" \
+    > "$OUT/log_${tag}.txt" 2>&1
 }
 
 run single 1 200000000
 run multi  3 1000000
+# Worker-pool cap must not change the result. --threads (and therefore batch
+# COMPOSITION) is held at 3 while only the CONCURRENCY is squeezed to 1, so this
+# isolates the mclapply pool size introduced by make_unified_max_workers /
+# --mem_budget_gb. Guards the property those knobs are only safe because of.
+run serialw 3 1000000 --max_workers 1
 
 fail() { echo "FAIL: $1" >&2; echo "--- single log tail ---" >&2; tail -20 "$OUT/log_single.txt" >&2
          echo "--- multi log tail ---" >&2; tail -20 "$OUT/log_multi.txt" >&2; exit 1; }
@@ -93,6 +100,13 @@ grep -qE "batch\[seq_te\].*te_sat=1" "$OUT/log_multi.txt" \
 grep -qE "batch\[seq_ovl\].*te_sat=0" "$OUT/log_multi.txt" \
   || fail "seq_ovl did not land in a te_sat-free batch (the split that reproduces the bug)"
 
+# The worker cap must actually have bitten, or the comparison below proves nothing.
+grep -qE "capping workers [0-9]+ -> 1 \(--max_workers\)" "$OUT/log_serialw.txt" \
+  || fail "--max_workers 1 did not cap the pool (gating not reached — comparison would be vacuous)"
+grep -qE "Batching: 3 batch" "$OUT/log_serialw.txt" \
+  || fail "capped run did not still produce 3 batches (concurrency cap must not change batch composition)"
+
+rc=0
 if diff <(grep -v '^#' "$OUT/unified_single.gff3") \
         <(grep -v '^#' "$OUT/unified_multi.gff3") > "$OUT/diff.txt"; then
   echo "test_unified_multibatch_determinism: PASSED (byte-identical single-batch vs 3-batch)"
@@ -100,5 +114,17 @@ else
   n=$(grep -c '^[<>]' "$OUT/diff.txt" || true)
   echo "FAIL: unified GFF3 differs across batchings ($n lines):" >&2
   head -40 "$OUT/diff.txt" >&2
-  exit 1
+  rc=1
 fi
+
+if diff <(grep -v '^#' "$OUT/unified_multi.gff3") \
+        <(grep -v '^#' "$OUT/unified_serialw.gff3") > "$OUT/diff_workers.txt"; then
+  echo "test_unified_multibatch_determinism: PASSED (byte-identical 3 workers vs 1 worker, same batching)"
+else
+  n=$(grep -c '^[<>]' "$OUT/diff_workers.txt" || true)
+  echo "FAIL: unified GFF3 differs by WORKER COUNT at fixed batching ($n lines)." >&2
+  echo "      make_unified_max_workers / --mem_budget_gb are only safe if this stays identical." >&2
+  head -40 "$OUT/diff_workers.txt" >&2
+  rc=1
+fi
+exit $rc
