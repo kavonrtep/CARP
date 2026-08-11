@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.1
 
 > **All BigWig tracks are unchanged** — every `.bw` verified byte-identical on
 > tiny_pea and on a 2.82 Gbp genome, across all four density rules. What changes
