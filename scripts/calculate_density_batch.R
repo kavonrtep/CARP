@@ -15,65 +15,24 @@ suppressPackageStartupMessages({
   if (length(f)) dirname(normalizePath(sub("^--file=", "", f[1]))) else getwd()
 })
 source(file.path(.density_script_dir, "density_utils.R"))
+source(file.path(.density_script_dir, "mem_utils.R"))
 
-smooth_score2 <- function(x, N_for_mean = 10){
-  # extend the score in each direction by N_for_mean-1 zeros
-  sc <- c(rep(0, N_for_mean-1), x, rep(0, N_for_mean-1))
-  sc_smooth <- filter(sc, rep(1/N_for_mean, N_for_mean), sides=2)
-  # remove the first N_for_mean-1 and the last N_for_mean-1 elements
-  sc_smooth[(N_for_mean):(length(sc_smooth)-N_for_mean+1)]
-}
-
-# Per-family smoothed density, byte-identical to the original whole-genome
-# get_density2() path but ~140x faster on assemblies with many scaffolds.
-#
-# The original tiled the WHOLE genome per family with the occupied seqlevels
-# moved to the FRONT of the concatenation (seqlevels(g) <- c(occupied, unused)).
-# tileGenome phases bin boundaries by the genome-concatenation offset, so that
-# occupied-first reordering makes each family's bin phasing depend on which
-# seqlevels it occupies. A single precomputed global grid therefore CANNOT
-# reproduce those bins -- the tiling must be rebuilt per family in the same
-# occupied-first order (this is what `chr_in_order` below restores).
-#
-# The speedup over the original is twofold and lossless:
-#   (a) keep ONLY the occupied bins before binnedAverage / smoothing / export.
-#       binnedAverage is per-bin independent and the moving-average smoothing is
-#       applied per seqname, so the values on occupied seqlevels are unchanged;
-#       we simply skip computing density on the (zero-coverage) scaffolds a
-#       family does not touch -- on a 1888-scaffold genome that is the bulk of
-#       the original cost.
-#   (b) parallelise across input files with mclapply.
-# The output header consequently carries only the occupied seqlevels (BigWig
-# export drops dataless seqlevels anyway), which is the intended behaviour.
-density_per_family <- function(g, chr_size_all, step, N_for_mean = 10){
-  # Union coverage (see calculate_density.R): collapse overlaps so the score is
-  # a fraction in [0,1]. A per-class file can hold an L1 LTR_RT_TR container
-  # plus its L2 member copies (same class), which overlap; without reduce()
-  # those regions would score >1. ignore.strand=TRUE so opposite-strand /
-  # '*'-strand overlaps also merge.
-  g <- reduce(g, ignore.strand = TRUE)
-  occ <- seqlevels(g)
-  not_used <- setdiff(names(chr_size_all), occ)
-  chr_in_order <- chr_size_all[c(occ, not_used)]   # occupied first, as the original
-  # NB: tileGenome sets the tile width to sum(seqlengths)/round(sum/step), so the
-  # bin boundaries depend on the WHOLE-genome total — tiling occupied-only would
-  # produce different bins (verified). The grid must be built over the full
-  # genome and then filtered; only the (cheap) filter keeps it occupied-only.
-  bins <- unlist(tileGenome(chr_in_order, tilewidth = step))
-  bins <- bins[as.character(seqnames(bins)) %in% occ]
-  bins <- keepSeqlevels(bins, occ, pruning.mode = "coarse")
-  cvg <- coverage(g)
-  d <- binnedAverage(bins, cvg, "score")
-  s_part <- split(d$score, seqnames(d))
-  d$score <- unlist(lapply(s_part, function(z) smooth_score2(z, N_for_mean)))
-  d
+.script_start <- proc.time()[3]
+log_msg <- function(...) message(sprintf("[+%6.1fs] ", proc.time()[3] - .script_start), ...)
+log_mem <- function(label) {
+  s <- mem_str()
+  if (!is.na(s)) log_msg(sprintf("[mem] %-40s %s", label, s))
 }
 
 option_list <- list(
   make_option(c("-d", "--dir"), type="character", default=NULL, help="Directory of GFF3 files"),
   make_option(c("-o", "--output_dir"), type="character", default=NULL, help="Output directory for BigWig files"),
   make_option(c("-g", "--genome"), type="character", default=NULL, help="genome_seqlengths.rds (named integer vector of scaffold lengths)"),
-  make_option(c("-t", "--threads"), type="integer", default=1, help="Parallel workers over input files [default %default]")
+  make_option(c("-t", "--threads"), type="integer", default=1, help="Parallel workers over input files [default %default]"),
+  make_option(c("--max_workers"), type="integer", default=0,
+              help="Hard ceiling on concurrent workers; 0 = no ceiling (the memory gate still applies) [default %default]"),
+  make_option(c("--mem_budget_gb"), type="double", default=0,
+              help="Memory budget in GB for sizing the worker pool; 0 = auto-detect (tightest of the cgroup limit and MemAvailable) [default %default]")
 )
 opt <- parse_args(OptionParser(option_list=option_list))
 
@@ -105,21 +64,124 @@ for (f in files) {
     out = file.path(directory_for_100k, paste0(base_noext, "_100k.bw")))
 }
 
+# Longest-processing-time first: heaviest input, and within an input the finer
+# (step=1000) resolution, are dispatched first so a dominant class file cannot
+# start late and strand the pool. Dispatch order only — every task writes its own
+# independent file, so the outputs cannot depend on it.
+if (length(tasks) > 0) {
+  sizes <- vapply(tasks, function(tk) as.numeric(file.size(tk$f)), numeric(1))
+  steps <- vapply(tasks, function(tk) as.numeric(tk$step), numeric(1))
+  tasks <- tasks[order(-sizes, steps)]
+}
+
 process_task <- function(tk){
   g <- import(tk$f, format="gff3")
   if (length(g) == 0) return(paste("No regions found in the input file:", tk$f))
-  # FR-1: write a run-length-merged BigWig (adjacent equal-value tiles, incl.
+  # density_track() streams the tileGenome grid one sequence at a time and
+  # returns the run-length-merged track (FR-1: adjacent equal-value tiles, incl.
   # zero runs, collapsed into one interval). Lossless; values unchanged.
-  export(rle_merge_granges(density_per_family(g, chr_size_all, tk$step, 10)),
-         tk$out, format="bigwig")
+  export(density_track(g, chr_size_all, tk$step, 10), tk$out, format="bigwig")
   "ok"
 }
 
-res <- mclapply(tasks, function(tk)
-  tryCatch(process_task(tk), error=function(e) paste("ERROR", tk$f, ":", conditionMessage(e))),
-  mc.cores = max(1L, opt$threads))
+# Each task reports its own peak RSS so the pool can be sized from a measurement
+# rather than a guess, and so a run that gets close to the limit says so.
+run_task <- function(tk) {
+  msg <- tryCatch(process_task(tk),
+                  error = function(e) paste("ERROR", tk$f, ":", conditionMessage(e)))
+  list(msg = msg, peak_mb = mem_hwm_mb())
+}
 
-errs <- unlist(res)[grepl("^ERROR", unlist(res))]
+# ── worker pool sizing ───────────────────────────────────────────────────────
+# History: this script ran mc.cores = threads (= workflow.cores = 96 on the HPC
+# profile) with no memory bound, and every task built the WHOLE-genome tile grid.
+# On run-000156 (94.26 Gbp, 5,096 sequences) that peaked at 568.5 GB — 74% of a
+# 768 GB host — for 1,603 tiny per-family tracks. density_track() removed the
+# grid blow-up; this bounds what is left, which is dominated by import() of the
+# GFF3 and by the size of the merged output track. Both vary by orders of
+# magnitude between a 1-feature family and a 52 M-feature class, so instead of
+# guessing a per-task cost we MEASURE it: run the heaviest task first, on its
+# own, and divide the budget by its peak.
+n_workers <- max(1L, min(opt$threads, length(tasks)))
+log_msg(sprintf("%d file(s), %d task(s), up to %d worker(s) requested",
+                length(files), length(tasks), n_workers))
+log_mem("before probe task")
+
+probe <- NULL
+if (length(tasks) > 0 && n_workers > 1L) {
+  # mcparallel/mccollect rather than mclapply: mclapply(mc.cores = 1) does not
+  # fork, and running the probe in the parent would leave its heap inflated for
+  # every subsequent fork.
+  probe <- mccollect(mcparallel(run_task(tasks[[1]])))[[1]]
+}
+probe_peak <- if (is.list(probe) && !is.null(probe$peak_mb)) probe$peak_mb else NA_real_
+if (!is.na(probe_peak))
+  log_msg(sprintf("[mem] probe task %s (step=%d) peaked at %.2fG",
+                  basename(tasks[[1]]$f), tasks[[1]]$step, probe_peak/1024))
+
+if (opt$max_workers > 0 && n_workers > opt$max_workers) {
+  log_msg(sprintf("[mem] capping workers %d -> %d (--max_workers)",
+                  n_workers, opt$max_workers))
+  n_workers <- opt$max_workers
+}
+{
+  bud <- mem_budget_mb(opt$mem_budget_gb)
+  if (!is.na(bud$mb) && !is.na(probe_peak) && probe_peak > 0) {
+    # 20% headroom: the probe is the heaviest task, but the parent also holds the
+    # seqlengths vector and the OS needs room for page cache during export.
+    cap <- max(1L, as.integer(floor((bud$mb * 0.8) / probe_peak)))
+    log_msg(sprintf("[mem] budget %.1fG (%s), probe peak %.2fG -> room for %d worker(s)",
+                    bud$mb/1024, bud$src, probe_peak/1024, cap))
+    if (cap < n_workers) {
+      log_msg(sprintf("[mem] capping workers %d -> %d (memory gate)", n_workers, cap))
+      n_workers <- cap
+    }
+  } else {
+    log_msg(sprintf("[mem] no memory gate applied (budget=%s, probe peak=%s)",
+                    ifelse(is.na(bud$mb), "unknown", sprintf("%.1fG", bud$mb/1024)),
+                    ifelse(is.na(probe_peak), "unknown", sprintf("%.2fG", probe_peak/1024))))
+  }
+}
+log_msg(sprintf("── Worker pool: %d concurrent worker(s) for %d remaining task(s) ─────",
+                n_workers, length(tasks) - as.integer(!is.null(probe))))
+
+# mc.preschedule = FALSE so tasks are handed out dynamically: with prescheduling
+# mclapply splits the list into contiguous blocks, which would hand every heavy
+# task to the first worker and defeat the LPT ordering above.
+rest <- if (is.null(probe)) tasks else tasks[-1]
+res <- if (length(rest) > 0) {
+  mclapply(rest, run_task, mc.cores = n_workers, mc.preschedule = FALSE)
+} else list()
+all_res <- c(if (!is.null(probe)) list(probe), res)
+done    <- if (is.null(probe)) tasks else c(tasks[1], rest)
+
+log_mem("after worker pool")
+peaks <- vapply(all_res,
+                function(r) if (is.list(r) && !is.null(r$peak_mb)) r$peak_mb else NA_real_,
+                numeric(1))
+if (any(!is.na(peaks)))
+  log_msg(sprintf("[mem] worker peak RSS: max %.2fG, median %.2fG over %d task(s)",
+                  max(peaks, na.rm = TRUE)/1024, median(peaks, na.rm = TRUE)/1024,
+                  sum(!is.na(peaks))))
+
+# Validate positively. A signal-killed mclapply child returns NULL rather than a
+# "try-error", so scanning the returned messages for "^ERROR" cannot see it — and
+# because these rules are checkpointed by a .done marker rather than by the .bw
+# files themselves, a silently missing track would have gone unnoticed.
+errs <- character(0)
+for (i in seq_along(done)) {
+  r  <- all_res[[i]]
+  tk <- done[[i]]
+  if (!is.list(r) || is.null(r$msg) || !is.character(r$msg)) {
+    errs <- c(errs, sprintf("ERROR %s (step=%d): worker produced no result (killed?)",
+                            tk$f, tk$step))
+  } else if (grepl("^ERROR", r$msg)) {
+    errs <- c(errs, r$msg)
+  } else if (identical(r$msg, "ok") && !file.exists(tk$out)) {
+    errs <- c(errs, sprintf("ERROR %s (step=%d): reported ok but %s is missing",
+                            tk$f, tk$step, tk$out))
+  }
+}
 if (length(errs)) { writeLines(errs, stderr()); quit(save="no", status=1) }
 cat(sprintf("calculate_density_batch: %d files (%d tasks), %d threads, done\n",
             length(files), length(tasks), opt$threads))

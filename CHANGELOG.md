@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+> **All BigWig tracks are unchanged** — every `.bw` verified byte-identical on
+> tiny_pea and on a 2.82 Gbp genome, across all four density rules. What changes
+> is the memory the density layer needs: it no longer scales with genome size.
+
+- **BigWig density: build only the bins that are kept.** `calculate_density.R` and
+  `calculate_density_batch.R` used to materialise the **whole-genome** `tileGenome`
+  grid for *every* track and then discard the bins the track did not occupy. On the
+  94.26 Gbp run-000156 that is 94.26 M bins per task at `step=1000` (plus a 94.26 M
+  character vector for the `%in%` filter), and 3,206 such tasks ran concurrently:
+  `make_tidecluster_tandem_per_family_bigwig` peaked at **568.5 GB — 74 % of a
+  768 GB host** — to produce 1,603 small per-family tracks. Across those families
+  the occupied territory sums to 7.25 Tbp against 151.1 Tbp of grid actually built,
+  i.e. **20.8× of the tiling was thrown away**; the median family occupies one
+  2.14 Gb chromosome and the commonest is a single feature on a single scaffold.
+  A previous attempt at "tile the occupied sequences only" was correctly rejected,
+  because `tileGenome` derives its effective tile width from the whole-genome
+  total, so subset tiling shifts the bins. The new `density_track()` instead
+  reproduces that phase in closed form and streams **one sequence at a time**, so
+  peak grid memory is `O(longest sequence / step)` — ~2.15 M bins here, independent
+  of genome size *and* of how much of the genome a track covers. Every downstream
+  step was already per-seqname (`binnedAverage` is per-bin independent, the
+  smoothing splits by seqname, the run-length merge never spans seqnames), so the
+  output is unchanged: `tests/test_density_tiling.R` pins the new grid arithmetic
+  against the real `tileGenome` over 3,068 randomised and boundary cases
+  (including a genome larger than `.Machine$integer.max`), `tests/test_density_utils.R`
+  pins `density_track` against verbatim copies of both implementations it replaces,
+  and all four density rules were re-run on two real genomes with byte-identical
+  `.bw` output. This also collapses two near-duplicate density implementations
+  (`density_per_family` / `get_density2`) into one.
+- **New config parameter `bigwig_max_workers` (default `0` = no ceiling) + a
+  measured, cgroup-aware memory gate on the BigWig worker pool.** The density rules
+  ran `mc.cores = workflow.cores` (96 on the HPC profile) with no memory bound. Per-
+  task cost varies by orders of magnitude between a 1-feature family and a 52 M-feature
+  class, so rather than guess it the heaviest task now runs **first, on its own**, and
+  the pool is `budget × 0.8 / its peak RSS` — the budget being `resources.mem_mb`
+  when a profile sets it, else the tightest of the cgroup limit (walking **up** the
+  hierarchy, so a PBS/Slurm job-scope limit is honoured rather than the node's free
+  memory) and `/proc/meminfo MemAvailable`. Remaining tasks are dispatched
+  longest-processing-time-first so a dominant class file cannot start late and
+  strand the pool. Concurrency only — each task writes its own `.bw`, so no track
+  can change. `[mem]` lines now report the probe peak, the gate decision and the
+  max/median worker peak.
+- **`calculate_density_batch.R`: detect dead workers and missing tracks.** A
+  signal-killed `mclapply` child returns `NULL`, not a `try-error`, so scanning the
+  returned messages for `^ERROR` could not see it — and because these rules are
+  checkpointed by a `.done` marker rather than by the `.bw` files, a silently
+  missing track would have gone unnoticed. Every task is now validated positively
+  (a result was returned, and the `.bw` it claims to have written exists).
+- Internal: the memory-instrumentation and cgroup-budget helpers move from
+  `scripts/make_unified_annotation.R` to a shared `scripts/mem_utils.R` (pure move,
+  no behaviour change).
+
 ## 1.5.0
 
 > **Annotations are unchanged** — verified byte-identical on tiny_pea end-to-end,

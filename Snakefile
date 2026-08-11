@@ -219,6 +219,21 @@ if "make_unified_max_workers" not in config:
 if not isinstance(config["make_unified_max_workers"], int) or config["make_unified_max_workers"] < 0:
     raise ValueError("Invalid value for make_unified_max_workers: must be a non-negative integer (0 = no ceiling).")
 
+# Hard ceiling on concurrent workers in the BigWig density rules
+# (calculate_density_batch.R: make_bigwig_density and the two per-family rules).
+# Default 0 = no hard ceiling, because those rules size their pool from a
+# MEASUREMENT: the heaviest task runs first on its own and the memory budget is
+# divided by its peak RSS. That gate is what the rules actually needed -- on the
+# 94 Gbp run-000156 make_tidecluster_tandem_per_family_bigwig peaked at 568.5 GB
+# of a 768 GB host, because every one of 3,206 concurrent tasks built the whole
+# 94.26 M-bin genome grid. Both halves are fixed: density_track() now streams the
+# grid one sequence at a time, and the pool is gated. Set > 0 to pin the worker
+# count directly (e.g. non-cgroup HPC where the budget cannot be detected).
+if "bigwig_max_workers" not in config:
+    config["bigwig_max_workers"] = 0
+if not isinstance(config["bigwig_max_workers"], int) or config["bigwig_max_workers"] < 0:
+    raise ValueError("Invalid value for bigwig_max_workers: must be a non-negative integer (0 = no ceiling).")
+
 # Optional inclusion of DANTE_TIR_FALLBACK reps in the RepeatMasker
 # library. Default OFF to preserve previous behaviour byte-for-byte.
 # When ON, build_fallback_tir_library re-clusters fallback survivors,
@@ -1913,7 +1928,8 @@ rule make_bigwig_density:
     params:
         bwdir=F"{config['output_dir']}/Repeat_density_by_class_bigwig",
         gffdir=F"{config['output_dir']}/Repeat_Annotation_NoSat_split_by_class_gff3",
-        genome_fasta=genome_fasta_cleaned
+        genome_fasta=genome_fasta_cleaned,
+        max_workers=config["bigwig_max_workers"]
     log:
         stdout=F"{config['output_dir']}/logs/make_bigwig_density.log",
         stderr=F"{config['output_dir']}/logs/make_bigwig_density.err"
@@ -1922,6 +1938,11 @@ rule make_bigwig_density:
     threads: workflow.cores
     conda:
         "envs/tidecluster.yaml"
+    # See make_unified_annotation: unset (0) lets the script auto-detect the
+    # budget (cgroup limit, walking up to the job scope, else /proc/meminfo);
+    # an HPC profile / --set-resources overrides it with the real allocation.
+    resources:
+        mem_mb=0
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
@@ -1931,7 +1952,12 @@ rule make_bigwig_density:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         ls_absolute_path=$(realpath {input.genome_seqlengths})
-        calculate_density_batch.R -d {params.gffdir} -o {params.bwdir} -g $ls_absolute_path -t {threads}
+        mem_budget_gb=0
+        if [ {resources.mem_mb} -gt 0 ]; then
+            mem_budget_gb=$(( {resources.mem_mb} / 1024 ))
+        fi
+        calculate_density_batch.R -d {params.gffdir} -o {params.bwdir} -g $ls_absolute_path -t {threads} \
+            --max_workers {params.max_workers} --mem_budget_gb "$mem_budget_gb"
         touch {output.checkpoint}
         """
 
@@ -2045,7 +2071,8 @@ rule make_unified_tandem_per_family_bigwig:
         done=F"{config['output_dir']}/Tandem_repeats_unified_split_by_family_bigwig/.done"
     params:
         splitdir=F"{config['output_dir']}/Tandem_repeats_unified_split_by_family_gff3",
-        bwdir=F"{config['output_dir']}/Tandem_repeats_unified_split_by_family_bigwig"
+        bwdir=F"{config['output_dir']}/Tandem_repeats_unified_split_by_family_bigwig",
+        max_workers=config["bigwig_max_workers"]
     log:
         stdout=F"{config['output_dir']}/logs/make_unified_tandem_per_family_bigwig.log",
         stderr=F"{config['output_dir']}/logs/make_unified_tandem_per_family_bigwig.err"
@@ -2054,6 +2081,8 @@ rule make_unified_tandem_per_family_bigwig:
     threads: workflow.cores
     conda:
         "envs/tidecluster.yaml"
+    resources:
+        mem_mb=0
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
@@ -2063,9 +2092,14 @@ rule make_unified_tandem_per_family_bigwig:
         export PATH=$scripts_dir:$PATH
         ls_absolute_path=$(realpath {input.genome_seqlengths})
         mkdir -p {params.splitdir} {params.bwdir}
+        mem_budget_gb=0
+        if [ {resources.mem_mb} -gt 0 ]; then
+            mem_budget_gb=$(( {resources.mem_mb} / 1024 ))
+        fi
         split_gff_by_name.R -i {input.unified} -o {params.splitdir} --name-prefix TRC_
         if ls {params.splitdir}/*.gff3 >/dev/null 2>&1; then
-            calculate_density_batch.R -d {params.splitdir} -o {params.bwdir} -g $ls_absolute_path -t {threads}
+            calculate_density_batch.R -d {params.splitdir} -o {params.bwdir} -g $ls_absolute_path -t {threads} \
+                --max_workers {params.max_workers} --mem_budget_gb "$mem_budget_gb"
         else
             echo "No tandem families to split — nothing to do"
         fi
@@ -2087,7 +2121,8 @@ rule make_tidecluster_tandem_per_family_bigwig:
     output:
         done=F"{config['output_dir']}/Tandem_repeats_TideCluster_split_by_family_bigwig/.done"
     params:
-        bwdir=F"{config['output_dir']}/Tandem_repeats_TideCluster_split_by_family_bigwig"
+        bwdir=F"{config['output_dir']}/Tandem_repeats_TideCluster_split_by_family_bigwig",
+        max_workers=config["bigwig_max_workers"]
     log:
         stdout=F"{config['output_dir']}/logs/make_tidecluster_tandem_per_family_bigwig.log",
         stderr=F"{config['output_dir']}/logs/make_tidecluster_tandem_per_family_bigwig.err"
@@ -2096,6 +2131,8 @@ rule make_tidecluster_tandem_per_family_bigwig:
     threads: workflow.cores
     conda:
         "envs/tidecluster.yaml"
+    resources:
+        mem_mb=0
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
@@ -2105,8 +2142,13 @@ rule make_tidecluster_tandem_per_family_bigwig:
         export PATH=$scripts_dir:$PATH
         ls_absolute_path=$(realpath {input.genome_seqlengths})
         mkdir -p {params.bwdir}
+        mem_budget_gb=0
+        if [ {resources.mem_mb} -gt 0 ]; then
+            mem_budget_gb=$(( {resources.mem_mb} / 1024 ))
+        fi
         if ls {input.split_files}/*.gff3 >/dev/null 2>&1; then
-            calculate_density_batch.R -d {input.split_files} -o {params.bwdir} -g $ls_absolute_path -t {threads}
+            calculate_density_batch.R -d {input.split_files} -o {params.bwdir} -g $ls_absolute_path -t {threads} \
+                --max_workers {params.max_workers} --mem_budget_gb "$mem_budget_gb"
         else
             echo "No TideCluster per-cluster split files — nothing to do"
         fi
