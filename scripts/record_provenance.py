@@ -117,6 +117,7 @@ def _filter_config(config: dict) -> dict:
         "include_dante_tir_fallback_in_library",
         "dante_tir_fallback_library_min_multiplicity",
         "cleanup_intermediates",
+        "max_memory_gb",
     )
     return {k: config[k] for k in keys if k in config}
 
@@ -124,8 +125,32 @@ def _filter_config(config: dict) -> dict:
 # ──────────────────────────────────────────────────────────────────────────
 # Library API
 # ──────────────────────────────────────────────────────────────────────────
+def _default_resources() -> dict:
+    """Resolve the memory budget for the ``resources`` block.
+
+    Used when the caller did not pass one (the CLI ``init`` subcommand). The
+    budget's SOURCE is the part worth recording: a run whose pools were sized
+    from host ``MemAvailable`` under a batch scheduler was sized against the
+    node, not the job, and that is the difference between a completed run and an
+    OOM kill — see scripts/mem_utils.py.
+    """
+    try:
+        sys.path.insert(0, str(_HERE))
+        from mem_utils import memory_budget_mb, scheduler_job_id
+        budget_mb, source = memory_budget_mb()
+        job = scheduler_job_id()
+    except Exception:
+        return {"memory_budget_mb": None, "memory_budget_source": "unavailable"}
+    return {
+        "memory_budget_mb": round(budget_mb, 1) if budget_mb is not None else None,
+        "memory_budget_source": source,
+        "scheduler_job": (F"{job[0]}={job[1]}" if job else None),
+    }
+
+
 def init_provenance(config_path: str | Path,
-                    output_dir: str | Path) -> Path:
+                    output_dir: str | Path,
+                    resources: dict | None = None) -> Path:
     """Phase-1 write. Returns the provenance JSON path."""
     import yaml
     config = yaml.safe_load(Path(config_path).read_text()) or {}
@@ -144,6 +169,7 @@ def init_provenance(config_path: str | Path,
         "user": getpass.getuser(),
         "container_sif": _detect_container(),
         "config": _filter_config(config),
+        "resources": resources if resources is not None else _default_resources(),
         "envs": {},
     }
     out = output_dir / "run_provenance.json"

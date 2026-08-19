@@ -139,6 +139,7 @@ and TideCluster tuning, in **[docs/configuration.md](docs/configuration.md)**):
 | `tidecluster_reannotate_superfamily_merge` | `True` | Group sibling TRCs by superfamily when applying the RM-on-TideCluster array-length filter, so a real tandem array tiled by several near-identical satellite TRCs is recovered instead of fragmented and lost (and the result no longer depends on culling) |
 | `rm_tc_tandem_gate` | `True` | A TideCluster-RM satellite may override a TE call only where independent tandem evidence (TideHunter) supports it; an unsupported satellite tiling a non-tandem TE is demoted below the TE, preventing spurious TE→satellite over-masking |
 | `bigwig_max_workers` | `0` (no ceiling) | Hard ceiling on concurrent workers in the BigWig density rules. They already size the pool by measuring the heaviest task's peak RSS against the (cgroup-aware) memory budget; set > 0 to pin it instead |
+| `max_memory_gb` | `0` (auto-detect) | Memory available to the run, in GB — the scheduler's allocation (`run_pipeline.py -m 128`). Sizes every memory-gated worker pool. Set it on a cluster or in a container: `/proc/meminfo` reports the whole node, not the job |
 | `reduce_library` | `True` | Deduplicate the RepeatMasker library (smaller, faster) |
 | `cleanup_intermediates` | `minimal` | Delete per-tool scratch after a successful run: `minimal` (default), `maximal` (also the big TideCluster trees + tool workdirs), or `none`. `run_pipeline.py --keep-all` forces `none`; manifest outputs are never touched |
 

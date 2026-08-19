@@ -25,6 +25,43 @@ template is in [`config_full.yaml`](../config_full.yaml).
 | `bigwig_max_workers` | `0` (no ceiling) | Hard ceiling on concurrent workers in the BigWig density rules (`make_bigwig_density`, `make_unified_tandem_per_family_bigwig`, `make_tidecluster_tandem_per_family_bigwig`), independent of `threads`. Caps **concurrency only** — every task writes its own independent `.bw`, so this cannot change any track. The default is `0` because those rules size the pool from a **measurement** rather than a guess: the heaviest task (largest input, finest resolution) runs first on its own, and the pool is then `budget × 0.8 / its peak RSS`, where the budget is `resources.mem_mb` when a profile sets it, else the tightest of the cgroup limit (walking **up** the hierarchy, so a PBS/Slurm job-scope limit is honoured rather than the node's free memory) and `/proc/meminfo MemAvailable`. **Why it exists:** on a 94.26 Gbp assembly `make_tidecluster_tandem_per_family_bigwig` peaked at **568.5 GB** — 74 % of a 768 GB host — producing 1,603 small per-family tracks, because each of the 3,206 concurrent tasks built the whole-genome 94.26 M-bin tile grid before discarding all but the bins it occupied. That grid is gone (the tiling is now streamed one sequence at a time), and this gates what remains: GFF3 import and the merged output track. Set > 0 to pin the worker count directly, e.g. on a scheduler where no memory budget can be detected. Integer ≥ 0. |
 | `rm_tc_tandem_gate` | `True` | Tandem gate for the unified annotation. A Tier-4 RM-on-TideCluster satellite may override a Tier-5 TE call **only where it has independent tandem evidence** (raw TideHunter). An RM_TC array with no tandem support — a short AT-rich consensus tiling a genuinely non-tandem TE (e.g. a Tekay LTR-RT) — is demoted below the TE, so the TE is not spuriously re-labelled satellite. RM_TC over non-TE sequence and genuine satellites are unaffected. |
 
+## Resources
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_memory_gb` | `0` (auto-detect) | Memory available to this run, in **GB** — the allocation the scheduler granted (`qsub -l mem=128gb`, `--mem=128G`), not a per-rule figure. Sets the default `resources.mem_mb` of every memory-gated rule, so one value sizes the `make_unified_annotation` worker pool, the three BigWig density pools, DANTE_TIR's concurrent CAP3 assemblies and TideCluster's TideHunter/TAREAN pools. `run_pipeline.py -m 128` is the same thing from the command line (and wins over the config file). An HPC profile or `--set-resources` still overrides it per rule. |
+
+**Why you should set this on a cluster.** With `0` the budget is detected, and
+detection can be wrong in exactly the situation CARP is usually run in — a `.sif`
+under PBS/Slurm. `/proc/meminfo MemAvailable` reports the **host**, because the
+kernel does not namespace it; the cgroup limit that will actually kill the job is
+normally set on an *ancestor* job scope, which may not be reachable from inside
+the container (controllers not delegated, `/sys/fs/cgroup` not mounted, or a
+scheduler that enforces by polling instead). Detection then cannot distinguish
+"no limit" from "a limit I cannot see", every pool sizes itself against the whole
+node, and the run is OOM-killed hours in with no earlier symptom. This is
+[TideCluster issue #6](https://github.com/kavonrtep/TideCluster/issues/6), where a
+128 GB job believed it had 1.6 TB.
+
+**Detection order** when `max_memory_gb` is `0` (first hit wins,
+`scripts/mem_utils.py` / `.R`, matching TideCluster 1.20.0's chain):
+
+| # | Source | Notes |
+|---|--------|-------|
+| 1 | `max_memory_gb` / `-m` | the explicit allocation |
+| 2 | `AGENT_MEMORY` | GB |
+| 3 | `PBS_RESC_MEM` (bytes), `SLURM_MEM_PER_NODE` (MB), `LSB_MAX_MEM_RUSAGE` (KB), `SLURM_MEM_PER_CPU` × `SLURM_CPUS_ON_NODE` | scheduler variables cross the container boundary intact, so they work where cgroups do not — unless stripped by `--cleanenv` / `--containall` |
+| 4/5 | the tighter of the cgroup limit (walked leaf → root, v1 + v2, minus current usage) and `/proc/meminfo MemAvailable` | exceeding either kills the job |
+| 6 | nothing readable | pools are not memory-gated |
+
+Sources 1–3 name an *allocation*, so 80 % of it is offered to the pools, leaving
+room for the parent process and page cache; 4–5 are already availability
+readings and are used as-is. The resolved figure and its source are printed as
+the second line of every run (`[mem] budget 104858 MB from PBS_RESC_MEM …`) and
+recorded in `run_provenance.json` under `resources`. If the budget ends up
+coming from host memory while a scheduler job id is set, the run says so with a
+warning at startup — the case where you want `-m`.
+
 ## Library reduction
 
 These three flags are **independent** of each other.
