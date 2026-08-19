@@ -32,7 +32,7 @@ option_list <- list(
   make_option(c("--max_workers"), type="integer", default=0,
               help="Hard ceiling on concurrent workers; 0 = no ceiling (the memory gate still applies) [default %default]"),
   make_option(c("--mem_budget_gb"), type="double", default=0,
-              help="Memory budget in GB for sizing the worker pool; 0 = auto-detect (tightest of the cgroup limit and MemAvailable) [default %default]")
+              help="Memory budget in GB (the job's allocation) for sizing the worker pool; 0 = auto-detect: AGENT_MEMORY, then the scheduler environment (PBS_RESC_MEM, SLURM_MEM_PER_NODE, ...), then the tightest of the cgroup limit and MemAvailable [default %default]")
 )
 opt <- parse_args(OptionParser(option_list=option_list))
 
@@ -126,6 +126,12 @@ if (opt$max_workers > 0 && n_workers > opt$max_workers) {
 }
 {
   bud <- mem_budget_mb(opt$mem_budget_gb)
+  warn_if_host_budget(bud$src)   # host-wide budget under PBS/Slurm -> say so now
+  # NOTE: mem_budget_mb() already applies MEMORY_HEADROOM to an ALLOCATION
+  # source (max_memory_gb / AGENT_MEMORY / scheduler vars); the 0.8 below is
+  # this gate's own headroom and is kept for the measured sources (cgroup,
+  # MemAvailable), which arrive unfactored. An explicit budget is therefore
+  # spent conservatively — the gate caps concurrency only, never the result.
   if (!is.na(bud$mb) && !is.na(probe_peak) && probe_peak > 0) {
     # 20% headroom: the probe is the heaviest task, but the parent also holds the
     # seqlengths vector and the OS needs room for page cache during export.
