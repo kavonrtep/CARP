@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.6.0
+
+> **Annotation outputs are unchanged.** The memory work caps *concurrency* only:
+> both fixtures were run in pairs differing in `--max-memory` (~31×),
+> thread count and `PYTHONHASHSEED`, and the manifest outputs came back
+> byte-identical, as did `make_unified` single-batch vs multi-batch. The two
+> dependency bumps do change behaviour in one visible way: **TideCluster now
+> fails loudly where it used to exit 0 with missing results**, so a run that
+> previously "succeeded" while a step had died will now stop.
 
 - **`max_memory_gb` / `run_pipeline.py -m <GB>`: one knob for every memory gate,
   and a budget that reflects the job rather than the host.** CARP ships as a
