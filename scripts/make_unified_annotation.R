@@ -105,9 +105,11 @@ option_list <- list(
                          "workers are expensive while tier resolution is only ~13% of",
                          "this rule's wall time. 0 = no ceiling. [8]")),
   make_option("--mem_budget_gb",    type="double",    default=0,
-              help=paste("Memory budget (GB) for sizing the worker pool. 0 = detect:",
-                         "the tightest of the cgroup limit (walking up the hierarchy,",
-                         "so a PBS/Slurm job scope limit is honoured) and /proc/meminfo",
+              help=paste("Memory budget (GB) — the job's allocation — for sizing the",
+                         "worker pool. 0 = detect: AGENT_MEMORY, then the scheduler",
+                         "environment (PBS_RESC_MEM, SLURM_MEM_PER_NODE, ...), then the",
+                         "tightest of the cgroup limit (walking up the hierarchy, so a",
+                         "PBS/Slurm job scope limit is honoured) and /proc/meminfo",
                          "MemAvailable. [0]")),
   make_option("--batch_size",       type="double",    default=200e6,
               help="Target genome bp per processing batch [200000000]"),
@@ -1752,6 +1754,12 @@ if (opt$max_workers > 0 && n_workers > opt$max_workers) {
 #    the fork-point RSS (121.9 GB vs 48.4 GB on run-000156).
 {
   bud <- mem_budget_mb(opt$mem_budget_gb)
+  warn_if_host_budget(bud$src)   # host-wide budget under PBS/Slurm -> say so now
+  # NOTE: mem_budget_mb() already applies MEMORY_HEADROOM to an ALLOCATION
+  # source (max_memory_gb / AGENT_MEMORY / scheduler vars); the 0.8 below is
+  # this gate's own headroom and is kept for the measured sources (cgroup,
+  # MemAvailable), which arrive unfactored. An explicit budget is therefore
+  # spent conservatively — the gate caps concurrency only, never the result.
   if (!is.na(bud$mb) && !is.na(parent_rss) && parent_rss > 0) {
     cap <- max(1L, as.integer(floor((bud$mb * 0.8) / parent_rss)))
     log_msg(sprintf("[mem] budget %.1fG (%s), parent rss %.1fG -> room for %d worker(s)",
