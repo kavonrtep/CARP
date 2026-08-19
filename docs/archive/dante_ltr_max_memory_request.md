@@ -2,7 +2,13 @@
 
 > Feature request for `github.com/kavonrtep/dante_ltr` — observed on **0.5.3.0**.
 >
-> **Status: open / not yet filed upstream.** This is the DANTE_LTR counterpart of
+> **Resolved in dante_ltr 0.5.4.0** (upstream issue #13), pinned by CARP. Every
+> proposal below was implemented as written: `--max_memory <GB>` (alias
+> `--max-memory`), the five-rung chain, the source named in the pool-sizing line,
+> and the scheduler warning — including the detail that the helper returns the
+> *raw* budget so the existing `0.8` at the call site is not applied twice.
+>
+> This is the DANTE_LTR counterpart of
 > [TideCluster issue #6](https://github.com/kavonrtep/TideCluster/issues/6),
 > resolved there in **TideCluster 1.20.0** with a `--max_memory <GB>` flag and a
 > five-rung resolution chain. The same class of bug is present in DANTE_LTR, and

@@ -898,6 +898,12 @@ rule dante_ltr:
     conda:
         "envs/tidecluster.yaml"
     threads: workflow.cores
+    # dante_ltr 0.5.4.0 gates its chunk pool at 0.8 * budget / per-chunk peak RSS.
+    # Left to itself it resolves the budget (scheduler env -> cgroup ->
+    # MemAvailable), but MemAvailable is the NODE's inside a .sif — upstream issue
+    # #13 — and pool_size is linear in it, so pass the allocation when we know it.
+    resources:
+        mem_mb=MAX_MEMORY_MB
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
@@ -910,7 +916,13 @@ rule dante_ltr:
         # hard limit for this rule. Durable fix is upstream —
         # see docs/archive/dante_ltr_too_many_open_files_request.md.
         ulimit -n "$(ulimit -Hn)" || true
-        dante_ltr -o {params.prefix} -s {input.fasta} -g {input.gff} -c {threads} -M 1 -S 50000000
+        # --max_memory takes GB; below 1 GB pass nothing and let dante_ltr resolve
+        # its own budget (its chain matches scripts/mem_utils.py).
+        max_mem_arg=""
+        if [ {resources.mem_mb} -ge 1024 ]; then
+            max_mem_arg="--max_memory $(( {resources.mem_mb} / 1024 ))"
+        fi
+        dante_ltr -o {params.prefix} -s {input.fasta} -g {input.gff} -c {threads} -M 1 -S 50000000 $max_mem_arg
         # if exit status is 0 and gff3 file was created but html is missing, create an empty file
         echo "DANTE LTR-RTs finished"
         if [ -f {output.gff} ]; then
