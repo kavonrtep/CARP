@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+- **`max_memory_gb` / `run_pipeline.py -m <GB>`: one knob for every memory gate,
+  and a budget that reflects the job rather than the host.** CARP ships as a
+  `.sif` and is usually run under PBS/Slurm, where `/proc/meminfo MemAvailable`
+  reports the **node** — the kernel does not namespace it — and the cgroup limit
+  that will actually kill the job normally sits on an *ancestor* job scope that
+  may be unreachable from inside the container (controllers not delegated,
+  `/sys/fs/cgroup` not mounted, or a scheduler enforcing by polling). Detection
+  therefore could not distinguish "no limit" from "a limit I cannot see", and
+  `run_pipeline.py` had no memory flag at all, so a default
+  `singularity run … -c config.yaml -t 96` carried **no** memory information into
+  the pipeline: every gated pool sized itself against the whole node and the run
+  was OOM-killed hours in with no earlier symptom (the failure behind
+  [TideCluster #6](https://github.com/kavonrtep/TideCluster/issues/6), where a
+  128 GB job believed it had 1.6 TB). The new value is the job's **allocation**;
+  it reaches the tools through `resources.mem_mb`, so an HPC profile or
+  `--set-resources` still overrides it per rule, and it now sizes the
+  `make_unified_annotation` worker pool, the three BigWig density pools and
+  DANTE_TIR's concurrent CAP3 assemblies from a single place. Default `0` keeps
+  every rule byte-identical to before.
+- **Memory-budget resolution is now scheduler-aware, and says where the number
+  came from.** `scripts/mem_utils.R` gained the rungs that survive a container
+  boundary and a Python mirror (`scripts/mem_utils.py`), sharing one chain and
+  one set of source labels with TideCluster 1.20.0's
+  `tc_utils.memory_budget_mb()`: explicit budget → `AGENT_MEMORY` →
+  `PBS_RESC_MEM` / `SLURM_MEM_PER_NODE` / `LSB_MAX_MEM_RUSAGE` /
+  `SLURM_MEM_PER_CPU` × `SLURM_CPUS_ON_NODE` → the tighter of the cgroup
+  headroom (walked leaf → root, v1 + v2) and `MemAvailable` → nothing. Allocation
+  sources carry 80 % headroom; the measured readings are used as-is, so runs that
+  detect a budget today are unaffected. Every run now prints
+  `[mem] budget … from <source>` as its second line and records
+  `resources.memory_budget_mb` / `memory_budget_source` in
+  `run_provenance.json`; when the budget came from host memory while
+  `$PBS_JOBID`/`$SLURM_JOB_ID` is set, it warns at startup instead of failing in
+  hour five.
+- **`dante_tir_cap3_max_memory_gb` now outranks `resources.mem_mb`** (it was the
+  other way round), so the global `max_memory_gb` cannot silently override a CAP3
+  budget pinned for that tool. No effect at the default `0`.
+
 ## 1.5.1
 
 > **All BigWig tracks are unchanged** — every `.bw` verified byte-identical on

@@ -77,6 +77,16 @@ dante_tir_fallback_min_cluster_size: 3
 dante_tir_fallback_max_group_size: 1000
 dante_line_max_group_size: 1000
 
+# Memory available to this run, in GB — the scheduler's allocation, not a
+# per-rule figure. 0 = auto-detect (AGENT_MEMORY, then the scheduler environment
+# PBS_RESC_MEM / SLURM_MEM_PER_NODE / ..., then the cgroup limit, then
+# MemAvailable). Sizes every memory-gated pool in the pipeline; the equivalent
+# CLI flag is `run_pipeline.py -m 128`. Set it explicitly on a cluster or in a
+# container: /proc/meminfo is not namespaced, so it reports the node rather than
+# the job, and the job's cgroup limit is often unreachable from inside the .sif.
+# The run prints the resolved budget and its source at startup. See docs.
+max_memory_gb: 0
+
 # CAP3 memory budget (GB) for DANTE_TIR's concurrent assemblies. 0 = auto:
 # DANTE_TIR 0.3.0 reads the cgroup limit (else node RAM) and uses 60%. The
 # dante_tir rule instead derives 60% of resources.mem_mb when a profile allocates

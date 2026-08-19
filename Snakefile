@@ -234,6 +234,31 @@ if "bigwig_max_workers" not in config:
 if not isinstance(config["bigwig_max_workers"], int) or config["bigwig_max_workers"] < 0:
     raise ValueError("Invalid value for bigwig_max_workers: must be a non-negative integer (0 = no ceiling).")
 
+# Memory allocated to this run, in GB — the number the scheduler granted
+# (`qsub -l mem=128gb`, `--mem=128G`), not a per-rule figure. Default 0 = detect
+# it (scripts/mem_utils.py resolution chain: AGENT_MEMORY, the scheduler
+# environment, the cgroup limit, then MemAvailable).
+#
+# Why an explicit knob is worth having: CARP normally runs from a .sif, and
+# inside a container /proc/meminfo reports the HOST — the kernel does not
+# namespace it — while the cgroup limit that will actually kill the job usually
+# sits on an ancestor job scope that may not be reachable (controllers not
+# delegated, /sys/fs/cgroup not mounted, or a scheduler enforcing by polling).
+# Detection then cannot distinguish "no limit" from "a limit I cannot see", and
+# every memory-gated pool sizes itself against the whole node. This is
+# TideCluster issue #6. `run_pipeline.py -m <GB>` sets this.
+#
+# It reaches the tools through `resources.mem_mb`, so an HPC profile or
+# --set-resources still overrides it per rule. When unset MAX_MEMORY_MB is 0 and
+# every rule below is byte-identical to before this knob existed.
+if "max_memory_gb" not in config:
+    config["max_memory_gb"] = 0
+if (isinstance(config["max_memory_gb"], bool)
+        or not isinstance(config["max_memory_gb"], (int, float))
+        or config["max_memory_gb"] < 0):
+    raise ValueError("Invalid value for max_memory_gb: must be a number >= 0 (0 = auto-detect).")
+MAX_MEMORY_MB = int(config["max_memory_gb"] * 1024)
+
 # Optional inclusion of DANTE_TIR_FALLBACK reps in the RepeatMasker
 # library. Default OFF to preserve previous behaviour byte-for-byte.
 # When ON, build_fallback_tir_library re-clusters fallback survivors,
@@ -490,25 +515,29 @@ rule dante_tir:
     conda:
         "envs/dante_tir.yaml"
     threads: workflow.cores
-    # mem_mb defaults to 0 (unset); an HPC profile / --set-resources allocates it.
-    # When set, the shell caps DANTE_TIR's CAP3 memory budget at 60% of it so CAP3
-    # respects the job allocation even on schedulers that enforce no cgroup limit.
+    # mem_mb comes from config max_memory_gb (0 = unset); an HPC profile /
+    # --set-resources overrides it per rule. When set, the shell caps DANTE_TIR's
+    # CAP3 memory budget at 60% of it so CAP3 respects the job allocation even on
+    # schedulers that enforce no cgroup limit.
     resources:
-        mem_mb=0
+        mem_mb=MAX_MEMORY_MB
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
         # Resolve the CAP3 memory budget passed to DANTE_TIR 0.3.0's --cap3_max_memory
-        # (GB). Precedence: 60% of the scheduler allocation (resources.mem_mb) when
-        # set; else the explicit config knob; else pass nothing (0.3.0 auto-detects
-        # the cgroup/node memory itself). 0 => omit the flag.
+        # (GB). Precedence: the explicit per-tool knob wins, then 60% of the memory
+        # allocation (resources.mem_mb, from config max_memory_gb or a profile),
+        # else pass nothing (0.3.0 then auto-detects the cgroup/node memory itself,
+        # which over-detects inside a container). 0 => omit the flag.
+        # The knob is checked FIRST so the global max_memory_gb cannot silently
+        # override a budget the user pinned for this tool specifically.
         cap3_mem=0
-        if [ {resources.mem_mb} -gt 0 ]; then
-            cap3_mem=$(( {resources.mem_mb} * 6 / 10 / 1024 ))
-        elif [ {params.cap3_max_memory_gb} -gt 0 ]; then
+        if [ {params.cap3_max_memory_gb} -gt 0 ]; then
             cap3_mem={params.cap3_max_memory_gb}
+        elif [ {resources.mem_mb} -gt 0 ]; then
+            cap3_mem=$(( {resources.mem_mb} * 6 / 10 / 1024 ))
         fi
         cap3_arg=""
         [ "$cap3_mem" -gt 0 ] && cap3_arg="--cap3_max_memory $cap3_mem"
@@ -1767,13 +1796,15 @@ rule make_unified_annotation:
     conda:
         "envs/tidecluster.yaml"
     threads: workflow.cores
-    # mem_mb defaults to 0 (unset); an HPC profile / --set-resources allocates it.
+    # mem_mb comes from config max_memory_gb (0 = unset); an HPC profile /
+    # --set-resources overrides it per rule.
     # When set it is the authoritative budget for sizing the worker pool — under
     # PBS/Slurm the scheduler's allocation, not the node's free memory, is what
-    # gets enforced. When unset the script detects the budget itself (tightest of
-    # the cgroup limit, walking up to the job scope, and /proc/meminfo).
+    # gets enforced. When unset the script detects the budget itself (scheduler
+    # environment, then the tightest of the cgroup limit — walking up to the job
+    # scope — and /proc/meminfo).
     resources:
-        mem_mb=0
+        mem_mb=MAX_MEMORY_MB
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
@@ -1939,10 +1970,11 @@ rule make_bigwig_density:
     conda:
         "envs/tidecluster.yaml"
     # See make_unified_annotation: unset (0) lets the script auto-detect the
-    # budget (cgroup limit, walking up to the job scope, else /proc/meminfo);
-    # an HPC profile / --set-resources overrides it with the real allocation.
+    # budget (scheduler environment, then the cgroup limit walking up to the job
+    # scope, else /proc/meminfo). config max_memory_gb, an HPC profile or
+    # --set-resources supply the real allocation instead.
     resources:
-        mem_mb=0
+        mem_mb=MAX_MEMORY_MB
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
@@ -2082,7 +2114,7 @@ rule make_unified_tandem_per_family_bigwig:
     conda:
         "envs/tidecluster.yaml"
     resources:
-        mem_mb=0
+        mem_mb=MAX_MEMORY_MB
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
@@ -2132,7 +2164,7 @@ rule make_tidecluster_tandem_per_family_bigwig:
     conda:
         "envs/tidecluster.yaml"
     resources:
-        mem_mb=0
+        mem_mb=MAX_MEMORY_MB
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}

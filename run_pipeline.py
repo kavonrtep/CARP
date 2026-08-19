@@ -85,6 +85,17 @@ rDNA_45S/ITS1
     parser.add_argument('-t', '--threads', required=False, default=2, type=int,
                         help='Number of threads to use')
     parser.add_argument(
+        '-m', '--max-memory', '--max_memory', dest='max_memory', type=float,
+        default=None, metavar='GB', required=False,
+        help='Memory available to this run, in GB — the allocation the '
+             'scheduler granted (e.g. `qsub -l mem=128gb` -> `-m 128`). Sets '
+             'config max_memory_gb, which sizes every memory-gated worker pool '
+             'in the pipeline. Strongly recommended on a cluster and in a '
+             'container: /proc/meminfo reports the whole node, not the job, so '
+             'without this the pools may size themselves against memory the job '
+             'is not allowed to use. Omit to auto-detect (scheduler environment, '
+             'then the cgroup limit, then MemAvailable).')
+    parser.add_argument(
         '-S', '--snakemake_args', type=str, nargs='?', required=False, default="",
         help='Additional snakemake arguments, Usage examples: '
              '-S="--dry-run"'
@@ -105,6 +116,33 @@ rDNA_45S/ITS1
     # self-identifying even without the provenance JSON (which the
     # later commits in the versioning rollout add).
     print(F"CARP pipeline {__version__} starting", file=sys.stderr)
+
+    # Memory budget: resolve it once, here, and say where the number came from.
+    # Every memory-gated pool in the pipeline (make_unified, the BigWig density
+    # rules, DANTE_TIR's CAP3, TideCluster's TideHunter/TAREAN) sizes itself
+    # against this. Inside a .sif under PBS/Slurm the auto-detected value can be
+    # the whole node's memory rather than the job's limit, and until now that
+    # only became visible when the OOM killer arrived — TideCluster issue #6.
+    sys.path.insert(0, os.path.join(script_dir, "scripts"))
+    try:
+        from mem_utils import (describe_budget, memory_budget_mb,
+                               scheduler_job_id, warn_if_host_budget)
+        budget_mb, budget_source = memory_budget_mb(args.max_memory)
+        print(describe_budget(budget_mb, budget_source), file=sys.stderr)
+        warn_if_host_budget(budget_source)
+        job = scheduler_job_id()
+    except Exception as exc:                       # never block a run on this
+        budget_mb, budget_source, job = None, "unavailable", None
+        print(F"WARNING: could not resolve the memory budget: {exc}",
+              file=sys.stderr)
+    resources_record = {
+        "threads": args.threads,
+        "max_memory_gb": args.max_memory,
+        "memory_budget_mb": (round(budget_mb, 1) if budget_mb is not None
+                             else None),
+        "memory_budget_source": budget_source,
+        "scheduler_job": (F"{job[0]}={job[1]}" if job else None),
+    }
 
     snakefile="/opt/pipeline/snakefile"
     # create output directory if it does not exist
@@ -165,10 +203,18 @@ rDNA_45S/ITS1
             show_singularity_settings(config_object)
             exit(1)
 
+    # --config overrides the config file, so -m wins over max_memory_gb in the
+    # YAML. It goes LAST: snakemake's --config consumes a variable number of
+    # values, so anything after it (a positional target passed through -S, say)
+    # would be swallowed as another key=value.
+    config_override = (F" --config max_memory_gb={args.max_memory}"
+                       if args.max_memory is not None else "")
+
     cmd = (F"snakemake --snakefile {script_dir}/Snakefile --configfile {args.config} "
            F"--cores {args.threads} --use-conda --conda-prefix {CONDA_ENVS_PATH} "
            F"--conda-frontend conda --show-failed-logs --keep-incomplete"
-           F" {args.snakemake_args}")
+           F" {args.snakemake_args}"
+           F"{config_override}")
 
     # append cache dir to other environment variables
     env = os.environ.copy()
@@ -189,7 +235,8 @@ rDNA_45S/ITS1
             from record_provenance import (init_provenance,
                                             finalise_provenance,
                                             extend_with_envs)
-            init_provenance(args.config, output_dir)
+            init_provenance(args.config, output_dir,
+                            resources=resources_record)
             finalise_fn = finalise_provenance
             extend_fn = extend_with_envs
         except Exception as e:
@@ -219,7 +266,8 @@ rDNA_45S/ITS1
         prep_cmd = (
             F"snakemake --snakefile {script_dir}/Snakefile --configfile {args.config} "
             F"--cores {args.threads} --use-conda --conda-prefix {CONDA_ENVS_PATH} "
-            F"--conda-frontend conda --conda-create-envs-only --quiet")
+            F"--conda-frontend conda --conda-create-envs-only --quiet"
+            F"{config_override}")
         prep_rc = subprocess.call(prep_cmd, shell=True, env=env)
         if prep_rc == 0:
             try:

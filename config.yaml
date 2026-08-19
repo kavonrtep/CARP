@@ -58,6 +58,17 @@ dante_tir_fallback_min_cluster_size: 3
 #   byte-identical to no grouping. Must be >= 2.
 dante_tir_fallback_max_group_size: 1000
 dante_line_max_group_size: 1000
+# max_memory_gb (default 0 = auto-detect): memory available to this run, in GB —
+#   the allocation the scheduler granted (qsub -l mem=128gb), not a per-rule
+#   figure. Sets the default resources.mem_mb of every memory-gated rule, so one
+#   value sizes the make_unified worker pool, the BigWig pools, DANTE_TIR's CAP3
+#   assemblies and TideCluster's TideHunter/TAREAN pools. `run_pipeline.py -m 128`
+#   sets it from the command line. SET THIS ON A CLUSTER OR IN A CONTAINER:
+#   /proc/meminfo reports the whole node, not the job (the kernel does not
+#   namespace it), and the cgroup limit usually sits on an ancestor job scope
+#   that may be unreachable from inside the .sif — so auto-detection can size
+#   every pool against memory the job may not use. See docs/configuration.md.
+max_memory_gb: 0
 # dante_tir_cap3_max_memory_gb (default 0 = auto): CAP3 memory budget (GB) for
 #   DANTE_TIR's concurrent assemblies. 0 lets DANTE_TIR 0.3.0 auto-detect (it
 #   reads the cgroup limit, else node RAM, and uses 60%). The dante_tir rule
