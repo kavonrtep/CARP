@@ -82,13 +82,33 @@
 # TAREAN output are thread-count-independent. NOTE: tc_reannotate has no
 # --max_memory upstream (its RepeatMasker chunk pool is CPU-sized), so the
 # tidecluster_reannotate rule passes nothing.
+# 1.20.1 fixes two silent-failure bugs, one of which hits a CARP feature
+# directly (upstream issue #7, reported from this project):
+#   * compare_trc_by_blast.R named each dotplot after every member TRC id joined
+#     together, so a superfamily of ~61+ three-digit members blew past NAME_MAX
+#     (255 B); png() could not open the device and the script died on the FIRST
+#     loop iteration. Superfamilies are ordered by decreasing member count, so
+#     the largest is always first and the loss was TOTAL, not partial: the
+#     superfamily CSV, the manifest and the closing of the HTML page all went
+#     with it, while run_all still exited 0. That CSV is exactly what
+#     tidecluster_reannotate_superfamily_merge consumes — so on a genome with one
+#     big satellite superfamily the merge silently fell back to the plain
+#     per-TRC filter (the failure mode the feature exists to prevent), with only
+#     the rule's NOTE line to show for it. Dotplots are now named by rank
+#     (superfamily_001.png) and a failed image can no longer discard the CSV.
+#   * No run_cmd call site inspected its return status, so a dead step led to a
+#     report that denied its own missing results. Steps whose failure invalidates
+#     the outputs now abort non-zero; presentational ones warn. NOTE: a run that
+#     previously "succeeded" with missing TideCluster results will now fail the
+#     rule loudly — which is what we want, but it can surface pre-existing
+#     breakage on re-runs.
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.20.0
+  - tidecluster=1.20.1
   # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
   # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
   # resolves (TideCluster needs r-base >= 4.2).

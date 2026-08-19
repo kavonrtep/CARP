@@ -36,7 +36,21 @@
   `run_provenance.json`; when the budget came from host memory while
   `$PBS_JOBID`/`$SLURM_JOB_ID` is set, it warns at startup instead of failing in
   hour five.
-- **TideCluster 1.20.0** (from 1.19.0), which fixes the same failure upstream
+- **TideCluster 1.20.1** (from 1.19.0). **1.20.1** fixes two silent failures,
+  one of which hits a CARP feature directly (upstream issue #7, reported from
+  this project): `compare_trc_by_blast.R` named each dotplot after every member
+  TRC id joined together, so a superfamily of ~61 or more three-digit members
+  exceeded `NAME_MAX` and killed the script on its **first** iteration —
+  superfamilies are ordered by decreasing member count, so the largest one is
+  always first and the loss was total. The superfamily CSV went with it, and
+  that CSV is what `tidecluster_reannotate_superfamily_merge` reads: on a genome
+  with one big satellite superfamily the merge silently fell back to the plain
+  per-TRC filter — the exact failure it exists to prevent — while `run_all`
+  exited 0. Dotplots are now named by rank and a failed image can no longer
+  discard the CSV. 1.20.1 also makes failed pipeline steps abort non-zero
+  instead of leading to a report that denies its own missing results; a run that
+  previously "succeeded" with missing TideCluster outputs will now fail the rule
+  loudly. **1.20.0** fixes the same failure class as the work above
   (its [issue #6](https://github.com/kavonrtep/TideCluster/issues/6), reported
   from this project). TideHunter's pool size and TAREAN's thread cap were
   resolved from `MemAvailable`, so a 128 GB PBS job read a ~1.6 TB budget, ran 32
