@@ -39,7 +39,25 @@ dependencies:
   # concatenated in index order, so completion order cannot reach the output. The
   # change is confined to that loop (plus the `-S` help text); the fd-budget guard
   # from the too-many-open-files fix is retained.
-  - dante_ltr=0.5.3.0
+  #
+  # 0.5.4.0 fixes the budget that gate reads (upstream issue #13, a request from
+  # this project — docs/archive/dante_ltr_max_memory_request.md). `MemAvailable`
+  # is not namespaced, so inside a .sif under PBS/Slurm it is the NODE's free
+  # memory, not the job's limit; pool_size is linear in it, so a 128 GB job on a
+  # node reporting ~1.6 TB oversubscribes 12.5x and the one safeguard between a
+  # large `-c` and an OOM stops binding. 0.5.4.0 adds `--max_memory <GB>` and the
+  # same chain as TideCluster 1.20.0 / scripts/mem_utils.py: --max_memory ->
+  # AGENT_MEMORY -> scheduler env (PBS_RESC_MEM, SLURM_MEM_PER_NODE, ...) ->
+  # cgroup (walked leaf -> root, so an ancestor job scope is found) ->
+  # MemAvailable, naming the winning source in the pool-sizing line and warning
+  # when the budget is host-wide while a scheduler job id is set. The helper
+  # returns the RAW budget and the 0.8 headroom stays at the call site, so the
+  # factor is applied exactly once. The `dante_ltr` rule passes the job's
+  # allocation explicitly (config max_memory_gb -> resources.mem_mb). Output is
+  # unchanged — per-chunk results stay index-keyed, so pool size cannot reach it;
+  # verified on tiny_pea, 0.5.3.0 vs 0.5.4.0 byte-identical on DANTE_LTR.gff3
+  # (26,150 features) and DANTE_LTR_statistics.csv but for the version header.
+  - dante_ltr=0.5.4.0
   - repeatmasker=4.1.2.p1
   - seqkit=2.8.2
   - cap3=10.2011

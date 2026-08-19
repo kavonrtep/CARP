@@ -36,6 +36,23 @@
   `run_provenance.json`; when the budget came from host memory while
   `$PBS_JOBID`/`$SLURM_JOB_ID` is set, it warns at startup instead of failing in
   hour five.
+- **DANTE_LTR 0.5.4.0** (from 0.5.3.0), closing the last blind spot in the stack
+  (upstream issue #13, a request from this project —
+  `docs/archive/dante_ltr_max_memory_request.md`). 0.5.3.0 gates its chunk pool at
+  `0.8 × MemAvailable / per-chunk peak RSS`; the per-chunk term is measured exactly
+  (largest chunk probed first, `ru_maxrss`) but `MemAvailable` is not namespaced, so
+  inside a `.sif` it is the node's free memory. `pool_size` is linear in that budget,
+  so a 128 GB job on a node reporting ~1.6 TB oversubscribes 12.5× and the one
+  safeguard between a large `-c` and an OOM stops binding — on the 94 Gbp genome a
+  single chunk in flight already peaked at 108.9 GB. 0.5.4.0 adds `--max_memory <GB>`
+  and the same resolution chain as TideCluster 1.20.0 and `scripts/mem_utils.py`,
+  names the winning source in the pool-sizing line, and warns when the budget is
+  host-wide while a scheduler job id is set. The `dante_ltr` rule now passes the
+  job's allocation explicitly via `resources.mem_mb`. Output is unchanged: per-chunk
+  results stay index-keyed and are concatenated in index order, so pool size cannot
+  reach the GFF3 — verified on tiny_pea, where 0.5.3.0 and 0.5.4.0 on identical
+  inputs give a byte-identical `DANTE_LTR.gff3` (26,150 features) and
+  `DANTE_LTR_statistics.csv` apart from the `##DANTE_LTR version` header.
 - **TideCluster 1.20.1** (from 1.19.0). **1.20.1** fixes two silent failures,
   one of which hits a CARP feature directly (upstream issue #7, reported from
   this project): `compare_trc_by_blast.R` named each dotplot after every member
