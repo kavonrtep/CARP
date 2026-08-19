@@ -1025,6 +1025,12 @@ rule tidecluster_long:
     conda:
         "envs/tidecluster_run.yaml"
     threads: workflow.cores
+    # TideCluster 1.20.0 sizes its TideHunter pool and TAREAN thread cap from a
+    # memory budget. Left to itself it resolves one (scheduler env -> cgroup ->
+    # MemAvailable), but MemAvailable is the NODE's inside a .sif — issue #6 —
+    # so pass the job's allocation explicitly whenever we know it.
+    resources:
+        mem_mb=MAX_MEMORY_MB
 
     shell:
         """
@@ -1046,7 +1052,13 @@ rule tidecluster_long:
         if [ -n "{params.rdna_library}" ]; then
             rdna_lib_arg="--rdna_library $(realpath {params.rdna_library})"
         fi
-        tc_extra="{params.rdna_flag} {params.overlaps_flag} $rdna_lib_arg"
+        # --max_memory takes GB; below 1 GB pass nothing and let TideCluster
+        # resolve its own budget (its chain matches scripts/mem_utils.py).
+        max_mem_arg=""
+        if [ {resources.mem_mb} -ge 1024 ]; then
+            max_mem_arg="--max_memory $(( {resources.mem_mb} / 1024 ))"
+        fi
+        tc_extra="{params.rdna_flag} {params.overlaps_flag} $rdna_lib_arg $max_mem_arg"
         # NOTE - there is a bug in tidecluster - it does not correctly format html links; solution is
         # to run it in the directory where the output will be created
         echo "Library: {input.library}"
@@ -1101,6 +1113,12 @@ rule tidecluster_short:
     conda:
         "envs/tidecluster_run.yaml"
     threads: workflow.cores
+    # TideCluster 1.20.0 sizes its TideHunter pool and TAREAN thread cap from a
+    # memory budget. Left to itself it resolves one (scheduler env -> cgroup ->
+    # MemAvailable), but MemAvailable is the NODE's inside a .sif — issue #6 —
+    # so pass the job's allocation explicitly whenever we know it.
+    resources:
+        mem_mb=MAX_MEMORY_MB
 
     shell:
         """
@@ -1119,7 +1137,13 @@ rule tidecluster_short:
         if [ -n "{params.rdna_library}" ]; then
             rdna_lib_arg="--rdna_library $(realpath {params.rdna_library})"
         fi
-        tc_extra="{params.rdna_flag} {params.overlaps_flag} $rdna_lib_arg"
+        # --max_memory takes GB; below 1 GB pass nothing and let TideCluster
+        # resolve its own budget (its chain matches scripts/mem_utils.py).
+        max_mem_arg=""
+        if [ {resources.mem_mb} -ge 1024 ]; then
+            max_mem_arg="--max_memory $(( {resources.mem_mb} / 1024 ))"
+        fi
+        tc_extra="{params.rdna_flag} {params.overlaps_flag} $rdna_lib_arg $max_mem_arg"
         # NOTE - there is a bug in tidecluster - it does not correctly format html links; solution is
         # to run it in the directory where the output will be created
         if [ -z "{params.library}" ]; then
@@ -1166,6 +1190,9 @@ rule tidecluster_reannotate:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
+        # NOTE: tc_reannotate.py has no --max_memory upstream (unlike run_all /
+        # tidehunter / tarean in TideCluster 1.20.0) — its chunked RepeatMasker
+        # pool is sized by -c alone — so there is no memory budget to pass here.
         # STOPGAP (large genomes): tc_reannotate's chunked RepeatMasker opens one
         # temp-file handle per genome chunk simultaneously (~genome_bp/chunk_size,
         # ~1800 at 90 Gbp / 50 Mb) in TideCluster's split_fasta_to_chunk_files,

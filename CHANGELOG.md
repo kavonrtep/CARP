@@ -36,6 +36,20 @@
   `run_provenance.json`; when the budget came from host memory while
   `$PBS_JOBID`/`$SLURM_JOB_ID` is set, it warns at startup instead of failing in
   hour five.
+- **TideCluster 1.20.0** (from 1.19.0), which fixes the same failure upstream
+  (its [issue #6](https://github.com/kavonrtep/TideCluster/issues/6), reported
+  from this project). TideHunter's pool size and TAREAN's thread cap were
+  resolved from `MemAvailable`, so a 128 GB PBS job read a ~1.6 TB budget, ran 32
+  concurrent TideHunter parts wanting ~310 GB and was OOM-killed. 1.20.0 adds
+  `--max_memory <GB>` and one shared resolution chain (the same one CARP now
+  uses), logs the winning source, and warns when it falls through to
+  `MemAvailable` under a scheduler. The `tidecluster_long` / `tidecluster_short`
+  rules pass the job's allocation explicitly via `resources.mem_mb`, so
+  TideCluster never has to guess. `tc_reannotate` has no such flag upstream (its
+  RepeatMasker chunk pool is CPU-sized), so `tidecluster_reannotate` passes
+  nothing. On a plain host with no scheduler or container the budget is unchanged
+  (`MemAvailable` × 0.8); where a source does hit, the only difference is a
+  smaller pool — TideHunter and TAREAN output are thread-count-independent.
 - **`dante_tir_cap3_max_memory_gb` now outranks `resources.mem_mb`** (it was the
   other way round), so the global `max_memory_gb` cannot silently override a CAP3
   budget pinned for that tool. No effect at the default `0`.

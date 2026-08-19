@@ -62,13 +62,33 @@
 #     huge TRC ran alone on a single core at the tail: on the 94 Gbp genome 441 of
 #     445 jobs finished within ~2 h and TRC_1 then ran ~55 h by itself, 74 % of the
 #     stage. Thread count is memory-gated; tarean.R output is thread-independent.
+# 1.20.0 fixes the memory budget under batch schedulers and in containers
+# (TideCluster issue #6, reported from this project): TideHunter's pool size and
+# TAREAN's thread cap were resolved from /proc/meminfo MemAvailable, which the
+# kernel does not namespace — inside a .sif that is the NODE's free memory, not
+# the job's limit. A 128 GB PBS job read a ~1.6 TB budget, spawned 32 concurrent
+# TideHunter parts wanting ~310 GB, and was OOM-killed with no earlier symptom.
+# 1.20.0 adds `--max_memory <GB>` (on run_all / tidehunter / tarean) and one
+# resolution chain shared by both gates: --max_memory -> AGENT_MEMORY ->
+# scheduler environment (PBS_RESC_MEM, SLURM_MEM_PER_NODE, LSB_MAX_MEM_RUSAGE,
+# SLURM_MEM_PER_CPU x SLURM_CPUS_ON_NODE) -> cgroup limit -> MemAvailable, with
+# the winning source logged and a warning when it falls through to MemAvailable
+# under a scheduler. CARP passes the job's allocation explicitly, from config
+# max_memory_gb / `run_pipeline.py -m <GB>` via resources.mem_mb, so TideCluster
+# never has to guess; scripts/mem_utils.py mirrors the same chain and labels for
+# the rest of the pipeline. Behaviour on a plain host with no scheduler,
+# container or AGENT_MEMORY is unchanged (MemAvailable x 0.8, as before), and
+# where a source does hit the only change is a smaller pool — TideHunter and
+# TAREAN output are thread-count-independent. NOTE: tc_reannotate has no
+# --max_memory upstream (its RepeatMasker chunk pool is CPU-sized), so the
+# tidecluster_reannotate rule passes nothing.
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.19.0
+  - tidecluster=1.20.0
   # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
   # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
   # resolves (TideCluster needs r-base >= 4.2).
