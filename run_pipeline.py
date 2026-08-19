@@ -117,6 +117,11 @@ rDNA_45S/ITS1
     # later commits in the versioning rollout add).
     print(F"CARP pipeline {__version__} starting", file=sys.stderr)
 
+    if args.max_memory is not None and args.max_memory < 0:
+        print("ERROR: -m/--max-memory must be >= 0 (0 = auto-detect).",
+              file=sys.stderr)
+        exit(1)
+
     # Memory budget: resolve it once, here, and say where the number came from.
     # Every memory-gated pool in the pipeline (make_unified, the BigWig density
     # rules, DANTE_TIR's CAP3, TideCluster's TideHunter/TAREAN) sizes itself
