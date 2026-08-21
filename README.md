@@ -141,7 +141,7 @@ and TideCluster tuning, in **[docs/configuration.md](docs/configuration.md)**):
 | `bigwig_max_workers` | `0` (no ceiling) | Hard ceiling on concurrent workers in the BigWig density rules. They already size the pool by measuring the heaviest task's peak RSS against the (cgroup-aware) memory budget; set > 0 to pin it instead |
 | `max_memory_gb` | `0` (auto-detect) | Memory available to the run, in GB — the scheduler's allocation (`run_pipeline.py -m 128`). Sizes every memory-gated worker pool. Set it on a cluster or in a container: `/proc/meminfo` reports the whole node, not the job |
 | `reduce_library` | `True` | Deduplicate the RepeatMasker library (smaller, faster) |
-| `cleanup_intermediates` | `minimal` | Delete per-tool scratch after a successful run: `minimal` (default), `maximal` (also the big TideCluster trees + tool workdirs), or `none`. `run_pipeline.py --keep-all` forces `none`; manifest outputs are never touched |
+| `cleanup_intermediates` | `minimal` | Delete per-tool scratch after a successful run: `minimal` (default), `maximal` (also TideCluster scratch files + tool workdirs), or `none`. `run_pipeline.py --keep-all` forces `none`; manifest outputs are never touched |
 
 The pipeline also screens the LTR library against `Class_II/Subclass_1` elements
 from the custom library: a `Class_I` sequence that resembles a DNA transposon is

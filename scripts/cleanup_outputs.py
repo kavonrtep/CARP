@@ -16,7 +16,7 @@ unconsumed scratch):
 
 Modes:
   minimal  — clearly-unconsumed scratch (safe; the default)
-  maximal  — minimal + big TideCluster trees + tool workdirs + mmseqs tmp
+  maximal  — minimal + TideCluster scratch files + tool workdirs + mmseqs tmp
   none     — no-op
 
 Standalone CLI: ``cleanup_outputs.py <output_dir> [--mode minimal|maximal|none]
@@ -63,13 +63,42 @@ _MINIMAL = (
     "DANTE_LTR/LTR_RTs_library.fasta.filtered_ids",
 )
 
-# maximal: additionally purge the big TideCluster trees (kite/tarean can be
-# multiple GB; TideCluster_report.html does NOT deep-link them) and the tool
-# workdirs / mmseqs tmp. All verified unconsumed downstream.
+# maximal: additionally purge TideCluster scratch and the tool workdirs /
+# mmseqs tmp. All verified unconsumed downstream.
+#
+# The TideCluster entries are FILE-level, not the three whole trees they used to
+# be (TideCluster_{tarean,kite,consensus}/). Deleting the trees outright also
+# removed the inputs for `tc_per_tra_consensus.py` (per-array consensus) and
+# `tc_rerender_report.py` (regenerating the HTML report on an archived run), and
+# the kite monomer-size CSV that make_repeat_report.R / make_summary_plots.R read
+# to label a tandem family with its monomer length — so a re-rendered report
+# silently lost its "(172 bp)" labels. Measured on a 94 Gbp run: the globs below
+# free 40.2 GB of those trees' 44.6 GB (90 %), keeping 4.4 GB and all three
+# capabilities. See upstream issue #3.
+#
+# NOTE the `*_tarean/` path component on the per-TRC globs. TideCluster keeps the
+# array FASTAs twice: `TideCluster_tarean/TRC_1.fasta_tarean/TRC_1.fasta` (a
+# byte-identical copy, disposable) and `TideCluster_tarean/fasta/TRC_1.fasta`
+# (which per-array consensus needs). A looser `TideCluster_tarean/*/TRC_*.fasta`
+# matches BOTH — it would delete the very files this change exists to keep.
 _MAXIMAL = (
-    "TideCluster/*/TideCluster_tarean",
-    "TideCluster/*/TideCluster_kite",
-    "TideCluster/*/TideCluster_consensus",
+    # kite: the periodogram is input to kite_heatmaps.R, which has already run;
+    # the report renders from profile_plots/*.png + monomer_size_top3_estimats.csv
+    "TideCluster/*/TideCluster_kite/kitehor.periodogram",
+    "TideCluster/*/TideCluster_kite/_*longext*",
+    # tarean per-TRC working files: k-mer counts are written by kmer_counting.py
+    # and never read back; ggmin/monomers.RData are save()d in tarean/methods.R
+    # and never load()ed anywhere (together the largest item by far)
+    "TideCluster/*/TideCluster_tarean/*_tarean/*.kmers",
+    "TideCluster/*/TideCluster_tarean/*_tarean/ggmin.RData",
+    "TideCluster/*/TideCluster_tarean/*_tarean/monomers.RData",
+    "TideCluster/*/TideCluster_tarean/*_tarean/TRC_*.fasta",
+    # consensus: RepeatMasker leftovers from the annotation step
+    "TideCluster/*/TideCluster_consensus/*_renamed.fasta",
+    "TideCluster/*/TideCluster_consensus/*_renamed.fasta.cat",
+    "TideCluster/*/TideCluster_consensus/*_renamed.fasta.masked",
+    # documented clustering intermediate
+    "TideCluster/*/TideCluster_clustering.gff3_1.gff3",
     "Libraries/workdir",
     "Libraries/containment_workdir",
     "RepeatMasker/workdir",

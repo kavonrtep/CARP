@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **`cleanup_intermediates: maximal` no longer deletes TideCluster's three
+  working trees whole.** It removed the scratch, but it also took the inputs for
+  TideCluster's per-array consensus (`tc_per_tra_consensus.py`) and report
+  re-render (`tc_rerender_report.py`), plus the kite monomer-size CSV that
+  `make_repeat_report.R` and `make_summary_plots.R` read — so a report rebuilt
+  from an archived run silently lost its `(172 bp)` monomer labels. `maximal` now
+  deletes the disposable **files** inside those trees instead: the per-array
+  k-mer counts, `ggmin.RData` / `monomers.RData` (written by TAREAN and never
+  read back by anything), the kite periodogram, the duplicated per-array FASTAs,
+  and the RepeatMasker leftovers in `TideCluster_consensus`. Verified on a 94 Gbp
+  run: **40.2 GB of the trees' 44.6 GB still freed (90 %)**, 4.4 GB kept, all
+  three capabilities preserved. Raised upstream as issue #3.
+
 ## 1.6.0
 
 > **Annotation outputs are unchanged.** The memory work caps *concurrency* only:
