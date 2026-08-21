@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.6.1
+
+> **Annotation outputs are unchanged**; both fixtures were re-run in pairs
+> varying `--max-memory`, thread count and `PYTHONHASHSEED` together and came
+> back byte-identical. What changes is what a finished run leaves on disk:
+> `cleanup_intermediates: maximal` now keeps TideCluster's working directories
+> (purging the files inside them), so an archived run can still be re-rendered,
+> compared and fed to per-array consensus.
 
 - **TideCluster 1.21.1** (from 1.20.1), closing out the cleanup thread above.
   **1.20.2** makes `tc_comparative_analysis.R` honour the run prefix for all six
