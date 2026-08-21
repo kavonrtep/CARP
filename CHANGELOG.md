@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **TideCluster 1.21.1** (from 1.20.1), closing out the cleanup thread above.
+  **1.20.2** makes `tc_comparative_analysis.R` honour the run prefix for all six
+  of its inputs — it hardcoded `tc_` for the two consensus FASTAs, so any run made
+  with a different `-pr` (CARP uses `TideCluster`) aborted on contact.
+  **1.21.0** adds `--cleanup`, a file-level purge inside
+  `<prefix>_{kite,tarean,consensus}/`; CARP does not pass it, but keeps its own
+  set in step with `tc_utils.CLEANUP_PATTERNS`. **1.21.1** writes
+  `<prefix>_consensus/consensus_sequences_all.fasta` during **clustering** rather
+  than annotation: it previously appeared only when TideCluster was given a
+  reference library, so a CARP run without `tandem_repeat_library` produced a
+  directory that looked complete and then aborted TideCluster's cross-genome
+  comparative analysis. Every CARP run is now comparative-ready, archived ones
+  included (the analysis rebuilds the pool from `TRC_*_dimers.fasta` when it is
+  missing).
 - **`cleanup_intermediates: maximal` no longer deletes TideCluster's three
   working trees whole.** It removed the scratch, but it also took the inputs for
   TideCluster's per-array consensus (`tc_per_tra_consensus.py`) and report
