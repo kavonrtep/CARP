@@ -59,8 +59,31 @@ def build_tree(root: Path):
     touch(root / "DANTE_LTR/LTR_RTs_library.fasta.reformatted")
 
     # ── delete (maximal only) ────────────────────────────────────────────────
-    touch(root / "TideCluster/default/TideCluster_kite/monomer.csv")
-    touch(root / "TideCluster/short_monomer/TideCluster_tarean/x.kmers")
+    # TideCluster scratch, file-level. The layout mirrors a real run: per-TRC
+    # working dirs are named "<array>.fasta_tarean", and the array FASTA exists
+    # TWICE — inside the per-TRC dir (disposable copy) and under tarean/fasta/
+    # (needed by tc_per_tra_consensus.py).
+    touch(root / "TideCluster/default/TideCluster_kite/kitehor.periodogram")
+    touch(root / "TideCluster/default/TideCluster_kite/_kite_input_longext.fasta")
+    touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/TRC_1.fasta_11.kmers")
+    touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/ggmin.RData")
+    touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/monomers.RData")
+    touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/TRC_1.fasta")
+    touch(root / "TideCluster/default/TideCluster_consensus/all_renamed.fasta")
+    touch(root / "TideCluster/default/TideCluster_consensus/all_renamed.fasta.cat")
+    touch(root / "TideCluster/default/TideCluster_consensus/all_renamed.fasta.masked")
+    touch(root / "TideCluster/default/TideCluster_clustering.gff3_1.gff3")
+    touch(root / "TideCluster/short_monomer/TideCluster_tarean/TRC_9.fasta_tarean/x.kmers")
+    # capability files maximal must now PRESERVE (issue #3)
+    touch(root / "TideCluster/default/TideCluster_tarean/fasta/TRC_1.fasta")
+    touch(root / "TideCluster/default/TideCluster_tarean/SSRS_summary.csv")
+    touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/consensus.fasta")
+    touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/consensus_dimer.fasta")
+    touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/ppm_11mer_28.csv")
+    touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/img/plot.png")
+    touch(root / "TideCluster/default/TideCluster_kite/monomer_size_top3_estimats.csv")
+    touch(root / "TideCluster/default/TideCluster_kite/kitehor.rescored.peaks.tsv")
+    touch(root / "TideCluster/default/TideCluster_consensus/TRC_1_dimers.fasta")
     touch(root / "RepeatMasker/workdir/chunk1.fa")
     touch(root / "DANTE_TIR/mmseqs_combined/tmp/db")
     touch(root / "DANTE_LINE/mmseqs/clu.tsv")
@@ -88,9 +111,35 @@ MINIMAL_GONE = [
     "DANTE_LTR/LTR_RTs_library.fasta.reformatted",
 ]
 MAXIMAL_GONE = [
-    "TideCluster/default/TideCluster_kite",
-    "TideCluster/short_monomer/TideCluster_tarean",
+    "TideCluster/default/TideCluster_kite/kitehor.periodogram",
+    "TideCluster/default/TideCluster_kite/_kite_input_longext.fasta",
+    "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/TRC_1.fasta_11.kmers",
+    "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/ggmin.RData",
+    "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/monomers.RData",
+    "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/TRC_1.fasta",
+    "TideCluster/default/TideCluster_consensus/all_renamed.fasta",
+    "TideCluster/default/TideCluster_consensus/all_renamed.fasta.cat",
+    "TideCluster/default/TideCluster_consensus/all_renamed.fasta.masked",
+    "TideCluster/default/TideCluster_clustering.gff3_1.gff3",
+    "TideCluster/short_monomer/TideCluster_tarean/TRC_9.fasta_tarean/x.kmers",
     "RepeatMasker/workdir", "DANTE_TIR/mmseqs_combined", "DANTE_LINE/mmseqs",
+]
+
+# Files inside the TideCluster trees that `maximal` used to destroy (it deleted
+# the trees whole) and must now keep: the inputs for per-array consensus and
+# report re-render, plus the kite CSV CARP's own report reads for monomer-size
+# labels. `fasta/TRC_1.fasta` is the trap — a per-TRC glob written without the
+# `*_tarean/` component matches it too and would delete it.
+TIDECLUSTER_KEPT = [
+    "TideCluster/default/TideCluster_tarean/fasta/TRC_1.fasta",
+    "TideCluster/default/TideCluster_tarean/SSRS_summary.csv",
+    "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/consensus.fasta",
+    "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/consensus_dimer.fasta",
+    "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/ppm_11mer_28.csv",
+    "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/img/plot.png",
+    "TideCluster/default/TideCluster_kite/monomer_size_top3_estimats.csv",
+    "TideCluster/default/TideCluster_kite/kitehor.rescored.peaks.tsv",
+    "TideCluster/default/TideCluster_consensus/TRC_1_dimers.fasta",
 ]
 
 
@@ -122,6 +171,9 @@ class CleanupTest(unittest.TestCase):
         self.assert_keep_all()
         for rel in MINIMAL_GONE + MAXIMAL_GONE:
             self.assertFalse(self._exists(rel), f"maximal did not delete: {rel}")
+        for rel in TIDECLUSTER_KEPT:
+            self.assertTrue(self._exists(rel),
+                            f"maximal deleted a TideCluster capability file: {rel}")
 
     def test_dry_run_deletes_nothing(self):
         cleanup(self.d, "maximal", dry_run=True, log=lambda m: None)
