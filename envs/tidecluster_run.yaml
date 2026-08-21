@@ -102,13 +102,34 @@
 #     previously "succeeded" with missing TideCluster results will now fail the
 #     rule loudly — which is what we want, but it can surface pre-existing
 #     breakage on re-runs.
+# 1.20.2 / 1.21.0 / 1.21.1 (all 2026-08-21) close out the cleanup thread this
+# project opened as CARP issue #3:
+#   * 1.20.2 makes tc_comparative_analysis.R honour the run prefix for ALL six of
+#     its per-run inputs. It resolved four from the input table's
+#     tidecluster_prefix but hardcoded `tc_` for the two consensus FASTAs, so any
+#     run made with a different -pr (CARP uses -pr TideCluster) aborted at
+#     readDNAStringSet. Output for the historic all-`tc` case is byte-identical.
+#   * 1.21.0 adds `--cleanup` to run_all: a file-level purge inside
+#     <prefix>_{kite,tarean,consensus}/ that keeps a run viewable, re-renderable,
+#     comparable and usable by tc_per_tra_consensus.py. CARP does NOT pass it —
+#     cleanup here stays one post-run step behind cleanup_intermediates, covering
+#     DANTE/RepeatMasker/mmseqs scratch in the same pass — but
+#     scripts/cleanup_outputs.py::_MAXIMAL is kept character-for-character in step
+#     with tc_utils.CLEANUP_PATTERNS so one definition governs both.
+#   * 1.21.1 writes <prefix>_consensus/consensus_sequences_all.fasta during
+#     CLUSTERING rather than annotation. It used to appear only when run_all got
+#     `-l <library>`, so a CARP run without `tandem_repeat_library` produced a
+#     directory that looked complete and aborted the comparative analysis on
+#     contact. Every CARP run is now comparative-ready, existing ones included
+#     (the analysis rebuilds the pool from TRC_*_dimers.fasta when it is absent).
+#     The file is concatenated in TRC order, so it does not vary between machines.
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.20.1
+  - tidecluster=1.21.1
   # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
   # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
   # resolves (TideCluster needs r-base >= 4.2).
