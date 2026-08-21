@@ -65,6 +65,8 @@ def build_tree(root: Path):
     # (needed by tc_per_tra_consensus.py).
     touch(root / "TideCluster/default/TideCluster_kite/kitehor.periodogram")
     touch(root / "TideCluster/default/TideCluster_kite/_kite_input_longext.fasta")
+    touch(root / "TideCluster/default/TideCluster_kite/_rescored_longext.peaks.tsv")
+    touch(root / "TideCluster/default/TideCluster_kite/_kite_peaks_longext.tsv")  # kept by TideCluster
     touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/TRC_1.fasta_11.kmers")
     touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/ggmin.RData")
     touch(root / "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/monomers.RData")
@@ -113,6 +115,7 @@ MINIMAL_GONE = [
 MAXIMAL_GONE = [
     "TideCluster/default/TideCluster_kite/kitehor.periodogram",
     "TideCluster/default/TideCluster_kite/_kite_input_longext.fasta",
+    "TideCluster/default/TideCluster_kite/_rescored_longext.peaks.tsv",
     "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/TRC_1.fasta_11.kmers",
     "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/ggmin.RData",
     "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/monomers.RData",
@@ -138,6 +141,7 @@ TIDECLUSTER_KEPT = [
     "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/ppm_11mer_28.csv",
     "TideCluster/default/TideCluster_tarean/TRC_1.fasta_tarean/img/plot.png",
     "TideCluster/default/TideCluster_kite/monomer_size_top3_estimats.csv",
+    "TideCluster/default/TideCluster_kite/_kite_peaks_longext.tsv",
     "TideCluster/default/TideCluster_kite/kitehor.rescored.peaks.tsv",
     "TideCluster/default/TideCluster_consensus/TRC_1_dimers.fasta",
 ]

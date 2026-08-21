@@ -76,6 +76,16 @@ _MINIMAL = (
 # free 40.2 GB of those trees' 44.6 GB (90 %), keeping 4.4 GB and all three
 # capabilities. See upstream issue #3.
 #
+# These patterns are kept CHARACTER-FOR-CHARACTER in step with TideCluster's own
+# `tc_utils.CLEANUP_PATTERNS` (its `--cleanup`, added in 1.21.0), so there is one
+# definition of "TideCluster scratch" and a future divergence shows up as a plain
+# diff. We deliberately do NOT pass `--cleanup`: cleanup in CARP is one post-run
+# step behind one config key that also covers DANTE / RepeatMasker / mmseqs
+# scratch. Note their set keeps `_kite_peaks_longext.tsv` (146 KB) while deleting
+# the other two long-period files — match that rather than using a broader
+# `_*longext*`; being wider than the owner's contract on paths we do not own is
+# how this breaks silently later.
+#
 # NOTE the `*_tarean/` path component on the per-TRC globs. TideCluster keeps the
 # array FASTAs twice: `TideCluster_tarean/TRC_1.fasta_tarean/TRC_1.fasta` (a
 # byte-identical copy, disposable) and `TideCluster_tarean/fasta/TRC_1.fasta`
@@ -85,18 +95,18 @@ _MAXIMAL = (
     # kite: the periodogram is input to kite_heatmaps.R, which has already run;
     # the report renders from profile_plots/*.png + monomer_size_top3_estimats.csv
     "TideCluster/*/TideCluster_kite/kitehor.periodogram",
-    "TideCluster/*/TideCluster_kite/_*longext*",
     # tarean per-TRC working files: k-mer counts are written by kmer_counting.py
     # and never read back; ggmin/monomers.RData are save()d in tarean/methods.R
     # and never load()ed anywhere (together the largest item by far)
-    "TideCluster/*/TideCluster_tarean/*_tarean/*.kmers",
-    "TideCluster/*/TideCluster_tarean/*_tarean/ggmin.RData",
-    "TideCluster/*/TideCluster_tarean/*_tarean/monomers.RData",
-    "TideCluster/*/TideCluster_tarean/*_tarean/TRC_*.fasta",
+    "TideCluster/*/TideCluster_tarean/*.fasta_tarean/*.kmers",
+    "TideCluster/*/TideCluster_tarean/*.fasta_tarean/ggmin.RData",
+    "TideCluster/*/TideCluster_tarean/*.fasta_tarean/monomers.RData",
+    "TideCluster/*/TideCluster_tarean/*.fasta_tarean/TRC_*.fasta",
     # consensus: RepeatMasker leftovers from the annotation step
-    "TideCluster/*/TideCluster_consensus/*_renamed.fasta",
-    "TideCluster/*/TideCluster_consensus/*_renamed.fasta.cat",
-    "TideCluster/*/TideCluster_consensus/*_renamed.fasta.masked",
+    "TideCluster/*/TideCluster_consensus/*_renamed.fasta*",
+    # long-period re-search intermediates
+    "TideCluster/*/TideCluster_kite/_kite_input_longext.fasta",
+    "TideCluster/*/TideCluster_kite/_rescored_longext.*",
     # documented clustering intermediate
     "TideCluster/*/TideCluster_clustering.gff3_1.gff3",
     "Libraries/workdir",
