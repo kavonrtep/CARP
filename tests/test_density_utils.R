@@ -204,4 +204,46 @@ test_zero_length_seq <- function() {
 }
 test_zero_length_seq()
 
+# 3. split_wide_ranges — the BigWig item-width cap. Run-length merging collapses
+#    the gap between a sparse family's features into ONE interval, and on a 94 Gbp
+#    assembly with 2.1 Gb chromosomes that reached 2.07 Gb, which the UCSC writer
+#    behind export(format="bigwig") could not serialise ("Internal error
+#    ucsc/bbiWrite.c 414"). Two of 1,599 families failed that way on run-000170
+#    and took the whole run down at the last rule. The cap must be
+#    representation-only: identical values at every base, and a strict no-op when
+#    nothing exceeds it (so smaller genomes keep byte-identical tracks).
+test_split_wide_ranges <- function() {
+  sl <- setNames(as.integer(c(250e6, 30e6)), c("big", "small"))
+  gr <- GRanges(c("big", "big", "small"),
+                IRanges(start = c(1L, 240000001L, 1L),
+                        end   = c(240000000L, 250000000L, 30000000L)),
+                score = c(0, 2.5, 1),
+                seqinfo = Seqinfo(names(sl), unname(sl)))
+
+  out <- split_wide_ranges(gr, max_width = 100e6)
+  if (max(width(out)) > 100e6) stop("split_wide_ranges left an over-wide range")
+  # the 240 Mb range becomes 3 pieces (100 + 100 + 40); the others are untouched
+  if (length(out) != 5L) stop(sprintf("expected 5 ranges, got %d", length(out)))
+  if (!identical(coverage(gr, weight = "score"), coverage(out, weight = "score")))
+    stop("split_wide_ranges changed the per-base values")
+  if (!identical(seqinfo(gr), seqinfo(out)))
+    stop("split_wide_ranges lost the seqinfo")
+  if (!identical(sum(as.numeric(width(gr))), sum(as.numeric(width(out)))))
+    stop("split_wide_ranges changed total covered bp")
+  if (is.unsorted(out)) stop("split_wide_ranges returned an unsorted track")
+
+  # strict no-op below the cap — this is what keeps smaller genomes byte-identical
+  if (!identical(split_wide_ranges(gr, max_width = 1e9), gr))
+    stop("split_wide_ranges must return the input unchanged when nothing is over-wide")
+  # exact multiple of the cap must not emit an empty trailing piece
+  ex <- GRanges("big", IRanges(1L, 200000000L), score = 1,
+                seqinfo = Seqinfo(names(sl), unname(sl)))
+  if (length(split_wide_ranges(ex, max_width = 100e6)) != 2L)
+    stop("exact multiple of the cap must split into exactly 2 pieces")
+  if (length(split_wide_ranges(gr[0], max_width = 100e6)) != 0L)
+    stop("empty input must give empty output")
+  cat("  split_wide_ranges: values preserved, no-op below the cap, boundaries clean\n")
+}
+test_split_wide_ranges()
+
 cat("test_density_utils: PASSED\n")

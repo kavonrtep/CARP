@@ -192,6 +192,48 @@ rle_merge_granges <- function(d) {
 # byte-identical to computing the whole grid at once, at a fraction of the peak
 # memory. coverage() is still taken over the whole of g, so each sequence's Rle
 # (and hence binnedAverage's trim()-based partial-bin scaling) is unchanged.
+# ── BigWig item-width cap ────────────────────────────────────────────────────
+# The UCSC/kent writer behind rtracklayer's BigWig export fails on very wide
+# single items, and run-length merging is what creates them: a family with only a
+# handful of features on a multi-gigabase chromosome collapses the gap between
+# them into ONE zero-value interval spanning almost the whole sequence.
+#
+# Measured on run-000170 (94.3 Gbp, 2.1 Gb chromosomes): TRC_319 has 47 features
+# across 22 sequences, which produced a single 2.07 Gb zero interval, and
+# export(format="bigwig") died with "UCSC library operation failed" / "Internal
+# error ucsc/bbiWrite.c 414" at step = 1000 while the same track wrote fine at
+# step = 10000. Two of 1,599 families failed that way and took a 10-day run down
+# with them at the very last rule, after every annotation output was complete.
+#
+# Splitting such an interval into consecutive pieces carrying the same value is
+# representation-only: every base keeps exactly the value it had, so no track
+# changes meaning and no consumer sees a difference. It is also a no-op wherever
+# no run is that wide — i.e. on every genome small enough not to have the problem,
+# whose outputs stay byte-identical.
+#
+# 100 Mb is far below where the writer misbehaves (2.07 Gb) and far above any
+# genuine density run, so it costs a handful of extra intervals: a 2.07 Gb run
+# becomes 21.
+.BW_MAX_ITEM_WIDTH <- 100e6
+
+split_wide_ranges <- function(gr, max_width = .BW_MAX_ITEM_WIDTH) {
+  if (length(gr) == 0L) return(gr)
+  w <- as.numeric(width(gr))
+  if (all(w <= max_width)) return(gr)              # fast path: nothing to split
+  n   <- as.integer(ceiling(w / max_width))        # pieces per input range
+  idx <- rep(seq_along(gr), n)                     # parent of each piece
+  k   <- sequence(n) - 1L                          # 0-based piece number
+  # Arithmetic in double: start + k * max_width can exceed .Machine$integer.max
+  # before pmin() brings it back under the sequence length.
+  s <- as.numeric(start(gr))[idx] + k * max_width
+  e <- pmin(s + max_width - 1, as.numeric(end(gr))[idx])
+  out <- GRanges(seqnames = seqnames(gr)[idx],
+                 ranges   = IRanges(start = as.integer(s), end = as.integer(e)),
+                 seqinfo  = seqinfo(gr))
+  mcols(out) <- mcols(gr)[idx, , drop = FALSE]
+  out
+}
+
 density_track <- function(g, chr_size_all, step, N_for_mean = 10,
                           keep_unoccupied = FALSE) {
   g   <- reduce(g, ignore.strand = TRUE)
@@ -228,5 +270,8 @@ density_track <- function(g, chr_size_all, step, N_for_mean = 10,
   if (length(pieces) == 0L)
     return(GRanges(seqnames = character(0), ranges = IRanges(),
                    score = numeric(0), seqinfo = si))
-  sort(do.call(c, unname(pieces)))
+  # Cap item width before the caller exports: run-length merging can leave a
+  # single interval spanning most of a multi-gigabase chromosome, which the
+  # BigWig writer cannot serialise. Values are unchanged — see split_wide_ranges.
+  split_wide_ranges(sort(do.call(c, unname(pieces))))
 }

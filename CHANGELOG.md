@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **BigWig export no longer dies on a sparse family over a multi-gigabase
+  chromosome.** `density_track()` run-length-merges the tiled track, so the gap
+  between a family's features collapses into one interval — and on a 94.3 Gbp
+  assembly with 2.1 Gb chromosomes a family with a handful of features produced a
+  single **2.07 Gb** zero-value interval, which the UCSC writer behind
+  `export(format="bigwig")` could not serialise (`UCSC library operation failed` /
+  `Internal error ucsc/bbiWrite.c 414`). It failed at `step = 1000` while the same
+  track wrote fine at `step = 10000`, so the 10k track died and the 100k one did
+  not. On run-000170 exactly two of 1,599 families hit it — TRC_319 (47 features
+  across 22 sequences) and TRC_222 (31) — and because the rule aborts on any
+  failed task, they failed the whole run at the **last rule**, after 3,198 of
+  3,200 BigWigs had been written and every annotation output was complete.
+  `density_track()` now caps item width at 100 Mb (`split_wide_ranges()`),
+  splitting an over-wide run into consecutive pieces carrying the same value.
+  This is representation-only — verified against the pre-change code, per-base
+  values are identical — and a strict no-op when nothing exceeds the cap, so every
+  genome without gigabase gaps keeps byte-identical tracks (44 of 44 medium-fixture
+  tracks compared identical, object for object).
+
 - **The DANTE GFF3 is no longer rewritten to a temp file just to rename one
   attribute.** `merge_rm_and_dante` ran `clean_DANTE_names.R` first, which
   imported the whole DANTE GFF3, set `Name` from `Final_Classification`, and
