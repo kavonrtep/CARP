@@ -49,7 +49,10 @@ _EXTRA_KEEP = (
 # minimal: verified unconsumed by any Snakefile rule input (per the cleanup
 # audit). Entries may be literal paths or globs.
 _MINIMAL = (
-    "DANTE/DANTE_filtered.gff3.tmp.gff3",         # within-rule scratch
+    # No longer produced (merge_repeat_annotations.R derives the DANTE names
+    # in-memory since 1.6.2); kept so cleanup still reclaims it from output
+    # trees written by older releases, where it can be ~10 GB.
+    "DANTE/DANTE_filtered.gff3.tmp.gff3",
     "DANTE_TIR/DANTE_TIR.RData",                  # debug workspace (~35-53 MB)
     "DANTE_TIR_FALLBACK/TPase_5prime_alignment.tsv",
     "DANTE_TIR_FALLBACK/TPase_3prime_alignment.tsv",
