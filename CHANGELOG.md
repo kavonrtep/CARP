@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **`canonicalise()` resolves distinct values instead of every element.** The R
+  helper was `vapply(x, .canonicalise_one, ...)`, one call per element — and its
+  callers pass one classification per annotated feature (millions) drawn from a
+  few dozen distinct strings, so nearly all of that work re-derived answers it had
+  already computed. It now resolves `unique(x)` and maps back, the same pattern
+  `validate_values()` beside it already used. Output is byte-identical: on a
+  300 MB slice of a real 94 Gbp DANTE GFF3, `clean_DANTE_names.R` went from
+  **68.9 s to 31.2 s** with a byte-identical GFF3 (310,309,914 bytes,
+  `cmp`-verified), and the canonicalise step itself from 43.9 s to ~0. Measured
+  effect on that genome: `clean_DANTE_names.R` ~25 min faster, and
+  `clean_rm_output.R` — which canonicalises the RepeatMasker class column over
+  69 M rows drawn from 21 distinct values — about **30 min** faster. Four call
+  sites in `make_unified_annotation.R` benefit too. NA still raises, a
+  zero-length vector still gives `character(0)`, and the result is still unnamed;
+  `tests/test_classification.R` pins all of it.
+
 ## 1.6.1
 
 > **Annotation outputs are unchanged**; both fixtures were re-run in pairs

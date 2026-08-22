@@ -65,6 +65,32 @@ for (i in seq_along(lines)) {
   }
 }
 
+# ── vectorised canonicalise(): memoisation must be transparent ───────────────
+# canonicalise() resolves unique() values and maps back, because callers pass one
+# value per annotated feature (millions) drawn from a few dozen distinct strings.
+# These cases pin the properties that make that substitution safe: same answers in
+# the same order however the duplicates fall, unnamed output, empty in / empty
+# out, factors accepted, and NA still an error rather than a silently mapped value.
+vec_fail <- function(msg) failures <<- c(failures, paste0("vectorised: ", msg))
+
+raws <- c("Class_I/LTR/Ty1_copia/Ale", "Class_II/Subclass_1/TIR/hAT",
+          "Class_I/LINE", "Class_I/LTR/Ty3_gypsy/chromovirus/Tekay")
+x <- rep(raws, length.out = 500)[c(seq(2, 500, 2), seq(1, 499, 2))]   # shuffled dups
+ref <- vapply(x, .canonicalise_one, character(1),
+              source = NULL, vocab = vocab, validate = TRUE, USE.NAMES = FALSE)
+got <- canonicalise(x, vocab = vocab)
+if (!identical(got, ref)) vec_fail("result differs from the per-element reference")
+if (!is.null(names(got)))  vec_fail("result must be unnamed")
+if (!identical(canonicalise(character(0), vocab = vocab), character(0)))
+  vec_fail("zero-length input must give character(0)")
+if (!identical(canonicalise(factor(raws), vocab = vocab),
+               canonicalise(raws, vocab = vocab)))
+  vec_fail("factor input must match character input")
+na_err <- tryCatch({ canonicalise(c(raws[1], NA_character_), vocab = vocab); FALSE },
+                   error = function(e) TRUE)
+if (!na_err) vec_fail("NA must still raise an error")
+if (length(failures) == 0L) passed <- passed + 5L
+
 total <- passed + length(failures)
 cat(sprintf("%d/%d cases passed\n", passed, total), file = stderr())
 if (length(failures) > 0) {
