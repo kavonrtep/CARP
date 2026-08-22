@@ -63,6 +63,9 @@ if (N < 3) {
 suppressPackageStartupMessages(library(rtracklayer))
 suppressPackageStartupMessages(library(parallel))
 
+source(file.path(dirname(sub("^--file=", "",
+  grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "classification.R"))
+
 
 
 # output is last one
@@ -78,6 +81,32 @@ gff <- import.gff(tmp_gff)
 unlink(tmp_gff)
 # set strand for all records to *
 strand(gff) <- "*"
+
+# DANTE records arrive carrying their raw domain name (Name=RT, Name=INT, ...)
+# with the classification in Final_Classification, and this merge keys entirely
+# on Name — so the DANTE side has to be renamed to its canonical classification
+# before anything else touches it.
+#
+# That used to be a separate pass: clean_DANTE_names.R imported the whole DANTE
+# GFF3, set Name, and exported it to a temp file that this script immediately
+# re-imported. On a 94 Gbp genome that is a 10.4 GB read, a 10.8 GB write and a
+# 10.8 GB re-read to change one attribute — the file is that large because DANTE
+# carries protein sequences (Region_Seq / Query_Seq / DB_Seq) on every feature.
+# Doing it here costs one vector assignment on data already in memory.
+#
+# RepeatMasker records have no Final_Classification (their attributes are Name /
+# Original_names / strands / ID), so import() gives them NA when the inputs are
+# combined and they are left untouched. Guard on the column existing at all, so
+# the script still works on inputs that have no DANTE side.
+if (!is.null(gff$Final_Classification)) {
+  from_dante <- !is.na(gff$Final_Classification)
+  if (any(from_dante)) {
+    message(sprintf("naming %d DANTE records from Final_Classification",
+                    sum(from_dante)))
+    gff$Name[from_dante] <- canonicalise(gff$Final_Classification[from_dante],
+                                         source = "DANTE")
+  }
+}
 
 if (any(grepl("|", gff$Name, fixed = TRUE))){
   to_clean <- grepl("|", gff$Name, fixed = TRUE)

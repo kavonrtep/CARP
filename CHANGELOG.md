@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **The DANTE GFF3 is no longer rewritten to a temp file just to rename one
+  attribute.** `merge_rm_and_dante` ran `clean_DANTE_names.R` first, which
+  imported the whole DANTE GFF3, set `Name` from `Final_Classification`, and
+  exported it to `DANTE_filtered.gff3.tmp.gff3` — which
+  `merge_repeat_annotations.R` then immediately re-imported and the rule deleted.
+  On a 94 Gbp genome that is a 10.4 GB read, a 10.8 GB write and a 10.8 GB re-read
+  to change one field (DANTE carries protein sequences on every feature, which is
+  why the file is that big). `merge_repeat_annotations.R` now derives the names on
+  the data it already has in memory, and `clean_DANTE_names.R` is removed.
+  RepeatMasker records are untouched — they carry no `Final_Classification`, so
+  they arrive as `NA` and are skipped. Output is byte-identical: on real 94 Gbp
+  slices (150 MB RepeatMasker + 300 MB DANTE) the old two-pass and new single-pass
+  paths produce the same 198,976,320-byte GFF3, `cmp`-verified, with the wall time
+  going from 89.6 s to 57.2 s and the temp file gone. `cleanup_intermediates`
+  still lists the temp path so older output trees are still tidied.
+
 - **`canonicalise()` resolves distinct values instead of every element.** The R
   helper was `vapply(x, .canonicalise_one, ...)`, one call per element — and its
   callers pass one classification per annotated feature (millions) drawn from a

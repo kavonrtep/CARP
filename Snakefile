@@ -1773,9 +1773,13 @@ rule merge_rm_and_dante:
         export CPU_COUNT={threads}
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        # names in gff3 must be consistent with names used for RepeatMasker
-        clean_DANTE_names.R {input.dante_gff}  {input.dante_gff}.tmp.gff3
-        merge_repeat_annotations.R {input.rm_gff} {input.dante_gff}.tmp.gff3 {output.gff}
+        # Names in the merged gff3 must be consistent with the names used for
+        # RepeatMasker, so the DANTE side is renamed from Final_Classification.
+        # merge_repeat_annotations.R does that on the data it already imports —
+        # this used to be a separate clean_DANTE_names.R pass whose only product
+        # was a rewritten copy of the DANTE gff3 (10.8 GB on a 94 Gbp genome)
+        # that was read straight back in and deleted.
+        merge_repeat_annotations.R {input.rm_gff} {input.dante_gff} {output.gff}
         """
 
 
