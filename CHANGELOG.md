@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.6.2
+
+> **Annotation values are unchanged** — every change here was verified against
+> the code it replaces on real 94 Gbp data: byte-identical GFF3s for the two
+> performance fixes, and identical per-base values for the BigWig fix. What
+> changes is that a large, sparse-family genome can now finish: run-000170 died
+> at its **last** rule after ten days, with every annotation output complete and
+> 3,198 of 3,200 BigWigs written, because two families of 1,599 produced a
+> zero-value interval too wide for the BigWig writer.
 
 - **BigWig export no longer dies on a sparse family over a multi-gigabase
   chromosome.** `density_track()` run-length-merges the tiled track, so the gap
