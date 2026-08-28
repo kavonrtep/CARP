@@ -24,7 +24,7 @@ assembly, then merges everything into a single, non-overlapping annotation.
 | [**DANTE**](https://github.com/kavonrtep/dante) | Annotates conserved transposon protein domains against REXdb; foundation for the DANTE_* tools |
 | [**DANTE_LTR**](https://github.com/kavonrtep/dante_ltr) | Reconstructs intact LTR retrotransposons from DANTE domains |
 | [**DANTE_TIR**](https://github.com/kavonrtep/dante_tir) | Calls TIR DNA transposons from DANTE transposase domains |
-| [**DANTE_LINE**](https://github.com/kavonrtep/dante_line) | Calls LINE elements (experimental) |
+| **DANTE_LINE** ([`scripts/dante_line.py`](scripts/dante_line.py)) | Calls LINE elements from DANTE domains. Part of CARP itself, not a separate upstream tool (experimental) |
 | [**TideCluster**](https://github.com/kavonrtep/TideCluster) | Detects tandem repeats in two passes (default + short monomer) and flags 45S/5S rDNA arrays |
 | [**RepeatMasker**](https://www.repeatmasker.org/) | Similarity masking of the genome with the CARP-built repeat library |
 | [**REXdb**](https://github.com/repeatexplorer/rexdb) | Viridiplantae protein-domain reference database backing the DANTE family |
