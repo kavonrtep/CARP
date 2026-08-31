@@ -57,7 +57,49 @@ dante_tir_fallback_min_cluster_size: 3
 #   size and aligned per group. At/below the threshold the result is
 #   byte-identical to no grouping. Must be >= 2.
 dante_tir_fallback_max_group_size: 1000
+# The fallback shares dante_line's flank-extension engine and shows the same
+#   failure: on a wheat run 85% of fallback bp comes from inferred flanks rather
+#   than the TPase anchor, and 13-35% of anchor groups have fewer than 5
+#   alignments (so a fixed "3rd largest" filters nothing). Same support rule.
+#   Its length bound is per TIR superfamily, from max_consensus_length in
+#   classification_vocabulary.yaml - CACTA reaches ~20 kb, Tc1_Mariner cannot.
+dante_tir_fallback_support_fraction: 0.5
+dante_tir_fallback_min_group_alignments: 5
 dante_line_max_group_size: 1000
+# DANTE_LINE consensus-boundary guards. dante_line infers where a LINE ends from
+#   an all-vs-all alignment of its flanks; in a repeat-dense genome the flank is
+#   often another, far more abundant repeat, so the extension runs to the 10 kb
+#   --flank ceiling and the "LINE consensus" becomes mostly foreign sequence that
+#   RepeatMasker then masks genome-wide as Class_I/LINE.
+# dante_line_support_fraction (default 0.5): fraction of a group's flank
+#   alignments that must reach the kept extension. 0 restores the pre-1.7.0
+#   fixed "3rd largest", which a 3-member group satisfies by construction.
+# dante_line_min_group_alignments (default 5): groups with fewer flank
+#   alignments get no extension at all. 0 disables.
+# dante_line_max_extension (default 1500) / dante_line_max_element_length
+#   (default 8000): per-side and whole-element caps in bp. The domain core is
+#   never trimmed, only the appended flanks. 0 disables.
+# screen_library_cross_class (default True): trim cross-class contamination out
+#   of the RepeatMasker library. Every other reduction CARP runs is WITHIN a
+#   class, so a consensus that is part LINE and part LTR is invisible to all of
+#   them. cross_class_max_shared_depth (1) keeps sibling LTR lineages safe;
+#   cross_class_ownership_margin (0.10) decides which side of a shared region is
+#   the chimera, so a broken consensus cannot drag a correct one down with it.
+screen_library_cross_class: True
+cross_class_min_identity: 80
+cross_class_min_length: 200
+cross_class_max_shared_depth: 1
+cross_class_ownership_margin: 0.10
+# Which span seeds the RepeatMasker library from the two INFERRED-boundary tools.
+#   'core' (default) = only the span DANTE annotated; the inferred flanks stay in
+#   the GFF3 but never enter the similarity search. 'element' = previous
+#   behaviour. See docs/configuration.md.
+dante_line_library_source: core
+dante_tir_fallback_library_source: core
+dante_line_support_fraction: 0.5
+dante_line_min_group_alignments: 5
+dante_line_max_extension: 1500
+dante_line_max_element_length: 8000
 # max_memory_gb (default 0 = auto-detect): memory available to this run, in GB —
 #   the allocation the scheduler granted (qsub -l mem=128gb), not a per-rule
 #   figure. Sets the default resources.mem_mb of every memory-gated rule, so one

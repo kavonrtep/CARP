@@ -48,6 +48,9 @@ class Vocabulary:
     special_classes: dict[str, dict]
     aggregation_buckets: frozenset[str]
     tool_dialects: dict[str, dict]
+    # Advisory per-class consensus length bounds (longest-prefix match).
+    # Reported on, never enforced -- see the YAML comment.
+    max_consensus_length: dict[str, int]
     # Ordered longest-first so longest match wins.
     tir_prefixes: tuple[tuple[str, str], ...]
     sources: frozenset[str] = field(default_factory=frozenset)
@@ -111,6 +114,7 @@ def load_vocabulary(path: str | Path | None = None) -> Vocabulary:
         special_classes=dict(raw.get("special_classes", {}) or {}),
         aggregation_buckets=frozenset((raw.get("aggregation_buckets", {}) or {}).keys()),
         tool_dialects=tool_dialects,
+        max_consensus_length=dict(raw.get("max_consensus_length", {}) or {}),
         tir_prefixes=tir_prefixes,
         sources=frozenset(tool_dialects.keys()),
     )

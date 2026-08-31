@@ -204,6 +204,37 @@ special_classes:
 # be confused — Tandem_repeats is the bucket; Satellite is a RepeatMasker
 # leaf class).
 # ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────
+# max_consensus_length — the longest a de-novo consensus of a class can
+# plausibly be, in bp. Longest-prefix match: Class_I/LINE beats Class_I.
+#
+# Advisory, not enforced. `screen_library_cross_class.py` REPORTS a consensus
+# that exceeds its class bound in the audit TSV; nothing truncates on this
+# number, because where to cut an over-long consensus is not defined by its
+# length alone. The LINE bound is enforced at build time instead, by
+# dante_line's --max-element-length.
+#
+# Its purpose is to make a boundary regression visible: CARP shipped 16-22 kb
+# `Class_I/LINE` consensi for several releases and nothing anywhere said that
+# was impossible.
+max_consensus_length:
+  # Full-length plant LINEs run 4-7 kb around an ENDO+RT core of ~2.1 kb.
+  Class_I/LINE: 8000
+  # LTR-RTs span a wide range; Ogre/Tat elements reach ~25 kb.
+  Class_I/LTR: 30000
+  # TIR superfamilies differ by more than an order of magnitude, so the bound is
+  # per superfamily; the generic entry covers anything not listed.
+  Class_II/Subclass_1/TIR: 25000
+  # CACTA elements are the long tail of the TIR world (~20 kb, some larger).
+  Class_II/Subclass_1/TIR/EnSpm_CACTA: 30000
+  # Mutator element size varies hugely.
+  Class_II/Subclass_1/TIR/MuDR_Mutator: 25000
+  Class_II/Subclass_1/TIR/hAT: 15000
+  Class_II/Subclass_1/TIR/PIF_Harbinger: 12000
+  Class_II/Subclass_1/TIR/Tc1_Mariner: 10000
+  Class_II/Subclass_2/Helitron: 30000
+  rDNA: 15000
+
 aggregation_buckets:
   Mobile_elements:
     description: Union of all Class_I and Class_II features

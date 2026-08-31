@@ -27,7 +27,7 @@ Keep the module minimal — no heavy imports at module level — so reading
 the version stays cheap.
 """
 
-__version__ = "1.6.2"
+__version__ = "1.7.0a1"
 __version_info__ = (1, 6, 2, None)
 
 

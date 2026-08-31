@@ -1,5 +1,300 @@
 # Changelog
 
+## Unreleased
+
+> **Annotations change on repeat-dense genomes.** `dante_line` inferred where a
+> LINE ends from an all-vs-all alignment of its flanks, and in a large,
+> repeat-dense genome the flank is frequently another far more abundant repeat —
+> so the extension ran to the `--flank` ceiling (10 kb per side) and the "LINE
+> consensus" became mostly foreign sequence, which RepeatMasker then masked
+> genome-wide as `Class_I/LINE`. Audited across **87 assemblies** (one run per
+> genome, `scripts/audit_line_boundaries.py`): 36 take **≥50 %** of their
+> `Class_I/LINE` base pairs from consensus extensions rather than the element's
+> own ENDO/RT core, and 20 take over 70 %. It scales with assembly size — median
+> extension-driven share 16 % below 0.5 Gb, **61 % above 4 Gb** — and it was not
+> fixed by 1.6.2 (16 of 46 audited 1.6.2 runs are ≥50 %, longest consensus
+> 22,929 bp). Worst case: a 20.2 Gb assembly reported **35.4 % LINE** against a
+> core-anchored upper bound of 0.97 %. On bread wheat (14.5 Gb, 15.93 % LINE
+> reported) the guards below plus the cross-class screen project **2.51 %** —
+> inside the 1.41–3.64 % band that the element's own ENDO/RT cores support.
+>
+> **Policy.** DANTE_LINE infers element boundaries from flank alignments rather
+> than observing them, so it is expected to return elements that are incomplete
+> and imprecisely bounded. Everything here is tuned on the principle that a
+> **truncated** consensus is the safe failure — it still masks its own family —
+> while an over-extended one mislabels whatever its tail matches across the whole
+> genome, and discarding a doubtful element beats keeping a chimera. A false
+> positive in this library is amplified by every RepeatMasker search that follows.
+
+- **Tier-1 overlap resolution now orders by OBSERVED extent, not raw span.** The
+  greedy trim is longest-first, so a DANTE_LINE or DANTE_TIR-fallback element whose
+  span is mostly inferred flank outranked a structurally delimited DANTE_LTR or
+  primary DANTE_TIR element purely on length it never observed. Each tier-1 feature
+  now carries an internal `claim_width` — the full width for the structural tools, the
+  DANTE domain span (ENDO..RT[..RH], or the TPase anchor) for the two inferred-boundary
+  ones — and the ordering uses it, falling back to width where it is absent. This is
+  the tier-level counterpart of the core-only library default. `source_tool` is
+  deliberately **not** used to carry the signal: it is a pinned nine-value contract
+  (`docs/unified_annotation_gff3_spec.md`), so `claim_width` is internal and dropped
+  before export.
+  **Scale, measured on wheat before assuming it mattered:** the four tier-1 pairings
+  contest about 1 Mb of a 14.5 Gb genome — DANTE_LINE/DANTE_LTR 220 pairs (109 kb),
+  DANTE_LINE/DANTE_TIR 80 pairs (226 kb), fallback/DANTE_LTR 2,343 pairs (1.47 Mb, 54 %
+  won by the fallback), and fallback/primary-DANTE_TIR **zero** pairs, because
+  `merge_dante_tir_with_fallback` already discards any fallback element overlapping a
+  primary one (6,653 of 59,598 on that run). So this is a correctness fix worth ~1 Mb,
+  not a numbers-mover — the numbers moved in the library. What justifies it is that
+  essentially none of the contested span is contested by the *observed* part: only
+  0.2 % (fallback) and 1 % (DANTE_LINE) of it involves the domain core, so what was
+  being resolved on length was inference beating observation.
+  Both tools clip their flanks at neighbouring DANTE features already, which is why
+  the numbers are small; that clipping is not a guarantee, and this makes the policy
+  explicit rather than incidental.
+- **The inferred flanks no longer seed the RepeatMasker library** (new
+  `dante_line_library_source` / `dante_tir_fallback_library_source`, default `core`).
+  DANTE_LINE and the DANTE_TIR fallback exist to give partial coverage where the
+  structural tools find nothing — DANTE_LINE so LINEs are covered at all, the fallback
+  so a TIR element with a DANTE TPase but no complete structural call is not lost — so
+  they are the least reliable layers in the pipeline, and their boundaries are
+  *inferred* rather than observed. The asymmetry that matters: a wrong flank in the
+  GFF3 costs one element, while a wrong flank in the **library** is amplified by every
+  RepeatMasker search that follows. The library is now built from the span DANTE
+  actually annotated (the ENDO..RT/RH region, or the TPase anchor); the flanks stay in
+  `DANTE_LINE.gff3` / `DANTE_TIR_FALLBACK.gff3`, so the structural layer still reports
+  the element extent it found. `element` restores the previous behaviour.
+- **This is what restores `Class_I/LTR`.** Measured on a wheat run by re-attributing
+  the existing RepeatMasker hits against each candidate library span: `Class_I/LINE`
+  **15.91 %** of the genome with the full extension, **5.82 %** capped, **3.95 %**
+  core-only — against ~1–2 % published for wheat. The territory is not lost. Competing
+  the chimera-masked loci against the library with every LINE consensus removed, **73.5
+  % of it is claimed by Ty1_copia / Ty3_gypsy consensi**, which takes `Class_I/LTR`
+  from **53.4 % to ~67 %** — in line with the literature, and matching the project's
+  own observation that the LTR estimates agreed with published figures before
+  DANTE_LINE was added to the pipeline. Roughly 5 points of the genome has no non-LINE
+  consensus at all and becomes unannotated; that is the honest residue, and the case
+  for a future `Unclassified` library layer.
+- **Where the damage was, and was not.** The unified annotation resolves tier-1
+  conflicts greedy-longest-first, so an over-extended DANTE_LINE element should in
+  principle out-compete a correctly-bounded DANTE_LTR one. Measured, it barely happens:
+  220 overlapping DANTE_LINE/DANTE_LTR pairs on the whole wheat genome, 109 kb
+  contested, 60 kb won by LINE — because `dante_line` already clips its flanks at
+  neighbouring DANTE features and DANTE_LTR elements are full of them. **All of the
+  damage is in the RepeatMasker layer**, where provenance is invisible: RepeatMasker
+  scores consensi, and a chimera built from a genomic context is by construction the
+  best match in that context. It also explains why the existing LCA demotion in
+  `clean_rm_output.R` never fired — 86.9 % of the chimera-masked territory had **no
+  competing RepeatMasker hit at all**, because ProcessRepeats had already discarded the
+  loser. A chimera does not produce ambiguity; it produces confident, unanimous, wrong
+  agreement.
+- **`dante_line` flanks now stop at elements the other tools have already
+  delimited.** `--mask-gff3` is repeatable, and the rule passes `DANTE_LTR.gff3`
+  and `DANTE_TIR_final.gff3` alongside the TideHunter arrays: a LINE flank can no
+  longer run through a complete LTR-retrotransposon or TIR element whose
+  boundaries are already known structurally. `DANTE_TIR_final.gff3` (primary)
+  rather than `DANTE_TIR_combined.gff3` — the fallback partials come from this
+  same flank-extension engine, so masking on them would propagate a boundary of
+  the kind being fixed. Mask files are parsed to bare `(seqname, start, end)`
+  triples (`parse_gff3_intervals`) instead of full `GFF3Feature` objects, because
+  a DANTE_LTR GFF3 carries a protein sequence per domain in column 9; the merged
+  boundary index is also now built **once** rather than per pattern type.
+- **New `dante_line_support_fraction` (default `0.5`) and
+  `dante_line_min_group_alignments` (default `5`).** The kept extension was the
+  `--min-num-alignments`-th largest of a group's pairwise flank alignments, with
+  `k` fixed at 3 regardless of group size — a threshold satisfiable by
+  construction, since a group with exactly three alignments has its third-largest
+  **equal to its minimum**. Most runaway extensions came from groups of 3–4; the
+  rest from a few outliers in a large group (`LINE_group_2147` took a 5,968 bp
+  extension from 3 of its 51 partners, whose 25th percentile was 751 bp). `k` is
+  now `max(min_num_alignments, ceil(support_fraction × n_alignments))`, and a
+  group with fewer than `min_group_alignments` partners gets no extension at all.
+  `analyze_alignment_lengths` gained a second counting pass to compute `k`;
+  memory stays bounded (peak `sum(k)`, measured max group 759 alignments). The
+  new arguments default to the **old** behaviour, so `dante_tir_fallback` — which
+  imports this function — is unchanged until it opts in; a parity test asserts
+  byte-identical output under the legacy settings.
+- **New `dante_line_max_extension` (default `1500`) and
+  `dante_line_max_element_length` (default `8000`).** Biological bounds on a LINE:
+  full-length plant elements run 4–7 kb around an ENDO+RT core of ~2.1 kb, so the
+  16–22 kb consensi the uncapped inference produced cannot be real. The per-side cap
+  is deliberately tighter than a full-length element strictly needs, per the policy
+  above; measured on wheat the choice costs little either way (5.82 % of the genome
+  at 2500, 5.44 % at 1500, 5.04 % at 500 — the residue after the support rule is not
+  mostly in the extensions), so it is set where truncation is cheap and
+  over-extension is not. Extensions are
+  **trimmed, not dropped** — the domain core is always kept, and a core already at
+  or over the cap is never itself trimmed. When both sides together exceed the
+  remaining budget it is split evenly, except that a side asking for less than its
+  half keeps what it asked and yields the rest. A capped element records
+  `Extension_capped`, `Extension_5prime_inferred` and `Extension_3prime_inferred`
+  in `DANTE_LINE.gff3`; an uncapped element's attributes are unchanged.
+- **New rule `screen_library_cross_class` + `screen_library_cross_class.py`, between
+  `reduce_library` and `reduce_library_containment`.** Every other reduction CARP runs
+  is **within** a class — `reduce_library_size.py` clusters per classification,
+  `containment_reduce_library.py` only drops a fragment into a same-class container —
+  so a consensus that is part one class and part another is invisible to all of them.
+  This blastn-screens every de-novo consensus against the rest of the library and
+  **truncates it to its longest span carrying no foreign material at all**, dropping
+  it only when too little survives. An earlier design peeled conflict blocks inward
+  from the two ends and left internal ones alone, on the grounds that cutting there
+  fragments a sequence whose middle might be contested legitimately. On real data
+  that leaves most of the contamination in place: the foreign material in a chimera
+  is not one clean block glued to an end but a **mosaic**, because the region the
+  boundary ran out into is itself a patchwork of decayed insertions with
+  unclassifiable rubble between them, and peeling stops at the first gap. Measured on
+  wheat, end-peeling removed 46 % of the foreign base pairs it had already identified
+  and stranded 54 % inside consensi the library then shipped. Truncating to the
+  longest clean span leaves **zero**. It generalises what
+  `filter_ltr_rt_library` already does for one class pair, and trimming is strictly
+  gentler than that rule's drop-the-whole-sequence policy. Every decision is recorded
+  in `Libraries/cross_class_screen.tsv`. Placed before the containment pass so that
+  pass can collapse fragments which only become redundant once the foreign tails are
+  gone, and so it remains the single place that canonically sorts the final
+  RepeatMasker library. Measured on a wheat library **already carrying the
+  `dante_line` guards above**: 56 consensi trimmed (0.22 % of library bp) removing a
+  further **336 Mb — 2.3 % of the genome — of mislabelled `Class_I/LINE`**. Together
+  with those guards this projects wheat `Class_I/LINE` at roughly **2.0–3.5 %**,
+  inside the 1.41–3.64 % core-anchored band, against 15.93 % as shipped.
+- **Two false positives the screen had to be designed around, both measured on a real
+  library rather than reasoned about.** *(a)* A blastn hit is symmetric and does not
+  say which consensus is the chimera; the naive rule trimmed **1,114
+  `Ty1_copia/Angela` consensi against 86 LINE consensi**, damaging the correct library
+  because of the broken one. `cross_class_ownership_margin` (0.10) fixes it: a shared
+  region is trimmed out of the query only when it covers materially more of the
+  subject — it is more of what the subject *is* — and the verdict is the same
+  whichever direction BLAST reports the hit. *(b)* Sibling LTR lineages share genuine
+  homology, so `cross_class_max_shared_depth` (1) makes two classes conflict only when
+  their lowest common ancestor is at depth ≤ 1: `Class_I/LINE` vs
+  `Class_I/LTR/…/Retand` conflicts, `Ty1_copia/Ale` vs `Ty1_copia/Angela` never does.
+- **New advisory `max_consensus_length` in `classification_vocabulary.yaml`** — the
+  longest a de-novo consensus of a class can plausibly be, longest-prefix matched.
+  The screen **reports** a consensus over its class bound in the audit TSV and nothing
+  truncates on it, because where to cut an over-long consensus is not defined by its
+  length alone; the LINE bound is enforced at build time by
+  `dante_line --max-element-length` instead. Its purpose is that CARP shipped 16–22 kb
+  `Class_I/LINE` consensi for several releases and nothing anywhere said that was
+  impossible. Read by `scripts/classification.py`; the R mirror ignores it and both
+  parsers still pass the shared vector.
+- **Validated end-to-end on the medium fixture** (42/42 steps, exit 0). The fixture's
+  own library has no cross-class contamination, so the screen is a clean no-op there
+  (24 consensi in, 24 out, empty audit) and the annotation is byte-for-byte what the
+  `dante_line` guards alone produce — which is the behaviour wanted on a genome that
+  has no chimeras. Because that leaves the trimming path unexercised through the rule,
+  it was verified separately by planting a chimera in the fixture library — a real
+  3,467 bp LINE consensus with a real 2,775 bp Ty3_gypsy/CRM consensus concatenated to
+  its 3' end — and running the rule's rendered command over it: the chimera came back
+  at exactly 3,467 bp ("trimmed 0 bp from 5' and 2775 bp from 3'"), and every other
+  consensus, the CRM one included, was untouched.
+- **New test** `tests/test_screen_library_cross_class.py` (28 cases), wired into
+  `unit.yml`: the conflict rule (including that sibling LTR lineages are never
+  conflicts), the ownership rule and its direction-invariance, truncation to the
+  longest clean span (including the interleaved-mosaic case and an assertion that no
+  conflict block survives inside a kept span), the drop threshold, `max_consensus_length` reporting, and the
+  copy-through-on-missing-blastn fallback. Includes a regression test for the BLAST id
+  bug found during development — `makeblastdb` does not split a FASTA header on `#`,
+  so `qseqid` arrives as `LINE_group_2147#Class_I/LINE`; looking classes up by the
+  bare name matched nothing and the screen reported a clean library on a contaminated
+  one.
+- **The DANTE_TIR fallback gets the same guards — it shares the same engine.**
+  `dante_tir_fallback.py` imports `analyze_alignment_lengths` from `dante_line` and
+  runs at the same `--flank 10000`, and it has the same disease, proportionally worse:
+  on the wheat run it produced 59,598 elements spanning 398 Mb (2.74 % of the genome)
+  of which **85 % is inferred flank rather than the TPase anchor**, 3,681 elements hit
+  the 10 kb ceiling, and 22,884 (69 % of fallback base pairs) exceed 8 kb. Group sizes
+  show the same unfilterable threshold as DANTE_LINE — 13–35 % of anchor groups have
+  fewer than 5 alignments, so a fixed "3rd largest" is satisfied by construction. It
+  now takes `--support-fraction` / `--min-group-alignments` (new config
+  `dante_tir_fallback_support_fraction` 0.5, `dante_tir_fallback_min_group_alignments`
+  5), a repeatable `--mask-gff3` with `DANTE_LTR.gff3` and **primary**
+  `DANTE_TIR_final.gff3` added by the rule (masking on its own output would be
+  circular), and the shared `cap_extensions`. Capped elements record
+  `Extension_capped` / `Extension_*_inferred` in `DANTE_TIR_FALLBACK.gff3` exactly as
+  DANTE_LINE does.
+- **The fallback's length bound is per TIR superfamily, not a config key.** TIR
+  superfamilies differ by more than an order of magnitude — CACTA genuinely reaches
+  ~20 kb where `Tc1_Mariner` cannot — so a single cap would either license the
+  chimeras or destroy real CACTA detection. `--max-element-length 0` (the default)
+  looks the bound up per subtype from `max_consensus_length` in
+  `classification_vocabulary.yaml`, which gains per-superfamily entries
+  (`EnSpm_CACTA` 30000, `MuDR_Mutator` 25000, `hAT` 15000, `PIF_Harbinger` 12000,
+  `Tc1_Mariner` 10000, generic TIR 25000). So that key is advisory in the library
+  screen — where the truncation point is undefined — and enforced at build time in
+  `dante_line` and `dante_tir_fallback`, where the core is known and only the flanks
+  are trimmed.
+- **Fix: the counting pass no longer runs when it cannot change the answer.** Adding
+  the group-scaled rule above made `analyze_alignment_lengths` unconditionally
+  two-pass, which silently doubled I/O for `dante_tir_fallback` — a caller that had
+  not opted in. Its tables are large (43 GB for EnSpm_CACTA 3' on a 14.5 Gb genome,
+  117 GB across all subtypes on a 94 Gbp one; every row carries its aligned
+  sequences), so that was tens of GB of reads for nothing. With
+  `support_fraction = 0` the function now takes a single-pass path where `k` is known
+  up front, and a test asserts the read counts (1 vs 2). Peak memory for the two-pass
+  path was checked against the same tables and is ~50 MB on the largest single file.
+- **Confirmed in writing: no other CARP layer is exposed.** `dante_line.py` and
+  `dante_tir_fallback.py` are the only consumers of the flank-alignment engine
+  (`global_local_aln.py`). The LTR library comes from `dante_ltr_to_library` over
+  structurally delimited `DANTE_LTR.gff3` elements — LTR boundaries are found by the
+  structural search, not inferred from flank similarity — so it cannot produce this
+  class of chimera.
+- **New `scripts/audit_line_boundaries.py`** — read-only, runs over finished
+  output trees and splits `Class_I/LINE` base pairs into core-anchored vs
+  extension-driven by joining each RepeatMasker hit's consensus coordinates
+  against the core recovered from `DANTE_LINE.gff3`. Also flags the empty
+  DANTE_TIR library from the pre-1.4.0 join bug (42 of the 87 audited runs).
+- **New rule `library_health` + `scripts/library_health.py`, and a "Library health"
+  panel in the HTML report.** Both defects above shipped for several releases and were
+  invisible in every output the pipeline produced — neither was hard to see once
+  someone looked at the library, but nothing in a run invited anyone to look. This
+  writes `Libraries/library_health.tsv` (long format, deterministic row order): per
+  class, consensus count / total bp / median and max length against the class bound
+  from `max_consensus_length`; per element builder, how much of its output is inferred
+  flank rather than anchoring domain, how many elements had a flank alignment reach the
+  `--flank` ceiling, and how many were capped; plus what the cross-class screen did.
+  It **cannot fail a run** — warnings go to the rule's log and a highlighted row in the
+  report. Run against the *pre-fix* wheat output it reports, unprompted, exactly the
+  two things this release fixes: `the library contains NO Class_II sequences`,
+  `Class_I/LINE: 59 consensi longer than the 8000 bp bound (longest 23926 bp)`,
+  `DANTE_LINE: 203 elements at the flank ceiling`, and `DANTE_TIR_FALLBACK: 3681 at the
+  ceiling, 85% inferred flank`. The empty-Class_II warning is suppressed below 50
+  consensi, where an empty class is an unremarkable consequence of the multiplicity
+  floor rather than a bug, so test-sized runs do not train people to ignore it.
+- **New test** `tests/test_library_health.py` (14 cases), wired into `unit.yml`: the
+  per-class bound being per class (22 kb is over the LINE bound and inside the CACTA
+  one), empty-Class_II detection and its size threshold, the extension-fraction and
+  flank-ceiling counts, that `protein_domain` children are not counted as elements,
+  deterministic row order, and that a warning never changes the exit status.
+- **A stricter parasail alignment score was evaluated and rejected.** The trim in
+  `global_local_aln.py` is a maximum-cumulative-score cut at `match +2 /
+  mismatch −2`, which breaks even at 50 % identity, so raising the mismatch
+  penalty looks like a one-line fix. It would make things worse: the runaway
+  extensions align at **99 % identity** (trims ≥7.5 kb: median implied identity
+  0.994, 10th percentile 0.958), while genuine 500 bp–3 kb extensions sit at
+  0.66–0.94. Trimming a 99 % alignment needs a mismatch penalty near −400, which
+  destroys every real alignment first. The alignments are correct; the inference
+  drawn from them is what failed.
+- **A poly(A)/target-site-duplication anchor for the 3′ boundary was evaluated and
+  rejected.** On the wheat 3′ flanks A-richness is flat along the flank (0.254 at
+  the element end vs 0.270 2–3 kb out) and A-rich windows are 2–3× **more** common
+  in a control window further out than at the boundary; a 20 bp ≥85 % A window
+  appears in 0.4 % of flanks. These copies are too degraded (mean RepeatMasker
+  divergence 11–15 %) to retain a tail to anchor on.
+- **New test** `tests/test_dante_line_boundaries.py` (24 cases): the interval
+  parser, mask merging, `cap_extensions` (including that it never lengthens an
+  extension and never trims the core), strand handling in `create_line_elements`,
+  and the support rule — with the legacy-parity check above.
+- **Validated end-to-end on the medium fixture** (41/41 steps, exit 0). All three
+  guards fire: 173 mask features merged from the three GFF3s (22 TideHunter +
+  137 DANTE_LTR + 14 DANTE_TIR), the support rule shortens several extensions
+  (`LINE_group_0004` 5′ 1554 → 141 bp), and one element is capped
+  (`LINE_group_0009` 5′ 2824 → 2500, recorded as `Extension_capped=5prime`).
+  The LINE library goes from 9 consensi / 42,458 bp to 7 / 29,857 bp and
+  `Class_I/LINE` from 58,696 to 51,437 bp (−12 %) — a proportionate change on a
+  757 kb fixture that has no high-copy families to be captured by, against the
+  ≈64 % reduction projected on a 14.5 Gb genome that does. Output is
+  **byte-identical** across a rerun at a different thread count and
+  `PYTHONHASHSEED` (`DANTE_LINE.gff3`, `LINE_rep_lib.fasta`,
+  `LINE_regions_extended.fasta`, both `_aln_length.tsv`).
+  Note for CI: the `output_medium` / `output_small` fixture baselines change.
+
 ## 1.6.2
 
 > **Annotation values are unchanged** — every change here was verified against

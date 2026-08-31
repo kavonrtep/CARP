@@ -75,7 +75,39 @@ dante_tir_fallback_min_cluster_size: 3
 # genomes. At/below the threshold the result is byte-identical to no grouping.
 # Must be >= 2. See docs/configuration.md.
 dante_tir_fallback_max_group_size: 1000
+
+# Boundary guards for the fallback layer — it shares dante_line's flank-extension
+# engine and the same failure mode. See docs/configuration.md.
+dante_tir_fallback_support_fraction: 0.5
+dante_tir_fallback_min_group_alignments: 5
 dante_line_max_group_size: 1000
+
+# DANTE_LINE consensus-boundary guards — they stop a LINE consensus being
+# extended through the neighbouring high-copy repeat. support_fraction scales the
+# support requirement with the size of the group (0 = the old fixed "3rd
+# largest"); min_group_alignments drops groups with too few partners to place a
+# boundary; the two caps bound each side and the whole element in bp, trimming
+# only the appended flanks and never the domain core. 0 disables any of them.
+# See docs/configuration.md.
+# Cross-class library screen — trims a span that belongs to an incompatible
+# class out of a consensus, which no within-class reduction can see. See
+# docs/configuration.md.
+screen_library_cross_class: True
+cross_class_min_identity: 80
+cross_class_min_length: 200
+cross_class_max_shared_depth: 1
+cross_class_ownership_margin: 0.10
+
+# Which span seeds the RepeatMasker library from the two INFERRED-boundary tools.
+#   'core' (default) = only the span DANTE annotated; the inferred flanks stay in
+#   the GFF3 but never enter the similarity search. 'element' = previous
+#   behaviour. See docs/configuration.md.
+dante_line_library_source: core
+dante_tir_fallback_library_source: core
+dante_line_support_fraction: 0.5
+dante_line_min_group_alignments: 5
+dante_line_max_extension: 1500
+dante_line_max_element_length: 8000
 
 # Memory available to this run, in GB — the scheduler's allocation, not a
 # per-rule figure. 0 = auto-detect (AGENT_MEMORY, then the scheduler environment

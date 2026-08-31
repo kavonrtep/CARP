@@ -1395,11 +1395,124 @@ under the array; <b>#&nbsp;expected</b> = tandem monomer units (array&nbsp;bp&nb
 </div>', paste(rows, collapse = "\n"))
 }
 
+# ── E6c. Library health ────────────────────────────────────────────────────
+# Renders Libraries/library_health.tsv: how the repeat library is made up per
+# class, and how much of each element builder's output is inferred flank rather
+# than the domain it is anchored on. This panel exists because two defects
+# shipped for several releases while every number in this report looked
+# plausible — an empty Class_II library, and 16-22 kb "LINE" consensi whose
+# flanks were a different repeat. Returns "" when the file is absent, so an
+# older output tree renders unchanged.
+html_library_health <- function(outdir) {
+  tsv <- file.path(outdir, "Libraries", "library_health.tsv")
+  if (!file.exists(tsv)) return("")
+  df <- tryCatch(read.table(tsv, header = TRUE, sep = "\t", quote = "",
+                            stringsAsFactors = FALSE, comment.char = ""),
+                 error = function(e) NULL)
+  if (is.null(df) || nrow(df) == 0) return("")
+
+  esc <- function(x) { x <- as.character(x)
+    x <- gsub("&", "&amp;", x, fixed = TRUE); x <- gsub("<", "&lt;", x, fixed = TRUE)
+    gsub(">", "&gt;", x, fixed = TRUE) }
+  pick <- function(section, item, metric, default = NA) {
+    v <- df$value[df$section == section & df$item == item & df$metric == metric]
+    if (length(v) == 0) default else v[1]
+  }
+  num <- function(x) suppressWarnings(as.numeric(x))
+  fmt <- function(x) { n <- num(x)
+    if (is.na(n)) "" else format(n, big.mark = ",", scientific = FALSE, trim = TRUE) }
+
+  # per-class composition of the library RepeatMasker searches
+  classes <- sort(unique(df$item[df$section == "class"]))
+  class_rows <- vapply(classes, function(cl) {
+    over  <- num(pick("class", cl, "n_over_bound", 0))
+    limit <- num(pick("class", cl, "max_allowed_len", 0))
+    flag  <- if (!is.na(over) && over > 0)
+      sprintf(' style="background:#fdecea"') else ""
+    note  <- if (!is.na(over) && over > 0)
+      sprintf('<span style="color:#a83a2c;font-weight:600">%s over %s bp</span>',
+              fmt(over), fmt(limit)) else "&mdash;"
+    sprintf("<tr%s><td>%s</td><td align=\"right\">%s</td><td align=\"right\">%s</td><td align=\"right\">%s</td><td align=\"right\">%s</td><td>%s</td></tr>",
+            flag, esc(cl),
+            fmt(pick("class", cl, "n_consensi")),
+            fmt(pick("class", cl, "total_bp")),
+            fmt(pick("class", cl, "median_len")),
+            fmt(pick("class", cl, "max_len")), note)
+  }, character(1))
+
+  class_tbl <- if (length(class_rows) == 0) "" else paste0(
+    '<h3 style="margin:18px 0 6px">Repeat library composition</h3>',
+    '<p style="margin:0 0 8px;color:#444;font-size:0.92em">Consensus sequences in the ',
+    'library RepeatMasker searched, per classification. The length bound comes from ',
+    '<code>max_consensus_length</code> in <code>classification_vocabulary.yaml</code>; ',
+    'a consensus over it is not necessarily wrong, but it is worth looking at.</p>',
+    '<table class="comp-table"><thead><tr><th>Classification</th>',
+    '<th align="right">Consensi</th><th align="right">Total bp</th>',
+    '<th align="right">Median len</th><th align="right">Max len</th>',
+    '<th>Over class bound</th></tr></thead><tbody>',
+    paste(class_rows, collapse = ""), "</tbody></table>")
+
+  # inferred element boundaries, per builder
+  builders <- sort(unique(df$item[df$section == "boundary"]))
+  b_rows <- vapply(builders, function(b) {
+    frac    <- num(pick("boundary", b, "extension_fraction", NA))
+    ceiling <- num(pick("boundary", b, "n_at_flank_ceiling", 0))
+    warn    <- (!is.na(frac) && frac > 0.5) || (!is.na(ceiling) && ceiling > 0)
+    style   <- if (warn) ' style="background:#fdecea"' else ""
+    fpct    <- if (is.na(frac)) "" else sprintf("%.0f%%", 100 * frac)
+    sprintf("<tr%s><td>%s</td><td align=\"right\">%s</td><td align=\"right\">%s</td><td align=\"right\">%s</td><td align=\"right\">%s</td><td align=\"right\">%s</td></tr>",
+            style, esc(b),
+            fmt(pick("boundary", b, "n_elements")),
+            fmt(pick("boundary", b, "total_bp")),
+            fpct, fmt(ceiling), fmt(pick("boundary", b, "n_capped")))
+  }, character(1))
+
+  b_tbl <- if (length(b_rows) == 0) "" else paste0(
+    '<h3 style="margin:18px 0 6px">Inferred element boundaries</h3>',
+    '<p style="margin:0 0 8px;color:#444;font-size:0.92em">DANTE_LINE and the ',
+    'DANTE_TIR fallback infer where an element ends by aligning its flanks against ',
+    'the flanks of other copies, rather than observing a structural boundary. ',
+    '<b>Inferred flank</b> is the share of their output that comes from that ',
+    'inference rather than from the anchoring protein domains; <b>at flank ceiling</b> ',
+    'counts elements for which the search never found an end at all. Across 87 ',
+    'assemblies that count tracked how much of the annotation came from flank ',
+    'rather than element.</p>',
+    '<table class="comp-table"><thead><tr><th>Builder</th>',
+    '<th align="right">Elements</th><th align="right">Total bp</th>',
+    '<th align="right">Inferred flank</th><th align="right">At flank ceiling</th>',
+    '<th align="right">Capped</th></tr></thead><tbody>',
+    paste(b_rows, collapse = ""), "</tbody></table>")
+
+  screen_note <- ""
+  if (any(df$section == "screen")) {
+    screen_note <- sprintf(
+      paste0('<p style="margin:10px 0 0;color:#444;font-size:0.92em">',
+             'Cross-class screen: %s consensi truncated, %s dropped, %s bp removed ',
+             '(detail in <code>Libraries/cross_class_screen.tsv</code>).</p>'),
+      fmt(pick("screen", "cross_class", "n_trimmed", 0)),
+      fmt(pick("screen", "cross_class", "n_dropped", 0)),
+      fmt(pick("screen", "cross_class", "bp_removed", 0)))
+  }
+
+  no_class_ii <- !any(grepl("^Class_II", classes))
+  banner <- if (no_class_ii) paste0(
+    '<p style="padding:10px 12px;border-left:4px solid #a83a2c;background:#fdecea;',
+    'margin:0 0 10px">The library contains <b>no Class_II sequences</b>. DNA ',
+    'transposons will only be annotated where a complete structural element was ',
+    'found, never by similarity. Check that ',
+    '<code>DANTE_TIR/all_representative_elements_combined.fasta</code> is not empty.</p>') else ""
+
+  paste0('<div class="section"><h2>Library health</h2>', banner,
+         class_tbl, b_tbl, screen_note, "</div>")
+}
+
+
 # ── E7. Assemble full HTML ─────────────────────────────────────────────────
 assemble_html <- function(plotly_js, cards_html, sunburst_div, comp_table_html,
                            dante_summary_html, comp_bar_div,
                            density_top_div, density_lineage_div, density_trc_div,
                            sat_table_html, sat_bar_div, te_trc_table_html,
+                           library_health_html,
                            outdir, bin_width, genome_avg_pct,
                            provenance_footer_html = "") {
 
@@ -1568,6 +1681,11 @@ Contigs &lt; %.0f kb are aggregated into the single Other bar.</p>
 %s
 </section>
 
+<!-- SECTION 5b: LIBRARY HEALTH -->
+<section id="s5b">
+%s
+</section>
+
 <!-- SECTION 6: SUB-REPORTS -->
 <section id="s6">
 <h2>Detailed Sub-reports</h2>
@@ -1594,6 +1712,7 @@ Contigs &lt; %.0f kb are aggregated into the single Other bar.</p>
     sat_table_html,
     sat_bar_div %||% not_generated_html("The satellite density panel"),
     te_trc_table_html,
+    library_health_html,
     sub_links,
     provenance_footer_html
   )
@@ -1787,6 +1906,8 @@ main <- function() {
   sat_table_html   <- html_sat_table(sat_data, genome_size)
   te_trc_table_html <- safe_build("TE-derived TRC table",
                                   html_te_derived_trc_table(outdir)) %||% ""
+  library_health_html <- safe_build("Library health panel",
+                                    html_library_health(outdir)) %||% ""
 
   sunburst_div      <- plotly_div("sunburst-plot", sunburst_chart)
   comp_bar_div      <- if (!is.null(comp_bar_chart))
@@ -1812,6 +1933,7 @@ main <- function() {
     comp_bar_div,
     density_top_div, density_lineage_div, density_trc_div,
     sat_table_html, sat_bar_div, te_trc_table_html,
+    library_health_html,
     outdir, d_bin, genome_avg_frac * 100,
     provenance_footer_html = prov_footer_html
   )

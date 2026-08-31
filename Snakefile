@@ -192,6 +192,133 @@ for _key in ("dante_tir_fallback_max_group_size", "dante_line_max_group_size"):
     if not isinstance(config[_key], int) or isinstance(config[_key], bool) or config[_key] < 2:
         raise ValueError(f"Invalid value for {_key}: must be an integer >= 2.")
 
+# The DANTE_TIR fallback shares dante_line's flank-extension engine, and shows the
+# same failure: on a wheat run 85% of all fallback base pairs come from inferred
+# flanks rather than the TPase anchor, 3,681 elements hit the 10 kb flank ceiling,
+# and 13-35% of anchor groups have fewer than 5 alignments (so a fixed "3rd
+# largest" filters nothing). It gets the same support rule. The length bound is
+# per TIR superfamily, from max_consensus_length in classification_vocabulary.yaml,
+# because CACTA genuinely reaches ~20 kb where Tc1_Mariner cannot.
+if "dante_tir_fallback_support_fraction" not in config:
+    config["dante_tir_fallback_support_fraction"] = 0.5
+if (isinstance(config["dante_tir_fallback_support_fraction"], bool)
+        or not isinstance(config["dante_tir_fallback_support_fraction"], (int, float))
+        or not 0.0 <= config["dante_tir_fallback_support_fraction"] <= 1.0):
+    raise ValueError("Invalid value for dante_tir_fallback_support_fraction: "
+                     "must be a number in [0, 1].")
+if "dante_tir_fallback_min_group_alignments" not in config:
+    config["dante_tir_fallback_min_group_alignments"] = 5
+if (not isinstance(config["dante_tir_fallback_min_group_alignments"], int)
+        or isinstance(config["dante_tir_fallback_min_group_alignments"], bool)
+        or config["dante_tir_fallback_min_group_alignments"] < 0):
+    raise ValueError("Invalid value for dante_tir_fallback_min_group_alignments: "
+                     "must be an integer >= 0.")
+
+# Which span of an inferred element seeds the RepeatMasker library. DANTE_LINE
+# and the DANTE_TIR fallback exist to give partial coverage where the structural
+# tools find nothing, so their output is the least reliable in the pipeline: the
+# domain span is what DANTE observed, the flanks around it are inferred. A wrong
+# flank in the GFF3 costs one element; a wrong flank in the LIBRARY is amplified
+# by every RepeatMasker search that follows. 'core' (default) therefore keeps the
+# inferred flanks out of the library while leaving them in the GFF3, so the
+# structural layer still reports the element extent it found. 'element' restores
+# the previous behaviour.
+#
+# Measured on a wheat run by re-attributing the existing RepeatMasker hits
+# against each library span: Class_I/LINE 15.91% of the genome with the full
+# extension, 5.82% with the extension capped, 3.95% core-only -- against a
+# published wheat LINE content of ~1-2%. The territory does not vanish: 73.5% of
+# it is claimed by Ty1_copia / Ty3_gypsy consensi once the chimeras stop
+# out-scoring them, taking Class_I/LTR from 53.4% back to ~67%.
+for _key in ("dante_line_library_source", "dante_tir_fallback_library_source"):
+    if _key not in config:
+        config[_key] = "core"
+    if config[_key] not in ("core", "element"):
+        raise ValueError(f"Invalid value for {_key}: must be 'core' or 'element'.")
+
+# Cross-class library screen. Every other reduction CARP runs is WITHIN a class
+# (reduce_library_size.py clusters per classification; containment_reduce_library.py
+# only drops a fragment into a SAME-class container), so a consensus that is part
+# one class and part another is invisible to both and RepeatMasker masks the
+# foreign part genome-wide under the wrong label. This screens every de-novo
+# consensus against the other classes and TRIMS the contaminated span rather than
+# dropping the sequence.
+#
+#   screen_library_cross_class (default True): master switch.
+#   cross_class_min_identity (80) / cross_class_min_length (200): what counts as a
+#     conflicting hit.
+#   cross_class_max_shared_depth (default 1): two classes conflict only when their
+#     lowest common ancestor is at this depth or shallower. 1 catches LINE-vs-LTR
+#     (LCA Class_I) and Class_I-vs-Class_II, while leaving sibling LTR lineages
+#     (Ale vs Angela, LCA Class_I/LTR/Ty1_copia) alone -- they share real homology
+#     and trimming them against each other would be destructive.
+#   cross_class_ownership_margin (default 0.10): a shared region is trimmed out of
+#     the query only when it covers this much more of the subject than of the
+#     query. Without it the screen is symmetric and a chimera drags its
+#     correctly-built neighbour down with it (measured on a wheat library: 1,114
+#     Ty1_copia/Angela consensi trimmed against 86 LINE).
+if "screen_library_cross_class" not in config:
+    config["screen_library_cross_class"] = True
+if not isinstance(config["screen_library_cross_class"], bool):
+    raise ValueError("Invalid value for screen_library_cross_class: must be True or False.")
+
+for _key, _default in (("cross_class_min_length", 200),
+                       ("cross_class_max_shared_depth", 1)):
+    if _key not in config:
+        config[_key] = _default
+    if (not isinstance(config[_key], int) or isinstance(config[_key], bool)
+            or config[_key] < 0):
+        raise ValueError(f"Invalid value for {_key}: must be an integer >= 0.")
+
+for _key, _default, _lo, _hi in (("cross_class_min_identity", 80.0, 0.0, 100.0),
+                                 ("cross_class_ownership_margin", 0.10, 0.0, 1.0)):
+    if _key not in config:
+        config[_key] = _default
+    if (isinstance(config[_key], bool)
+            or not isinstance(config[_key], (int, float))
+            or not _lo <= config[_key] <= _hi):
+        raise ValueError(f"Invalid value for {_key}: must be a number in [{_lo}, {_hi}].")
+
+# DANTE_LINE consensus-boundary guards. dante_line infers where a LINE ends
+# from an all-vs-all alignment of its flanks; in a repeat-dense genome the flank
+# is frequently another, far more abundant repeat, so the extension runs to the
+# --flank ceiling (10 kb per side) and the "LINE consensus" becomes mostly
+# foreign sequence that RepeatMasker then masks genome-wide as Class_I/LINE.
+# Measured over 87 assemblies: the median share of Class_I/LINE base pairs
+# coming from consensus extensions rather than the element's own ENDO/RT core
+# rises from 16% below 0.5 Gb to 61% above 4 Gb.
+#
+#   dante_line_support_fraction (default 0.5): fraction of a group's flank
+#     alignments that must reach the kept extension. Replaces a fixed "3rd
+#     largest", which is satisfiable by construction -- a group with three
+#     alignments has its third largest equal to its minimum. 0 restores the old
+#     behaviour.
+#   dante_line_min_group_alignments (default 5): groups with fewer flank
+#     alignments get no extension; too few partners to place a boundary. 0 off.
+#   dante_line_max_extension (default 1500): per-side cap in bp. Deliberately
+#     tighter than a full-length LINE needs. A truncated consensus still masks
+#     its family; an over-extended one mislabels its neighbour genome-wide, and
+#     a false positive here is amplified across the whole RepeatMasker search.
+#     0 off.
+#   dante_line_max_element_length (default 8000): whole-element cap in bp. The
+#     domain core is never trimmed, only the appended flanks. No plant LINE is
+#     longer than this; full-length elements run 4-7 kb. 0 off.
+if "dante_line_support_fraction" not in config:
+    config["dante_line_support_fraction"] = 0.5
+if (isinstance(config["dante_line_support_fraction"], bool)
+        or not isinstance(config["dante_line_support_fraction"], (int, float))
+        or not 0.0 <= config["dante_line_support_fraction"] <= 1.0):
+    raise ValueError("Invalid value for dante_line_support_fraction: must be a number in [0, 1].")
+
+for _key, _default in (("dante_line_min_group_alignments", 5),
+                       ("dante_line_max_extension", 1500),
+                       ("dante_line_max_element_length", 8000)):
+    if _key not in config:
+        config[_key] = _default
+    if (not isinstance(config[_key], int) or isinstance(config[_key], bool)
+            or config[_key] < 0):
+        raise ValueError(f"Invalid value for {_key}: must be an integer >= 0.")
+
 # DANTE_TIR primary-element library filter (Multiplicity floor). Default 3
 # matches the pre-fallback behaviour where the library was sourced from
 # `all_representative_elements_min3.fasta` produced by `dante_tir_summary.R`
@@ -397,6 +524,7 @@ rule all:
         F"{config['output_dir']}/summary_plots.pdf",
         F"{config['output_dir']}/benchmark_report.html",
         F"{config['output_dir']}/repeat_annotation_report.html",
+        F"{config['output_dir']}/Libraries/library_health.tsv",
         F"{config['output_dir']}/Repeat_Annotation_Unified.gff3",
         F"{config['output_dir']}/.classifications_validated"
 
@@ -590,7 +718,13 @@ rule dante_tir_fallback:
         gff=F"{config['output_dir']}/DANTE/DANTE.gff3",
         genome=genome_fasta_cleaned,
         dante_tir_checkpoint=F"{config['output_dir']}/DANTE_TIR/.done",
-        mask_gff=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter.gff3"
+        mask_gff=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter.gff3",
+        # Same flank masks as dante_line: a TPase flank must not run through an
+        # element another tool has already delimited structurally. The primary
+        # DANTE_TIR set is the right mask here -- masking on this rule's OWN
+        # (fallback) output would be circular.
+        mask_dante_ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
+        mask_dante_tir=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3"
     output:
         gff=F"{config['output_dir']}/DANTE_TIR_FALLBACK/DANTE_TIR_FALLBACK.gff3",
         rep_lib=F"{config['output_dir']}/DANTE_TIR_FALLBACK/TIR_fallback_rep_lib.fasta",
@@ -599,7 +733,10 @@ rule dante_tir_fallback:
         output_dir=F"{config['output_dir']}/DANTE_TIR_FALLBACK",
         min_alignments=config["dante_tir_fallback_min_alignments"],
         min_cluster_size=config["dante_tir_fallback_min_cluster_size"],
-        max_group_size=config["dante_tir_fallback_max_group_size"]
+        max_group_size=config["dante_tir_fallback_max_group_size"],
+        support_fraction=config["dante_tir_fallback_support_fraction"],
+        min_group_alignments=config["dante_tir_fallback_min_group_alignments"],
+        library_source=config["dante_tir_fallback_library_source"]
     log:
         stdout=F"{config['output_dir']}/DANTE_TIR_FALLBACK/dante_tir_fallback.log",
         stderr=F"{config['output_dir']}/DANTE_TIR_FALLBACK/dante_tir_fallback.err"
@@ -625,7 +762,12 @@ rule dante_tir_fallback:
             --min-num-alignments {params.min_alignments} \
             --min-cluster-size {params.min_cluster_size} \
             --max-group-size {params.max_group_size} \
-            --mask-gff3 {input.mask_gff}
+            --support-fraction {params.support_fraction} \
+            --min-group-alignments {params.min_group_alignments} \
+            --library-source {params.library_source} \
+            --mask-gff3 {input.mask_gff} \
+            --mask-gff3 {input.mask_dante_ltr} \
+            --mask-gff3 {input.mask_dante_tir}
 
         # Ensure outputs exist even if no TIR elements were found
         touch {output.gff} {output.rep_lib} {output.extended_fasta}
@@ -828,6 +970,14 @@ rule dante_line:
     input:
         gff=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
         gff3_tidehunter=F"{config['output_dir']}/TideCluster/default/TideCluster_tidehunter.gff3",
+        # Flank masks. A LINE flank must not run through an element another tool
+        # has already delimited structurally, so DANTE_LTR elements and primary
+        # DANTE_TIR elements terminate it alongside the TideHunter arrays.
+        # DANTE_TIR_final.gff3 (primary) rather than DANTE_TIR_combined.gff3:
+        # the fallback partials come from this same flank-extension engine, so
+        # masking on them would propagate a boundary of the kind being fixed.
+        gff3_dante_ltr=F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
+        gff3_dante_tir=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
         genome=genome_fasta_cleaned
     output:
         line_rep_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta",
@@ -836,7 +986,12 @@ rule dante_line:
         line_regions_extended=F"{config['output_dir']}/DANTE_LINE/LINE_regions_extended.fasta"
     params:
         output_dir=F"{config['output_dir']}/DANTE_LINE",
-        max_group_size=config["dante_line_max_group_size"]
+        max_group_size=config["dante_line_max_group_size"],
+        support_fraction=config["dante_line_support_fraction"],
+        min_group_alignments=config["dante_line_min_group_alignments"],
+        max_extension=config["dante_line_max_extension"],
+        max_element_length=config["dante_line_max_element_length"],
+        library_source=config["dante_line_library_source"]
     log:
         stdout=F"{config['output_dir']}/DANTE_LINE/dante_line.log",
         stderr=F"{config['output_dir']}/DANTE_LINE/dante_line.err"
@@ -867,7 +1022,14 @@ rule dante_line:
         dante_line.py -g {input.genome} -a {input.gff} \
                 -o {params.output_dir} -t {threads} \
                 --max-group-size {params.max_group_size} \
-                --mask-gff3 {input.gff3_tidehunter} || rc=$?
+                --support-fraction {params.support_fraction} \
+                --min-group-alignments {params.min_group_alignments} \
+                --max-extension {params.max_extension} \
+                --max-element-length {params.max_element_length} \
+                --library-source {params.library_source} \
+                --mask-gff3 {input.gff3_tidehunter} \
+                --mask-gff3 {input.gff3_dante_ltr} \
+                --mask-gff3 {input.gff3_dante_tir} || rc=$?
         if [ "$rc" -eq 3 ]; then
             echo "dante_line.py: no LINE content (too few features); creating empty outputs"
         elif [ "$rc" -ne 0 ]; then
@@ -1612,6 +1774,116 @@ rule reduce_library:
             --max-blast-parallel {threads}
         """
 
+rule screen_library_cross_class:
+    """
+    Cross-class contamination screen, between the per-class reduction and the
+    containment pass.
+
+    reduce_library_size.py clusters WITHIN a classification and
+    containment_reduce_library.py only drops a fragment into a SAME-class
+    container, so neither can see a consensus that is part one class and part
+    another — a LINE whose inferred boundary ran out into the neighbouring
+    Retand array looks like an ordinary, slightly long LINE. This blastn-screens
+    every consensus against the rest of the library and TRUNCATES it to its
+    longest span carrying no foreign material at all.
+
+    Placed BEFORE reduce_library_containment on purpose: the containment pass
+    can then collapse fragments that only become redundant once the foreign
+    tails are gone, and it — not this rule — remains the single place that
+    canonically sorts the final RepeatMasker library.
+
+    Measured on a wheat library already carrying the dante_line boundary guards:
+    156 consensi truncated (0.93% of library bp), leaving ZERO identified foreign
+    base pairs in the library. With the guards this projects wheat Class_I/LINE at
+    2.51% against 15.93% as shipped, inside the 1.41-3.64% core-anchored band.
+    Every decision is recorded in
+    Libraries/cross_class_screen.tsv. blastn-unavailable / failure copies the
+    library through unchanged.
+    """
+    input:
+        library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced.fasta"
+    output:
+        library_screened=F"{config['output_dir']}/Libraries/combined_library_screened.fasta",
+        audit=F"{config['output_dir']}/Libraries/cross_class_screen.tsv"
+    params:
+        enabled=config["screen_library_cross_class"],
+        min_identity=config["cross_class_min_identity"],
+        min_length=config["cross_class_min_length"],
+        max_shared_depth=config["cross_class_max_shared_depth"],
+        ownership_margin=config["cross_class_ownership_margin"]
+    log:
+        stdout=F"{config['output_dir']}/Libraries/screen_library_cross_class.log",
+        stderr=F"{config['output_dir']}/Libraries/screen_library_cross_class.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/screen_library_cross_class.tsv"
+    conda: "envs/tidecluster.yaml"
+    threads: workflow.cores
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        workdir=$(dirname {output.library_screened})/cross_class_workdir
+        disabled_flag=""
+        if [ "{params.enabled}" = "False" ]; then disabled_flag="--disabled"; fi
+        screen_library_cross_class.py -i {input.library_reduced} \
+            -o {output.library_screened} -a {output.audit} \
+            -t {threads} -d $workdir \
+            --min-identity {params.min_identity} \
+            --min-length {params.min_length} \
+            --max-shared-depth {params.max_shared_depth} \
+            --ownership-margin {params.ownership_margin} \
+            $disabled_flag
+        """
+
+rule library_health:
+    """
+    Advisory summary of the repeat library and the inferred element boundaries.
+
+    Two defects shipped for several releases and were invisible in every output
+    the pipeline produced: the DANTE_TIR library was empty on every run (so the
+    RepeatMasker library held no Class_II sequences at all), and DANTE_LINE built
+    16-22 kb "LINE" consensi whose flanks were a different, far more abundant
+    repeat. Neither was hard to see once someone looked at the library; nothing
+    in the run invited anyone to look.
+
+    This writes the numbers that would have made both obvious -- per-class
+    consensus counts and length distributions against the class bounds in
+    classification_vocabulary.yaml, the share of each element builder's output
+    that is inferred flank rather than anchoring domain, and how many elements
+    had a flank alignment reach the --flank ceiling (a count that tracked the
+    scale of the problem across 87 assemblies). Warnings go to the rule's log;
+    nothing here can fail a run.
+    """
+    input:
+        library=F"{config['output_dir']}/Libraries/combined_library_reduced_containment.fasta",
+        dante_line=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
+        fallback=F"{config['output_dir']}/DANTE_TIR_FALLBACK/DANTE_TIR_FALLBACK.gff3",
+        screen_audit=F"{config['output_dir']}/Libraries/cross_class_screen.tsv"
+    output:
+        tsv=F"{config['output_dir']}/Libraries/library_health.tsv"
+    log:
+        stdout=F"{config['output_dir']}/Libraries/library_health.log",
+        stderr=F"{config['output_dir']}/Libraries/library_health.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/library_health.tsv"
+    conda: "envs/tidecluster.yaml"
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        library_health.py -o {output.tsv} \
+            --library {input.library} \
+            --dante-line-gff3 {input.dante_line} \
+            --fallback-gff3 {input.fallback} \
+            --screen-audit {input.screen_audit}
+        """
+
 rule reduce_library_containment:
     """
     Second-round CONTAINMENT reduction of the per-class-reduced library, run
@@ -1627,7 +1899,7 @@ rule reduce_library_containment:
     blastn-unavailable / failure copies the library through unchanged.
     """
     input:
-        library_reduced=F"{config['output_dir']}/Libraries/combined_library_reduced.fasta"
+        library_reduced=F"{config['output_dir']}/Libraries/combined_library_screened.fasta"
     output:
         library_containment=F"{config['output_dir']}/Libraries/combined_library_reduced_containment.fasta"
     params:
