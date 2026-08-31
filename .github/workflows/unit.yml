@@ -69,6 +69,15 @@ jobs:
       - name: dante_line pattern order is PYTHONHASHSEED-invariant
         run: python tests/test_dante_line_order.py
 
+      - name: dante_line consensus-boundary guards (masks, caps, support rule)
+        run: python tests/test_dante_line_boundaries.py
+
+      - name: Cross-class library screen (conflict rule, ownership, trimming)
+        run: python tests/test_screen_library_cross_class.py
+
+      - name: Library-health summary (empty-class + boundary flags)
+        run: python tests/test_library_health.py
+
       - name: Determinism-gate comparator (assert_run_determinism)
         run: python tests/test_assert_run_determinism.py
 

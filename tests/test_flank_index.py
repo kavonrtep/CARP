@@ -245,7 +245,12 @@ def test_prime_line(rng):
         flank = rng.choice([2000, 5000, 10000])
         with tempfile.TemporaryDirectory() as td:
             b5 = os.path.join(td, "5.bed"); b3 = os.path.join(td, "3.bed")
-            create_prime_bed_files(patterns, all_f, flank, b5, b3, mask_f, seq_lengths)
+            # dante_line's create_prime_bed_files takes prebuilt indexes: the
+            # mask set is now merged from several GFF3s and the index is built
+            # once in main() rather than per pattern type.
+            create_prime_bed_files(
+                patterns, FeatureIndex(all_f), flank, b5, b3,
+                FeatureIndex(mask_f) if mask_f else None, seq_lengths)
             got5 = open(b5).read().splitlines(); got3 = open(b3).read().splitlines()
         exp5, exp3 = ref_prime_line(patterns, all_f, flank, mask_f, seq_lengths)
         assert got5 == exp5, "prime line 5' BED mismatch"
@@ -269,7 +274,11 @@ def test_prime_fallback(rng):
         flank = rng.choice([2000, 5000, 10000])
         with tempfile.TemporaryDirectory() as td:
             b5 = os.path.join(td, "5.bed"); b3 = os.path.join(td, "3.bed")
-            dtf.create_prime_bed_files(anchors, all_f, flank, b5, b3, mask_f, seq_lengths)
+            # dante_tir_fallback's create_prime_bed_files now takes a prebuilt
+            # mask index too: several mask GFF3s are merged in main().
+            dtf.create_prime_bed_files(
+                anchors, all_f, flank, b5, b3,
+                FeatureIndex(mask_f) if mask_f else None, seq_lengths)
             got5 = open(b5).read().splitlines(); got3 = open(b3).read().splitlines()
         exp5, exp3 = ref_prime_fallback(anchors, all_f, flank, mask_f, seq_lengths)
         assert got5 == exp5, "prime fallback 5' BED mismatch"

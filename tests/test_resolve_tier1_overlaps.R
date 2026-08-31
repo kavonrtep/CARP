@@ -144,6 +144,60 @@ rand_t1 <- function(rng_i, n) {
   gr
 }
 
+# ---- observed vs inferred extent (claim_width) -------------------------------
+# DANTE_LINE and the DANTE_TIR fallback INFER most of their extent by aligning
+# the flanks of other copies; DANTE_LTR and primary DANTE_TIR observe theirs
+# structurally. The greedy is longest-first, so without claim_width an inferred
+# flank outranks an observed element purely on length it never observed.
+mk_cw <- function(s, e, tool, cw) {
+  g <- GRanges("chr1", IRanges(s, e))
+  g$Name <- tool; g$classification <- tool; g$source_tier <- 1L
+  g$source_tool <- tool; g$claim_width <- as.integer(cw); g
+}
+span_of <- function(gr, tool) sum(width(gr[gr$source_tool == tool]))
+
+check_claim_width <- function(min_len) {
+  # 1. a chimeric LINE (22 kb span, 2 kb observed core) must not displace a
+  #    structurally delimited 10 kb DANTE_LTR element
+  r <- resolve_new(c(mk_cw(1, 22000, "DANTE_LINE", 2000),
+                     mk_cw(15000, 25000, "DANTE_LTR", 10001)), min_len)
+  if (span_of(r, "DANTE_LTR") != 10001L)
+    stop("inferred LINE flank displaced an observed DANTE_LTR element")
+
+  # 2. but an OBSERVED LINE core still beats a smaller competitor
+  r <- resolve_new(c(mk_cw(1, 5000, "DANTE_LINE", 4000),
+                     mk_cw(4500, 5200, "DANTE_LTR", 701)), min_len)
+  if (span_of(r, "DANTE_LINE") < 4000L)
+    stop("an observed LINE core was carved by a smaller competitor")
+
+  # 3. primary DANTE_TIR (observed) over a fallback element (inferred flank)
+  r <- resolve_new(c(mk_cw(1, 20000, "DANTE_TIR", 20000),
+                     mk_cw(15000, 30000, "DANTE_TIR", 1200)), min_len)
+  if (max(width(r)) != 20000L)
+    stop("an inferred TIR fallback flank displaced a primary DANTE_TIR element")
+
+  # 4. absent claim_width must reproduce the width-only behaviour exactly --
+  #    otherwise this whole check could pass vacuously on inputs that never set it
+  a <- c(mk_cw(1, 22000, "DANTE_LINE", 2000), mk_cw(15000, 25000, "DANTE_LTR", 10001))
+  b <- a; b$claim_width <- NULL
+  if (identical(sig(resolve_new(a, min_len)), sig(resolve_new(b, min_len))))
+    stop("claim_width had no effect - the ordering key is not being read")
+  if (!identical(sig(resolve_new(b, min_len)), sig(resolve_old(b, min_len))))
+    stop("without claim_width the resolver diverged from the width-only reference")
+
+  # 5. still order-invariant when claim_width drives the ordering
+  base <- c(mk_cw(1, 22000, "DANTE_LINE", 2000),
+            mk_cw(15000, 25000, "DANTE_LTR", 10001),
+            mk_cw(21000, 24000, "DANTE_TIR", 3001))
+  ref <- sig(resolve_new(base, min_len))
+  for (perm in list(c(2, 1, 3), c(3, 2, 1), c(2, 3, 1))) {
+    if (!identical(sig(resolve_new(base[perm], min_len)), ref))
+      stop("claim_width ordering is not order-invariant")
+  }
+  cat("  claim_width: inferred flank yields to observed extent; observed core kept;\n")
+  cat("               absent claim_width == width-only reference; order-invariant\n")
+}
+
 main <- function() {
   min_len <- 50L
   ntrials <- 30
@@ -161,6 +215,8 @@ main <- function() {
   }
   cat(sprintf("  resolve_tier1_overlaps: new == old (%d random overlap-dense trials)\n",
               ntrials))
+
+  check_claim_width(min_len)
 
   # Order-invariance (determinism): the greedy trim RESULT must not depend on the
   # order features arrive in — that order is batch/thread-dependent. Use inputs

@@ -34,8 +34,10 @@ try:
         FeatureIndex,
         GFF3Feature,
         analyze_alignment_lengths,
+        cap_extensions,
         load_sequence_lengths,
         parse_gff3_features,
+        parse_gff3_intervals,
         process_strand_orientation_with_seqkit,
         run_mmseqs_clustering,
     )
@@ -49,8 +51,10 @@ except ImportError:
     spec.loader.exec_module(dante_line)
     GFF3Feature = dante_line.GFF3Feature
     analyze_alignment_lengths = dante_line.analyze_alignment_lengths
+    cap_extensions = dante_line.cap_extensions
     load_sequence_lengths = dante_line.load_sequence_lengths
     parse_gff3_features = dante_line.parse_gff3_features
+    parse_gff3_intervals = dante_line.parse_gff3_intervals
     process_strand_orientation_with_seqkit = dante_line.process_strand_orientation_with_seqkit
     run_mmseqs_clustering = dante_line.run_mmseqs_clustering
     FeatureIndex = dante_line.FeatureIndex
@@ -101,6 +105,9 @@ class TIRFallbackElement:
     end: int
     extension_5prime: int = 0
     extension_3prime: int = 0
+    # What the flank alignment proposed before the length caps were applied.
+    extension_5prime_inferred: int = 0
+    extension_3prime_inferred: int = 0
     # Composite quality score from the TPase anchor (Similarity × Relat_Length).
     # Used as the tie-breaker when resolving overlaps across subtypes — higher
     # wins. Set when the element is created from its anchor.
@@ -218,7 +225,7 @@ def create_prime_bed_files(
     flank_size: int,
     bed_5prime: str,
     bed_3prime: str,
-    mask_features: List[GFF3Feature] = None,
+    mask_index: "FeatureIndex" = None,
     seq_lengths: Dict[str, int] = None,
 ) -> None:
     """Create strand-aware BED files for 5' and 3' flanking regions.
@@ -231,13 +238,13 @@ def create_prime_bed_files(
     *any* domain marks the boundary of a different element that we must not
     extend into. Do not narrow this to just TPase.
     """
-    # Index once, not per anchor: mask_features (raw TideHunter) can be millions
+    # Index once, not per anchor: the mask set (raw TideHunter arrays plus the
+    # DANTE_LTR / primary DANTE_TIR elements) can be millions
     # of records on a large genome, so the old per-anchor `[f for f in ...]`
     # rescan was O(anchors x features). The anchor's own feature never satisfies
     # the strict end<start / start>end clip conditions, so dropping the
     # `other is feature` skip does not change the result.
     all_index = FeatureIndex(all_features)
-    mask_index = FeatureIndex(mask_features) if mask_features else None
     with open(bed_5prime, "w") as f5, open(bed_3prime, "w") as f3:
         for anchor in anchors:
             feature = anchor.feature
@@ -315,7 +322,7 @@ def extract_prime_sequences(
     flank_size: int,
     output_5prime: str,
     output_3prime: str,
-    mask_features: List[GFF3Feature] = None,
+    mask_index: "FeatureIndex" = None,
     seq_lengths: Dict[str, int] = None,
 ) -> bool:
     """Extract 5' and 3' flanking sequences around TPase anchors."""
@@ -331,7 +338,7 @@ def extract_prime_sequences(
             flank_size,
             bed_5prime,
             bed_3prime,
-            mask_features,
+            mask_index,
             seq_lengths,
         )
 
@@ -369,6 +376,8 @@ def run_prime_alignments(
     min_num_alignments: int = 3,
     verbose: bool = False,
     max_group_size: Optional[int] = None,
+    support_fraction: float = 0.0,
+    min_group_alignments: int = 0,
 ) -> None:
     """Run all-vs-all alignment analysis for TIR flanks."""
     alignment_files = [
@@ -411,7 +420,9 @@ def run_prime_alignments(
             continue
 
         try:
-            analyze_alignment_lengths(alignment_path, length_output, min_num_alignments)
+            analyze_alignment_lengths(alignment_path, length_output, min_num_alignments,
+                                      support_fraction=support_fraction,
+                                      min_group_alignments=min_group_alignments)
             print(f"    -> {length_output.name}")
         except Exception as e:
             print(f"    Error processing {alignment_name}: {e}", file=sys.stderr)
@@ -456,11 +467,45 @@ def _anchor_score(feature: GFF3Feature) -> float:
     return similarity * relat_length
 
 
+def max_element_length_for_subtype(subtype: str, explicit: int = 0) -> int:
+    """Length bound in bp for a TIR subtype; 0 means unbounded.
+
+    ``explicit`` (the CLI value) wins when set. Otherwise the bound comes from
+    ``max_consensus_length`` in classification_vocabulary.yaml, longest-prefix
+    matched on the subtype's canonical classification -- so EnSpm_CACTA, which
+    genuinely reaches ~20 kb, is not held to the same bound as Tc1_Mariner.
+    """
+    if explicit:
+        return explicit
+    try:
+        vocab = classification.load_vocabulary()
+        table = dict(getattr(vocab, "max_consensus_length", {}) or {})
+    except Exception:
+        return 0
+    canonical = f"Class_II/Subclass_1/TIR/{sanitize_label(subtype)}"
+    best, best_depth = 0, -1
+    for prefix, value in table.items():
+        if canonical == prefix or canonical.startswith(prefix + "/"):
+            depth = len(prefix.split("/"))
+            if depth > best_depth:
+                best, best_depth = value, depth
+    return best
+
+
 def create_tir_elements(
     anchors: List[TIRAnchor],
     alignment_lengths: Dict[str, Dict[str, int]],
+    max_extension: int = 0,
+    max_element_length: int = 0,
 ) -> List[TIRFallbackElement]:
-    """Create extended fallback elements from inferred flank lengths."""
+    """Create extended fallback elements from inferred flank lengths.
+
+    The fallback anchors on a single TPase domain, so its extensions do far more
+    of the work than DANTE_LINE's do -- measured on a wheat run, 85% of all
+    fallback base pairs come from the inferred flanks rather than the anchor. The
+    same caps therefore apply here, but per subtype: a CACTA element really can
+    be 20 kb, a Tc1_Mariner cannot.
+    """
     tir_elements: List[TIRFallbackElement] = []
 
     for anchor in anchors:
@@ -468,8 +513,13 @@ def create_tir_elements(
         base_end = anchor.feature.end
         lookup_id = f"{anchor.group_id}_revcomp" if anchor.strand == "-" else anchor.group_id
         extensions = alignment_lengths.get(lookup_id, {})
-        ext_5prime = extensions.get("5prime", 0)
-        ext_3prime = extensions.get("3prime", 0)
+        raw_5prime = extensions.get("5prime", 0)
+        raw_3prime = extensions.get("3prime", 0)
+        ext_5prime, ext_3prime = cap_extensions(
+            base_end - base_start + 1, raw_5prime, raw_3prime,
+            max_extension=max_extension,
+            max_element_length=max_element_length_for_subtype(
+                anchor.subtype, max_element_length))
 
         if anchor.strand == "+":
             element_start = base_start - ext_5prime if ext_5prime > 0 else base_start
@@ -491,6 +541,8 @@ def create_tir_elements(
                 end=element_end,
                 extension_5prime=ext_5prime,
                 extension_3prime=ext_3prime,
+                extension_5prime_inferred=raw_5prime,
+                extension_3prime_inferred=raw_3prime,
                 score=_anchor_score(anchor.feature),
             )
         )
@@ -562,6 +614,18 @@ def write_tir_gff(
                     attributes += (
                         f";Extension_5prime={element.extension_5prime}"
                         f";Extension_3prime={element.extension_3prime}"
+                    )
+                capped = [
+                    side for side, applied, inferred in (
+                        ("5prime", element.extension_5prime, element.extension_5prime_inferred),
+                        ("3prime", element.extension_3prime, element.extension_3prime_inferred),
+                    ) if applied != inferred
+                ]
+                if capped:
+                    attributes += (
+                        f";Extension_capped={','.join(capped)}"
+                        f";Extension_5prime_inferred={element.extension_5prime_inferred}"
+                        f";Extension_3prime_inferred={element.extension_3prime_inferred}"
                     )
                 handle.write(
                     f"{element.seqname}\t{SOURCE_NAME}\t{GFF_PARENT_TYPE}\t"
@@ -784,10 +848,15 @@ def process_subtype(
     threads: int,
     min_num_alignments: int,
     min_cluster_size: int,
-    mask_features: List[GFF3Feature] = None,
+    mask_index: "FeatureIndex" = None,
     seq_lengths: Dict[str, int] = None,
     verbose: bool = False,
     max_group_size: Optional[int] = None,
+    support_fraction: float = 0.0,
+    min_group_alignments: int = 0,
+    max_extension: int = 0,
+    max_element_length: int = 0,
+    library_source: str = "core",
 ) -> Tuple[Optional[Path], Optional[Path], List[TIRFallbackElement], str]:
     """Run the fallback workflow for one TIR subtype.
 
@@ -840,7 +909,7 @@ def process_subtype(
             flank_size,
             str(output_files["5prime_fasta"]),
             str(output_files["3prime_fasta"]),
-            mask_features,
+            mask_index,
             seq_lengths,
         )
         if not prime_success:
@@ -852,10 +921,15 @@ def process_subtype(
             min_num_alignments=min_num_alignments,
             verbose=verbose,
             max_group_size=max_group_size,
+            support_fraction=support_fraction,
+            min_group_alignments=min_group_alignments,
         )
 
         alignment_lengths = load_prime_alignment_lengths(subtype_dir)
-        tir_elements = create_tir_elements(anchors, alignment_lengths)
+        tir_elements = create_tir_elements(
+            anchors, alignment_lengths,
+            max_extension=max_extension,
+            max_element_length=max_element_length)
         write_tir_gff(anchors, tir_elements, str(output_files["gff_out"]))
 
         extended_success = extract_extended_tir_regions(
@@ -876,8 +950,25 @@ def process_subtype(
             classification_with_slashes,
         )
 
+        # The library is built from the TPase anchor span by default: that span
+        # is what DANTE actually annotated, the flanks around it are inferred,
+        # and a wrong flank in the library is amplified by every RepeatMasker
+        # search that follows. The extended FASTA is still written -- it records
+        # the element extent the boundary search inferred -- and the fallback
+        # GFF3 still reports the full element either way.
+        if library_source == "core":
+            annotate_extended_fasta_headers(
+                str(output_files["core_fasta"]),
+                classification_with_slashes,
+            )
+            library_source_path = output_files["core_fasta"]
+            print(f"  Library source for {subtype}: TPase_regions.fasta "
+                  f"(TPase anchor; inferred flanks excluded from the library)")
+        else:
+            library_source_path = output_files["extended_fasta"]
+
         clustering_success = run_mmseqs_clustering(
-            str(output_files["extended_fasta"]),
+            str(library_source_path),
             subtype_dir,
             threads=threads,
         )
@@ -970,7 +1061,33 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
             "library. Must be >= 1."
         ),
     )
-    parser.add_argument("--mask-gff3", help="Optional GFF3 file with features that can limit flanking regions")
+    parser.add_argument("--mask-gff3", action="append", metavar="GFF3",
+                        help="GFF3 whose features terminate a flank. Repeatable: pass "
+                             "the TideHunter tandem arrays plus DANTE_LTR / primary "
+                             "DANTE_TIR elements so a flank cannot run through an "
+                             "element another tool has already delimited.")
+    parser.add_argument("--support-fraction", type=float, default=0.5,
+                        help="Fraction of a group's flank alignments that must reach the "
+                             "kept extension. 0 restores the old fixed "
+                             "--min-num-alignments behaviour (default: 0.5)")
+    parser.add_argument("--min-group-alignments", type=int, default=5,
+                        help="Groups with fewer flank alignments than this get no "
+                             "extension: too few partners to place a boundary, so the "
+                             "element keeps its TPase anchor. 0 disables (default: 5)")
+    parser.add_argument("--max-extension", type=int, default=0,
+                        help="Cap on each side's extension in bp. 0 = no per-side cap; "
+                             "the whole-element bound below still applies (default: 0)")
+    parser.add_argument("--library-source", choices=["core", "element"], default="core",
+                        help="Which span seeds the RepeatMasker library. 'core' (default) "
+                             "uses only the TPase anchor span DANTE annotated and leaves "
+                             "the inferred flanks out of the similarity search, while "
+                             "DANTE_TIR_FALLBACK.gff3 still reports the full element. "
+                             "'element' restores the previous behaviour.")
+    parser.add_argument("--max-element-length", type=int, default=0,
+                        help="Cap on the total element length in bp. 0 = take the bound "
+                             "for this TIR superfamily from max_consensus_length in "
+                             "classification_vocabulary.yaml, which differs by more than "
+                             "an order of magnitude across superfamilies (default: 0)")
     parser.add_argument(
         "--max-group-size",
         type=int,
@@ -998,6 +1115,13 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
         parser.error("--min-num-alignments must be >= 1")
     if args.max_group_size is not None and args.max_group_size < 2:
         parser.error("--max-group-size must be >= 2")
+    if not 0.0 <= args.support_fraction <= 1.0:
+        parser.error("--support-fraction must be between 0 and 1")
+    for _name, _value in (("--min-group-alignments", args.min_group_alignments),
+                          ("--max-extension", args.max_extension),
+                          ("--max-element-length", args.max_element_length)):
+        if _value < 0:
+            parser.error(f"{_name} must be >= 0")
 
     for file_path, name in [(args.genome, "Genome"), (args.annotations, "Annotations")]:
         if not Path(file_path).exists():
@@ -1021,14 +1145,22 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
         f"Relat_Length∈{QUALITY_RELAT_LENGTH_RANGE}): {len(all_features)} features"
     )
 
-    mask_features = None
+    # Several mask GFF3s may be given; they merge into one boundary index, so a
+    # flank stops at whichever feature comes first.
+    mask_index = None
     if args.mask_gff3:
-        if not Path(args.mask_gff3).exists():
-            print(f"Error: Mask GFF3 file {args.mask_gff3} not found", file=sys.stderr)
-            sys.exit(1)
-        print(f"Parsing mask GFF3 file: {args.mask_gff3}")
-        mask_features = parse_gff3_features(args.mask_gff3)
-        print(f"Found {len(mask_features)} mask features")
+        mask_intervals = []
+        for mask_path in args.mask_gff3:
+            if not Path(mask_path).exists():
+                print(f"Error: Mask GFF3 file {mask_path} not found", file=sys.stderr)
+                sys.exit(1)
+            print(f"Parsing mask GFF3 file: {mask_path}")
+            found = parse_gff3_intervals(mask_path)
+            print(f"  {len(found)} mask features")
+            mask_intervals.extend(found)
+        print(f"Found {len(mask_intervals)} mask features in total")
+        mask_index = FeatureIndex.from_intervals(mask_intervals)
+        del mask_intervals
 
     print("Filtering TIR TPase features...")
     tir_anchors_by_subtype = build_tir_anchors(all_features)
@@ -1087,10 +1219,15 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
             threads=args.threads,
             min_num_alignments=args.min_num_alignments,
             min_cluster_size=args.min_cluster_size,
-            mask_features=mask_features,
+            mask_index=mask_index,
             seq_lengths=seq_lengths,
             verbose=args.verbose,
             max_group_size=args.max_group_size,
+            support_fraction=args.support_fraction,
+            min_group_alignments=args.min_group_alignments,
+            max_extension=args.max_extension,
+            max_element_length=args.max_element_length,
+            library_source=args.library_source,
         )
         per_subtype_results.append((subtype, gff_path, rep_path))
         all_elements.extend(elements)

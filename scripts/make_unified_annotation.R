@@ -135,7 +135,39 @@ set_meta <- function(gr, name_vec, cls_vec, tier, tool) {
   gr$classification <- cls_vec
   gr$source_tier    <- tier
   gr$source_tool    <- tool
+  # Default: the whole feature is observed. The two inferred-boundary loaders
+  # (DANTE_LINE, DANTE_TIR fallback) overwrite this with the domain span. Set
+  # here rather than per call site so every tier carries the column and the
+  # mcols schema stays uniform across a c() combine.
+  gr$claim_width    <- as.integer(width(gr))
   gr
+}
+
+# ── Observed vs inferred extent ────────────────────────────────────────────
+# DANTE_LTR and primary DANTE_TIR delimit an element structurally: the whole
+# feature is observed. DANTE_LINE and the DANTE_TIR fallback exist to give
+# partial coverage where no structural call is possible — they anchor on DANTE
+# domains (ENDO..RT[..RH], or a TPase) and INFER the rest by aligning the flanks
+# of other copies. Only the domain span is observed there.
+#
+# `claim_width` is that observed span, and tier-1 overlap resolution orders by it
+# instead of by raw width. The greedy is longest-first, so without this an
+# inferred flank outranks a structurally delimited element purely on length it
+# never observed. Measured on a wheat genome: 2,343 DANTE_TIR_FALLBACK/DANTE_LTR
+# overlaps contesting 1.47 Mb, of which the fallback won 54% on length — and only
+# 0.2% of that contested span was contested by its TPase anchor rather than by
+# the inferred flank. The same for DANTE_LINE (1% core-contested).
+#
+# Internal only: `source_tool` is a pinned nine-value contract
+# (docs/unified_annotation_gff3_spec.md), so the reliability signal must not
+# travel as a tool name. `claim_width` is dropped before export.
+observed_width <- function(gr, ext5 = NULL, ext3 = NULL) {
+  w <- width(gr)
+  if (is.null(ext5) && is.null(ext3)) return(w)
+  num <- function(v) { if (is.null(v)) return(rep(0L, length(gr)))
+                       v <- suppressWarnings(as.integer(as.character(v)))
+                       v[is.na(v)] <- 0L; v }
+  pmax(1L, w - num(ext5) - num(ext3))
 }
 
 # Import GFF3 safely; return empty GRanges for empty/missing/error files.
@@ -158,7 +190,7 @@ safe_import <- function(path) {
 # CharacterList vs character schema incompatibilities that cause NSBS errors.
 .META_COLS <- c("ID", "Name", "classification", "source_tier",
                 "source_tool", "element_type", "TE_origin", "TE_origin_structure",
-                "structure", "copy_number")
+                "structure", "copy_number", "claim_width")
 
 # Subset a GRanges to a set of sequence names.
 # Also standardizes seqlevels and mcols schema so that c() / reduce()
@@ -278,8 +310,18 @@ load_tier1_tir <- function(path) {
 
   raw$type <- "transposable_element"
   cls <- canonicalise(raw$Classification, source = "DANTE_TIR")
+  # Fallback elements are inferred around a TPase anchor; primary DANTE_TIR
+  # elements are structurally delimited (TIRs + TSD). They arrive in one file,
+  # distinguished by Method=.
+  meth  <- if (is.null(raw$Method)) rep(NA_character_, length(raw)) else as.character(raw$Method)
+  is_fb <- !is.na(meth) & meth == "DANTE_TIR_FALLBACK"
+  cw <- width(raw)
+  if (any(is_fb))
+    cw[is_fb] <- observed_width(raw[is_fb], raw$Extension_5prime[is_fb],
+                                raw$Extension_3prime[is_fb])
   raw <- set_meta(raw, cls, cls, 1L, "DANTE_TIR")
-  message("  ", length(raw), " TIR elements")
+  raw$claim_width <- as.integer(cw)
+  message("  ", length(raw), " TIR elements (", sum(is_fb), " fallback)")
   raw
 }
 
@@ -292,7 +334,9 @@ load_tier1_line <- function(path) {
   children <- raw[raw$type == "protein_domain"]
   top$type <- "transposable_element"
   cls <- rep("Class_I/LINE", length(top))
+  cw  <- observed_width(top, top$Extension_5prime, top$Extension_3prime)
   top <- set_meta(top, cls, cls, 1L, "DANTE_LINE")
+  top$claim_width <- as.integer(cw)
   message("  ", length(top), " LINE elements")
   list(top = top, children = children)
 }
@@ -941,7 +985,13 @@ resolve_tier1_overlaps <- function(t1, min_len) {
   # (e.g. a DANTE_LTR complete + a DANTE_TIR call at the same span) — makes the
   # result independent of input order and thus of batching.
   inv  <- t1[involved]
-  ord  <- order(-width(inv), as.character(seqnames(inv)), start(inv), end(inv),
+  # Order by OBSERVED extent, not raw width — see observed_width(). Features
+  # with no claim_width (structurally delimited tools, and anything reaching
+  # here from another path) fall back to their full width.
+  cw <- inv$claim_width
+  cw <- if (is.null(cw)) width(inv) else
+        ifelse(is.na(cw), width(inv), as.integer(cw))
+  ord  <- order(-cw, -width(inv), as.character(seqnames(inv)), start(inv), end(inv),
                 as.character(strand(inv)), as.character(inv$classification),
                 as.character(inv$source_tool))
   t1s  <- inv[ord]
@@ -1413,6 +1463,7 @@ finalise_output <- function(level1, level2, seqlengths_vec, output_path) {
   {
     keep <- vapply(mcols(all_feats), function(v) !all(is.na(v)), logical(1))
     keep <- keep | names(keep) %in% c("type", "source")  # never drop GFF3 reserved cols
+    keep[names(keep) == "claim_width"] <- FALSE  # internal ordering key, never exported
     mcols(all_feats) <- mcols(all_feats)[, keep, drop = FALSE]
     cur  <- colnames(mcols(all_feats))
     pref <- c("source", "type", "score", "phase", "ID", "Parent", "Name",

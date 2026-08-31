@@ -114,6 +114,7 @@ _MAXIMAL = (
     "TideCluster/*/TideCluster_clustering.gff3_1.gff3",
     "Libraries/workdir",
     "Libraries/containment_workdir",
+    "Libraries/cross_class_workdir",
     "RepeatMasker/workdir",
     "DANTE_TIR/mmseqs_combined",
     "DANTE_TIR/fallback_library_workdir",

@@ -21,6 +21,7 @@ import tempfile
 import os
 import re
 import heapq
+import math
 from pathlib import Path
 import bisect
 from collections import defaultdict, namedtuple
@@ -175,6 +176,33 @@ def parse_gff3_features(gff3_file: str) -> List[GFF3Feature]:
     return features
 
 
+def parse_gff3_intervals(gff3_file: str) -> List[Tuple[str, int, int]]:
+    """Parse a GFF3 into bare ``(seqname, start, end)`` triples.
+
+    Used for ``--mask-gff3`` inputs, which are only ever asked where the nearest
+    feature boundary is. Keeping the attribute column would dominate memory: a
+    DANTE_LTR or DANTE GFF3 stores the protein sequence of every domain in
+    column 9.
+    """
+    intervals = []
+    with open(gff3_file, 'r') as f:
+        for line_num, line in enumerate(f, 1):
+            if line.startswith('#'):
+                continue
+            fields = line.rstrip('\n').split('\t')
+            if len(fields) != 9:
+                if line.strip():
+                    print(f"Warning: Invalid GFF3 line {line_num} in {gff3_file}",
+                          file=sys.stderr)
+                continue
+            try:
+                intervals.append((fields[0], int(fields[3]), int(fields[4])))
+            except ValueError as e:
+                print(f"Warning: Error parsing line {line_num} in {gff3_file}: {e}",
+                      file=sys.stderr)
+    return intervals
+
+
 def get_line_features(features: List[GFF3Feature]) -> List[GFF3Feature]:
     """Filter features that have Final_Classification=Class_I|LINE."""
     return [f for f in features if f.has_line_classification()]
@@ -326,9 +354,9 @@ class FeatureIndex:
 
     Flank clipping used to rescan the whole feature list per pattern
     (``[f for f in all_features if f.seqname == ...]`` inside the per-pattern
-    loop), i.e. O(patterns x features). On a large genome ``mask_features`` (the
-    raw TideHunter tandem-repeat set) can hold millions of records, so that
-    quadratic scan dominates wall-time. This indexes features once and answers
+    loop), i.e. O(patterns x features). On a large genome the mask set (raw
+    TideHunter arrays plus the DANTE_LTR / DANTE_TIR elements) holds millions of
+    records, so that quadratic scan dominates wall-time. This indexes features once and answers
     the two flank-clipping queries by binary search.
 
     Both queries reproduce the exact result of the original linear loops:
@@ -341,11 +369,27 @@ class FeatureIndex:
     """
 
     def __init__(self, features: List[GFF3Feature]):
+        self._build((f.seqname, f.start, f.end) for f in features)
+
+    @classmethod
+    def from_intervals(cls, intervals) -> "FeatureIndex":
+        """Build from bare ``(seqname, start, end)`` triples.
+
+        Mask files are only ever queried for boundaries, so they are parsed with
+        ``parse_gff3_intervals`` rather than into ``GFF3Feature`` objects -- a
+        DANTE_LTR GFF3 carries protein sequences in column 9 and is multiple GB
+        on a large genome, none of which this index needs.
+        """
+        index = cls.__new__(cls)
+        index._build(intervals)
+        return index
+
+    def _build(self, intervals) -> None:
         ends = defaultdict(list)
         starts = defaultdict(list)
-        for f in features:
-            ends[f.seqname].append(f.end)
-            starts[f.seqname].append(f.start)
+        for seqname, start, end in intervals:
+            ends[seqname].append(end)
+            starts[seqname].append(start)
         self._ends = {sn: sorted(v) for sn, v in ends.items()}
         self._starts = {sn: sorted(v) for sn, v in starts.items()}
 
@@ -378,12 +422,12 @@ def get_flanking_regions(pattern: FeatureGroup, all_index: "FeatureIndex",
     ----------
     pattern : FeatureGroup
         The feature group to calculate flanking regions for
-    all_features : List[GFF3Feature]
-        All DANTE annotation features
+    all_index : FeatureIndex
+        Index over all DANTE annotation features
     flank_size : int
         Maximum size of flanking regions
-    mask_features : List[GFF3Feature], optional
-        Additional masking features that can limit flanking regions
+    mask_index : FeatureIndex, optional
+        Index over additional masking features that limit flanking regions
 
     Returns
     -------
@@ -442,8 +486,11 @@ def create_extraction_bed(patterns: List[FeatureGroup], all_features: List[GFF3F
 
 def extract_all_sequences(genome_fasta: str, bed_file: str, patterns: List[FeatureGroup],
                          all_features: List[GFF3Feature], output_files: Dict, flank_size: int,
-                         mask_features: List[GFF3Feature] = None, seq_lengths: Dict[str, int] = None) -> bool:
+                         mask_index: "FeatureIndex" = None, seq_lengths: Dict[str, int] = None) -> bool:
     """Extract all required sequences: full regions, grouped by pattern, and 5'/3' prime sequences."""
+    # Index the DANTE features once: create_prime_bed_files is called for both
+    # pattern types, and on a large genome rebuilding it per call is expensive.
+    all_index = FeatureIndex(all_features)
     try:
         # Extract main sequences with flanking regions
         temp_fasta = tempfile.mktemp(suffix='.fasta')
@@ -470,14 +517,14 @@ def extract_all_sequences(genome_fasta: str, bed_file: str, patterns: List[Featu
 
         # Extract 5' and 3' prime sequences with mask support and sequence boundaries
         if endo_rt_patterns:
-            extract_prime_sequences(genome_fasta, endo_rt_patterns, all_features, flank_size,
+            extract_prime_sequences(genome_fasta, endo_rt_patterns, all_index, flank_size,
                                    str(output_files['endo_rt_5prime']), str(output_files['endo_rt_3prime']),
-                                   mask_features, seq_lengths)
+                                   mask_index, seq_lengths)
 
         if endo_rt_rh_patterns:
-            extract_prime_sequences(genome_fasta, endo_rt_rh_patterns, all_features, flank_size,
+            extract_prime_sequences(genome_fasta, endo_rt_rh_patterns, all_index, flank_size,
                                    str(output_files['endo_rt_rh_5prime']), str(output_files['endo_rt_rh_3prime']),
-                                   mask_features, seq_lengths)
+                                   mask_index, seq_lengths)
 
         # Clean up
         os.remove(temp_fasta)
@@ -686,9 +733,9 @@ def extract_grouped_sequences(main_fasta: str, output_fasta: str,
 
 
 def extract_prime_sequences(genome_fasta: str, patterns: List[FeatureGroup],
-                          all_features: List[GFF3Feature], flank_size: int,
+                          all_index: "FeatureIndex", flank_size: int,
                           output_5prime: str, output_3prime: str,
-                          mask_features: List[GFF3Feature] = None,
+                          mask_index: "FeatureIndex" = None,
                           seq_lengths: Dict[str, int] = None) -> None:
     """Extract 5' and 3' prime sequences around ENDO and RT/RH domains."""
     # Create BED files for 5' and 3' sequences
@@ -696,7 +743,7 @@ def extract_prime_sequences(genome_fasta: str, patterns: List[FeatureGroup],
     bed_3prime = tempfile.mktemp(suffix='_3prime.bed')
 
     try:
-        create_prime_bed_files(patterns, all_features, flank_size, bed_5prime, bed_3prime, mask_features, seq_lengths)
+        create_prime_bed_files(patterns, all_index, flank_size, bed_5prime, bed_3prime, mask_index, seq_lengths)
 
         # Extract 5' prime sequences
         if os.path.getsize(bed_5prime) > 0:
@@ -725,9 +772,9 @@ def extract_prime_sequences(genome_fasta: str, patterns: List[FeatureGroup],
                 os.remove(bed_file)
 
 
-def create_prime_bed_files(patterns: List[FeatureGroup], all_features: List[GFF3Feature],
+def create_prime_bed_files(patterns: List[FeatureGroup], all_index: "FeatureIndex",
                           flank_size: int, bed_5prime: str, bed_3prime: str,
-                          mask_features: List[GFF3Feature] = None,
+                          mask_index: "FeatureIndex" = None,
                           seq_lengths: Dict[str, int] = None) -> None:
     """Create BED files for 5' and 3' prime sequence extraction with mask support.
 
@@ -737,9 +784,6 @@ def create_prime_bed_files(patterns: List[FeatureGroup], all_features: List[GFF3
 
     Flanking regions are limited by neighboring DANTE features, optional mask features, and sequence boundaries.
     """
-    # Index once, not per pattern (mask_features can be millions of records).
-    all_index = FeatureIndex(all_features)
-    mask_index = FeatureIndex(mask_features) if mask_features else None
     with open(bed_5prime, 'w') as f5, open(bed_3prime, 'w') as f3:
         for pattern in patterns:
             # Get sequence length if available
@@ -812,6 +856,10 @@ class LineElement:
     pattern_type: str
     extension_5prime: int = 0
     extension_3prime: int = 0
+    # What the flank alignment proposed before the length caps were applied.
+    # Equal to the applied values when nothing was capped.
+    extension_5prime_inferred: int = 0
+    extension_3prime_inferred: int = 0
 
 
 def load_alignment_lengths(output_dir: Path) -> Dict[str, Dict[str, int]]:
@@ -855,7 +903,48 @@ def load_alignment_lengths(output_dir: Path) -> Dict[str, Dict[str, int]]:
     return dict(alignment_lengths)
 
 
-def create_line_elements(patterns: List[FeatureGroup], alignment_lengths: Dict[str, Dict[str, int]]) -> List[LineElement]:
+def cap_extensions(core_len: int, ext_5prime: int, ext_3prime: int,
+                   max_extension: int = 0, max_element_length: int = 0) -> Tuple[int, int]:
+    """Clamp a pair of inferred extensions to the biological length bounds.
+
+    The flank alignment can propose an extension all the way to ``--flank``
+    (10 kb by default) on each side, which produces "LINE" consensi of 16-22 kb.
+    No plant LINE is that long -- full-length elements run 4-7 kb around an
+    ENDO+RT core of roughly 2.1 kb -- so the extensions are capped rather than
+    the elements discarded: the domain core is always kept, only the appended
+    flank is trimmed.
+
+    ``max_extension`` bounds each side independently. ``max_element_length``
+    then bounds the whole element; when the two sides together exceed the
+    remaining budget it is split evenly, except that a side asking for less than
+    its half keeps what it asked for and yields the rest to the other side. An
+    odd base pair goes to the 3' side. A core already at or over
+    ``max_element_length`` yields no extension at all -- the core itself is never
+    trimmed.
+
+    Either bound is disabled by passing 0.
+    """
+    if max_extension > 0:
+        ext_5prime = min(ext_5prime, max_extension)
+        ext_3prime = min(ext_3prime, max_extension)
+
+    if max_element_length > 0:
+        budget = max(0, max_element_length - core_len)
+        if ext_5prime + ext_3prime > budget:
+            half = budget // 2
+            if ext_5prime <= half:
+                ext_3prime = budget - ext_5prime
+            elif ext_3prime <= half:
+                ext_5prime = budget - ext_3prime
+            else:
+                ext_5prime = half
+                ext_3prime = budget - half
+
+    return ext_5prime, ext_3prime
+
+
+def create_line_elements(patterns: List[FeatureGroup], alignment_lengths: Dict[str, Dict[str, int]],
+                         max_extension: int = 0, max_element_length: int = 0) -> List[LineElement]:
     """Create LINE_element features with boundaries based on alignment lengths.
 
     Parameters
@@ -864,6 +953,10 @@ def create_line_elements(patterns: List[FeatureGroup], alignment_lengths: Dict[s
         List of feature groups (ENDO-RT or ENDO-RT-RH patterns)
     alignment_lengths : Dict[str, Dict[str, int]]
         Dictionary mapping group_id to 5prime/3prime alignment lengths
+    max_extension : int, optional
+        Cap on each side's extension in bp; 0 disables
+    max_element_length : int, optional
+        Cap on the whole element in bp; 0 disables
 
     Returns
     -------
@@ -880,8 +973,12 @@ def create_line_elements(patterns: List[FeatureGroup], alignment_lengths: Dict[s
         # For minus strand, the group_id in TSV has _revcomp suffix
         lookup_id = f"{pattern.group_id}_revcomp" if pattern.strand == '-' else pattern.group_id
         extensions = alignment_lengths.get(lookup_id, {})
-        ext_5prime = extensions.get('5prime', 0)
-        ext_3prime = extensions.get('3prime', 0)
+        raw_5prime = extensions.get('5prime', 0)
+        raw_3prime = extensions.get('3prime', 0)
+
+        ext_5prime, ext_3prime = cap_extensions(
+            base_end - base_start + 1, raw_5prime, raw_3prime,
+            max_extension=max_extension, max_element_length=max_element_length)
 
         # Calculate extended boundaries based on strand
         if pattern.strand == '+':
@@ -907,7 +1004,9 @@ def create_line_elements(patterns: List[FeatureGroup], alignment_lengths: Dict[s
             end=element_end,
             pattern_type=pattern.pattern_type,
             extension_5prime=ext_5prime,
-            extension_3prime=ext_3prime
+            extension_3prime=ext_3prime,
+            extension_5prime_inferred=raw_5prime,
+            extension_3prime_inferred=raw_3prime
         ))
 
     return line_elements
@@ -1004,6 +1103,18 @@ def write_grouped_gff(patterns: List[FeatureGroup], output_gff: str, line_elemen
                 attributes = f"ID={pattern.group_id};Pattern_Type={pattern.pattern_type}"
                 if line_element.extension_5prime > 0 or line_element.extension_3prime > 0:
                     attributes += f";Extension_5prime={line_element.extension_5prime};Extension_3prime={line_element.extension_3prime}"
+                # Only emitted when a cap actually bound, so an uncapped element's
+                # attributes are unchanged from previous releases.
+                capped = [
+                    side for side, applied, inferred in (
+                        ("5prime", line_element.extension_5prime, line_element.extension_5prime_inferred),
+                        ("3prime", line_element.extension_3prime, line_element.extension_3prime_inferred),
+                    ) if applied != inferred
+                ]
+                if capped:
+                    attributes += (f";Extension_capped={','.join(capped)}"
+                                   f";Extension_5prime_inferred={line_element.extension_5prime_inferred}"
+                                   f";Extension_3prime_inferred={line_element.extension_3prime_inferred}")
 
                 f.write(f"{line_element.seqname}\tDANTE\tLINE_element\t"
                        f"{line_element.start}\t{line_element.end}\t.\t"
@@ -1019,11 +1130,42 @@ def write_grouped_gff(patterns: List[FeatureGroup], output_gff: str, line_elemen
                        f"{feature.strand}\t{feature.phase}\t{new_attributes}\n")
 
 
-def analyze_alignment_lengths(alignment_tsv: Path, output_tsv: Path, min_num_alignments: int) -> None:
-    """Analyze alignment TSV and determine length thresholds for each group.
+def analyze_alignment_lengths(alignment_tsv: Path, output_tsv: Path,
+                              min_num_alignments: int,
+                              support_fraction: float = 0.0,
+                              min_group_alignments: int = 0) -> None:
+    """Choose, per group, how far its flank is supported by the other copies.
 
-    For each Group_ID, collects all alignment lengths (from both query and ref positions),
-    sorts them, and selects the Nth largest value where N = min_num_alignments.
+    For each ``Group_ID`` the alignment table holds one length per pairwise flank
+    alignment the group takes part in. The extension kept for the group is the
+    ``k``-th largest of those lengths, i.e. the distance out to which at least
+    ``k`` partners still align.
+
+    Why ``k`` is not a constant
+    ---------------------------
+    ``k`` used to be ``min_num_alignments`` (default 3) regardless of how many
+    partners a group had, which makes the threshold satisfiable by construction:
+    a group with exactly three alignments has its third-largest *equal to its
+    minimum*, so nothing is filtered at all. Measured on a wheat run, most
+    runaway extensions came from groups of 3-4, and the ones that did not came
+    from a handful of outlier pairs in a large group -- ``LINE_group_2147`` took
+    a 5,968 bp extension from 3 of its 51 partners while the 25th percentile of
+    that same group was 751 bp.
+
+    So ``k`` scales with the evidence available::
+
+        k = max(min_num_alignments, ceil(support_fraction * n_alignments))
+
+    and a group with fewer than ``min_group_alignments`` alignments is not
+    reported at all -- too few partners to say anything, so the element keeps its
+    domain core and no extension.
+
+    ``support_fraction=0.0`` reproduces the old fixed-``k`` behaviour exactly, and
+    takes a **single-pass** code path: ``k`` is then known up front, so the counting
+    pass is unnecessary. That matters because ``dante_tir_fallback`` shares this
+    function and its alignment tables are far larger than DANTE_LINE's -- on a
+    14.5 Gb wheat run the EnSpm_CACTA 3' table alone is **43 GB** (every row carries
+    its aligned sequences), so a gratuitous second read costs tens of GB of I/O.
 
     Parameters
     ----------
@@ -1032,59 +1174,85 @@ def analyze_alignment_lengths(alignment_tsv: Path, output_tsv: Path, min_num_ali
     output_tsv : Path
         Output TSV file with length thresholds per group
     min_num_alignments : int
-        Minimum number of alignments required (N largest alignments to consider)
+        Floor on ``k``; also the value of ``k`` when ``support_fraction`` is 0
+    support_fraction : float, optional
+        Fraction of a group's alignments that must reach the kept length
+    min_group_alignments : int, optional
+        Groups with fewer alignments than this get no extension
     """
-    # Bounded memory: we only ever need the N largest lengths per group (to pick
-    # the Nth largest) plus a running count — not every length. Keep a size-N
-    # min-heap per group, so peak memory is groups x N instead of total records.
-    n = min_num_alignments
-    group_heap = defaultdict(list)   # min-heap holding the N largest lengths seen
-    group_count = defaultdict(int)   # total lengths seen per group
+    if not 0.0 <= support_fraction <= 1.0:
+        raise ValueError("support_fraction must be between 0 and 1")
 
-    # Read alignment data from TSV
-    with open(alignment_tsv, 'r') as f:
-        # Read header
-        header = f.readline().strip().split('\t')
-        query_id_idx = header.index('query_id')
-        ref_id_idx = header.index('ref_id')
-        degapped_query_len_idx = header.index('degapped_query_len')
-        degapped_ref_len_idx = header.index('degapped_ref_len')
+    def read_lengths():
+        """Yield (group_id, length) for both partners of every alignment row."""
+        with open(alignment_tsv, 'r') as f:
+            header = f.readline().strip().split('\t')
+            query_id_idx = header.index('query_id')
+            ref_id_idx = header.index('ref_id')
+            degapped_query_len_idx = header.index('degapped_query_len')
+            degapped_ref_len_idx = header.index('degapped_ref_len')
+            for line in f:
+                fields = line.strip().split('\t')
+                yield fields[query_id_idx], int(fields[degapped_query_len_idx])
+                yield fields[ref_id_idx], int(fields[degapped_ref_len_idx])
 
-        # Read data rows; feed each length into its group's bounded heap
-        for line in f:
-            fields = line.strip().split('\t')
-            for gid, length in (
-                (fields[query_id_idx], int(fields[degapped_query_len_idx])),
-                (fields[ref_id_idx], int(fields[degapped_ref_len_idx])),
-            ):
-                group_count[gid] += 1
-                heap = group_heap[gid]
-                if len(heap) < n:
-                    heapq.heappush(heap, length)
-                else:
-                    heapq.heappushpop(heap, length)  # keep the N largest
+    group_count = defaultdict(int)
+    group_heap = defaultdict(list)
 
-    # Calculate threshold for each group. The selected length is the Nth largest
-    # (= the heap's min once the group has >= N lengths). Num_Shorter is
-    # (# lengths <= selected) - 1; every length strictly greater than the Nth
-    # largest is itself among the N largest (so it is in the heap), hence
-    # (# > selected) = n - (# heap entries == selected). This reproduces exactly
-    # what the previous sort-all-lengths code computed.
-    results = []
-    for group_id in sorted(group_count.keys()):
-        total = group_count[group_id]
-        if n >= 1 and total >= n:
+    if support_fraction > 0:
+        # k scales with the group, so it cannot be known while streaming the
+        # lengths: count first, then keep the k largest per group.
+        for group_id, _ in read_lengths():
+            group_count[group_id] += 1
+
+        group_k = {}
+        for group_id, total in group_count.items():
+            k = max(min_num_alignments, math.ceil(total * support_fraction))
+            if total < k or total < min_group_alignments:
+                continue
+            group_k[group_id] = k
+
+        for group_id, length in read_lengths():
+            k = group_k.get(group_id)
+            if k is None:
+                continue
             heap = group_heap[group_id]
-            selected_length = heap[0]
-            num_greater = n - sum(1 for x in heap if x == selected_length)
-            num_shorter_or_equal = total - num_greater - 1
+            if len(heap) < k:
+                heapq.heappush(heap, length)
+            else:
+                heapq.heappushpop(heap, length)  # keep the k largest
+    else:
+        # k is a constant, so one pass suffices: a size-k min-heap per group
+        # holds the k largest lengths and the count comes along for free.
+        k = min_num_alignments
+        for group_id, length in read_lengths():
+            group_count[group_id] += 1
+            heap = group_heap[group_id]
+            if len(heap) < k:
+                heapq.heappush(heap, length)
+            else:
+                heapq.heappushpop(heap, length)
+        group_k = {g: k for g, total in group_count.items()
+                   if total >= k and total >= min_group_alignments}
 
-            results.append({
-                'Group_ID': group_id,
-                'Selected_Length': selected_length,
-                'Num_Shorter': num_shorter_or_equal
-            })
-        # If fewer than min_num_alignments, don't report (doesn't pass threshold)
+    # The selected length is the k-th largest (= the heap's min). Num_Shorter is
+    # (# lengths <= selected) - 1; every length strictly greater than the k-th
+    # largest is itself among the k largest (so it is in the heap), hence
+    # (# > selected) = k - (# heap entries == selected).
+    results = []
+    for group_id in sorted(group_k.keys()):
+        total = group_count[group_id]
+        k = group_k[group_id]
+        heap = group_heap[group_id]
+        selected_length = heap[0]
+        num_greater = k - sum(1 for x in heap if x == selected_length)
+        num_shorter_or_equal = total - num_greater - 1
+
+        results.append({
+            'Group_ID': group_id,
+            'Selected_Length': selected_length,
+            'Num_Shorter': num_shorter_or_equal
+        })
 
     # Write results to TSV atomically (.tmp + rename) so a run killed mid-write
     # cannot leave a truncated file that the caller's `.exists()` checkpoint would
@@ -1186,7 +1354,9 @@ def run_mmseqs_clustering(input_fasta: str, output_dir: Path, threads: int = 1) 
         return False
 
 
-def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments: int = 3, verbose: bool = False, max_group_size: Optional[int] = None) -> None:
+def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments: int = 3,
+                         verbose: bool = False, max_group_size: Optional[int] = None,
+                         support_fraction: float = 0.0, min_group_alignments: int = 0) -> None:
     """Run all-vs-all alignment analysis on prime sequences.
 
     For 5' sequences: use --end 3 (3' end fixed, analyze 5' similarity)
@@ -1202,6 +1372,10 @@ def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments:
         Minimum number of alignments for length threshold calculation, default 3
     verbose : bool, optional
         Print verbose progress messages for alignment analysis, default False
+    support_fraction : float, optional
+        Fraction of a group's alignments that must reach the kept extension
+    min_group_alignments : int, optional
+        Groups with fewer alignments than this get no extension
     """
     alignment_files = [
         ('ENDO_RT_5prime.fasta', 'ENDO_RT_5prime_alignment.tsv', '3'),  # 5' seqs -> fix 3' end
@@ -1267,7 +1441,9 @@ def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments:
 
         print(f"  Processing {alignment_name}...")
         try:
-            analyze_alignment_lengths(alignment_path, length_output, min_num_alignments)
+            analyze_alignment_lengths(alignment_path, length_output, min_num_alignments,
+                                      support_fraction=support_fraction,
+                                      min_group_alignments=min_group_alignments)
             print(f"    → {length_output.name}")
         except Exception as e:
             print(f"    Error processing {alignment_name}: {e}", file=sys.stderr)
@@ -1308,9 +1484,40 @@ Examples:
     parser.add_argument('-t', '--threads', type=int, default=1,
                        help='Number of threads for alignment analysis (default: 1)')
     parser.add_argument('--min-num-alignments', type=int, default=3,
-                       help='Minimum number of alignments for length threshold calculation (default: 3)')
-    parser.add_argument('--mask-gff3',
-                       help='Optional: GFF3 file with features that can limit flanking regions')
+                       help='Floor on the number of partner alignments that must reach the '
+                            'kept extension (default: 3)')
+    parser.add_argument('--support-fraction', type=float, default=0.5,
+                       help='Fraction of a group\'s flank alignments that must reach the kept '
+                            'extension. Scales the support requirement with the evidence '
+                            'available, so a few near-identical outlier pairs cannot set the '
+                            'boundary for the whole group. 0 restores the old fixed '
+                            '--min-num-alignments behaviour (default: 0.5)')
+    parser.add_argument('--min-group-alignments', type=int, default=5,
+                       help='Groups with fewer flank alignments than this get no extension at '
+                            'all: too few partners to place a boundary, so the element keeps '
+                            'its domain core. 0 disables (default: 5)')
+    parser.add_argument('--max-extension', type=int, default=1500,
+                       help='Cap on each side\'s extension in bp. Deliberately tighter than a '
+                            'full-length LINE needs: a truncated consensus still masks its '
+                            'family, an over-extended one mislabels its neighbour genome-wide. '
+                            '0 disables (default: 1500)')
+    parser.add_argument('--library-source', choices=['core', 'element'], default='core',
+                       help="Which span of each element seeds the RepeatMasker library. "
+                            "'core' (default) uses only the span DANTE actually annotated "
+                            "-- the ENDO..RT/RH domain region -- and leaves the inferred "
+                            "flanks out of the similarity search entirely, while "
+                            "DANTE_LINE.gff3 still reports the full element. 'element' "
+                            "restores the previous behaviour of clustering the extended "
+                            "regions. The flanks are an inference, and a wrong one is "
+                            "amplified by every RepeatMasker search that follows.")
+    parser.add_argument('--max-element-length', type=int, default=8000,
+                       help='Cap on the total LINE element length in bp; the domain core is '
+                            'never trimmed, only the appended flanks. 0 disables (default: 8000)')
+    parser.add_argument('--mask-gff3', action='append', metavar='GFF3',
+                       help='GFF3 whose features terminate a flank. Repeatable: pass '
+                            'the TideHunter tandem arrays plus DANTE_LTR / DANTE_TIR '
+                            'elements so a flank cannot run through a neighbouring '
+                            'element that another tool has already annotated.')
     parser.add_argument('--max-group-size', type=int, default=None,
                        help='When more than this many LINE patterns are found, split them '
                             'into deterministic clustering-based groups of at most this size '
@@ -1323,6 +1530,13 @@ Examples:
     args = parser.parse_args()
     if args.max_group_size is not None and args.max_group_size < 2:
         parser.error("--max-group-size must be >= 2")
+    if not 0.0 <= args.support_fraction <= 1.0:
+        parser.error("--support-fraction must be between 0 and 1")
+    for name, value in (("--min-group-alignments", args.min_group_alignments),
+                        ("--max-extension", args.max_extension),
+                        ("--max-element-length", args.max_element_length)):
+        if value < 0:
+            parser.error(f"{name} must be >= 0")
 
     # Validate input files
     for file_path, name in [(args.genome, "Genome"), (args.annotations, "Annotations")]:
@@ -1334,15 +1548,22 @@ Examples:
     all_features = parse_gff3_features(args.annotations)
     print(f"Found {len(all_features)} total features")
 
-    # Parse mask GFF3 if provided
-    mask_features = None
+    # Parse mask GFF3s if provided. Several may be given; they are merged into a
+    # single boundary index, so the flank stops at whichever comes first.
+    mask_index = None
     if args.mask_gff3:
-        if not Path(args.mask_gff3).exists():
-            print(f"Error: Mask GFF3 file {args.mask_gff3} not found")
-            sys.exit(1)
-        print(f"Parsing mask GFF3 file: {args.mask_gff3}")
-        mask_features = parse_gff3_features(args.mask_gff3)
-        print(f"Found {len(mask_features)} mask features")
+        mask_intervals = []
+        for mask_path in args.mask_gff3:
+            if not Path(mask_path).exists():
+                print(f"Error: Mask GFF3 file {mask_path} not found")
+                sys.exit(1)
+            print(f"Parsing mask GFF3 file: {mask_path}")
+            found = parse_gff3_intervals(mask_path)
+            print(f"  {len(found)} mask features")
+            mask_intervals.extend(found)
+        print(f"Found {len(mask_intervals)} mask features in total")
+        mask_index = FeatureIndex.from_intervals(mask_intervals)
+        del mask_intervals
 
     print("Filtering LINE features...")
     line_features = get_line_features(all_features)
@@ -1408,7 +1629,7 @@ Examples:
 
     print(f"Extracting sequences from {args.genome}...")
     success = extract_all_sequences(args.genome, bed_file, patterns, all_features,
-                                   output_files, args.flank, mask_features, seq_lengths)
+                                   output_files, args.flank, mask_index, seq_lengths)
 
     # Clean up BED file
     if not keep_bed and os.path.exists(bed_file):
@@ -1425,18 +1646,34 @@ Examples:
                 print(f"  {name}: {path.name}")
 
         # Run alignment analysis on prime sequences
-        run_prime_alignments(output_dir, threads=args.threads, min_num_alignments=args.min_num_alignments, verbose=args.verbose, max_group_size=args.max_group_size)
+        run_prime_alignments(output_dir, threads=args.threads,
+                             min_num_alignments=args.min_num_alignments,
+                             verbose=args.verbose, max_group_size=args.max_group_size,
+                             support_fraction=args.support_fraction,
+                             min_group_alignments=args.min_group_alignments)
 
         # Load alignment lengths and create LINE elements
         print("\nCreating LINE_element features from alignment data...")
         alignment_lengths = load_alignment_lengths(output_dir)
-        line_elements = create_line_elements(patterns, alignment_lengths)
+        line_elements = create_line_elements(patterns, alignment_lengths,
+                                             max_extension=args.max_extension,
+                                             max_element_length=args.max_element_length)
+        n_capped = sum(1 for le in line_elements
+                       if le.extension_5prime != le.extension_5prime_inferred
+                       or le.extension_3prime != le.extension_3prime_inferred)
+        if n_capped:
+            print(f"  {n_capped} of {len(line_elements)} elements had a boundary capped "
+                  f"(--max-extension {args.max_extension}, "
+                  f"--max-element-length {args.max_element_length})")
 
         # Write GFF3 with LINE_element features
         print(f"Writing GFF3 with LINE_element features to {output_files['gff_out']}...")
         write_grouped_gff(patterns, str(output_files['gff_out']), line_elements)
 
-        # Extract extended LINE regions based on LINE_element boundaries
+        # Extract extended LINE regions based on LINE_element boundaries. This
+        # file is always written -- it is the record of the element extent the
+        # boundary search inferred -- but see --library-source for whether it is
+        # what seeds RepeatMasker.
         extended_fasta_path = output_dir / 'LINE_regions_extended.fasta'
         print(f"\nExtracting extended LINE regions to {extended_fasta_path}...")
         extended_success = extract_extended_line_regions(args.genome, line_elements, str(extended_fasta_path))
@@ -1444,8 +1681,20 @@ Examples:
         if extended_success:
             print(f"  → LINE_regions_extended.fasta")
 
-            # Run MMseqs2 clustering on extended sequences
-            clustering_success = run_mmseqs_clustering(str(extended_fasta_path), output_dir, threads=args.threads)
+            # The library is built from the DANTE-annotated core by default: the
+            # domain span is observed, the flanks are inferred, and a wrong flank
+            # in the library is amplified across the whole RepeatMasker search.
+            # LINE_regions.fasta is that core span, already strand-normalised.
+            if args.library_source == 'core':
+                library_source_path = output_files['main_fasta']
+                print(f"  Library source: LINE_regions.fasta (DANTE domain core; "
+                      f"inferred flanks excluded from the RepeatMasker library)")
+            else:
+                library_source_path = extended_fasta_path
+                print(f"  Library source: LINE_regions_extended.fasta (core + inferred flanks)")
+
+            # Run MMseqs2 clustering on the chosen library source
+            clustering_success = run_mmseqs_clustering(str(library_source_path), output_dir, threads=args.threads)
 
             if clustering_success:
                 # Process cluster representative sequences to create repeat library
