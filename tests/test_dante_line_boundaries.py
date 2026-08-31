@@ -324,6 +324,42 @@ class TestSupportRule(unittest.TestCase):
             self.assertFalse((out.parent / (out.name + ".tmp")).exists())
 
 
+class TestGff3AttributeValuesAreSingleValued(unittest.TestCase):
+    """No attribute value may contain a comma.
+
+    A comma is GFF3's multi-value separator, so `Key=a,b` is imported by
+    rtracklayer as a CompressedCharacterList mcols column. Subsetting a
+    DataFrame that holds one dies on the Bioconductor 3.14 stack the pipeline
+    container pins via r-base 4.1 (S4Vectors 0.32.4):
+
+        'end' must be <= 'length(x)'   in vector_OR_factor_extract_ranges
+
+    It does NOT die on Bioconductor 3.18, so a newer dev environment cannot see
+    it. `Extension_capped=5prime,3prime` shipped in a 1.7.0a1 build and failed
+    every batch of make_unified_annotation on two real genomes.
+    """
+
+    def _emitters(self):
+        import dante_tir_fallback
+        return [(Path(dante_line.__file__), "dante_line"),
+                (Path(dante_tir_fallback.__file__), "dante_tir_fallback")]
+
+    def test_no_emitter_joins_attribute_values_with_a_comma(self):
+        for path, name in self._emitters():
+            src = path.read_text()
+            self.assertNotIn("','.join(capped)", src,
+                             f"{name} joins a GFF3 attribute value with a comma")
+
+    def test_extension_capped_is_single_valued(self):
+        for path, name in self._emitters():
+            for line in path.read_text().splitlines():
+                if "Extension_capped=" in line and "join(" in line:
+                    self.assertNotIn("','", line,
+                                     f"{name}: Extension_capped must not be comma-joined")
+                    self.assertIn("'+'", line,
+                                  f"{name}: expected a '+'-joined Extension_capped")
+
+
 class TestSinglePassWhenFractionRuleIsOff(unittest.TestCase):
     """The counting pass must not run when k is a constant.
 

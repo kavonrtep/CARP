@@ -1112,7 +1112,7 @@ def write_grouped_gff(patterns: List[FeatureGroup], output_gff: str, line_elemen
                     ) if applied != inferred
                 ]
                 if capped:
-                    attributes += (f";Extension_capped={','.join(capped)}"
+                    attributes += (f";Extension_capped={'+'.join(capped)}"
                                    f";Extension_5prime_inferred={line_element.extension_5prime_inferred}"
                                    f";Extension_3prime_inferred={line_element.extension_3prime_inferred}")
 

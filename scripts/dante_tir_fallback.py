@@ -623,7 +623,7 @@ def write_tir_gff(
                 ]
                 if capped:
                     attributes += (
-                        f";Extension_capped={','.join(capped)}"
+                        f";Extension_capped={'+'.join(capped)}"
                         f";Extension_5prime_inferred={element.extension_5prime_inferred}"
                         f";Extension_3prime_inferred={element.extension_3prime_inferred}"
                     )

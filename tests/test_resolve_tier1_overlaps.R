@@ -198,6 +198,41 @@ check_claim_width <- function(min_len) {
   cat("               absent claim_width == width-only reference; order-invariant\n")
 }
 
+# ---- subset_seqs drops list-valued columns BEFORE the row subset -------------
+# A GFF3 attribute containing a comma (GFF3's multi-value separator) imports as a
+# CompressedCharacterList mcols column. Subsetting a DataFrame that holds one dies
+# on the Bioconductor 3.14 stack the container pins via r-base 4.1
+# (S4Vectors 0.32.4) -- "'end' must be <= 'length(x)'" -- but not on 3.18, so a
+# newer dev environment cannot see it. subset_seqs must therefore drop non-standard
+# columns BEFORE it subsets rows, never after.
+check_subset_seqs_drops_first <- function() {
+  # load the function AND the column whitelist it closes over, into one env
+  env <- load_from_script(c("subset_seqs", ".META_COLS"))
+  subset_seqs <- env$subset_seqs
+  meta_cols   <- env$.META_COLS
+
+  gr <- GRanges(c("chr1", "chr1", "chr2"), IRanges(c(1, 100, 1), c(50, 150, 50)))
+  gr$Name <- c("a", "b", "c"); gr$classification <- gr$Name
+  gr$source_tier <- 1L; gr$source_tool <- "DANTE_LINE"
+  # the shape a comma-valued GFF3 attribute takes after rtracklayer import
+  gr$Extension_capped <- IRanges::CharacterList(c("5prime", "3prime"),
+                                                character(0), "5prime")
+  out <- subset_seqs(gr, "chr1")
+  if (length(out) != 2L) stop("subset_seqs returned the wrong number of features")
+  if ("Extension_capped" %in% colnames(mcols(out)))
+    stop("subset_seqs kept a non-standard, list-valued column")
+  if (!all(colnames(mcols(out)) %in% meta_cols))
+    stop("subset_seqs kept a column outside .META_COLS")
+  # The drop must happen BEFORE the row subset. On Bioconductor 3.18 both orders
+  # work, so assert the ordering in the source rather than by behaviour.
+  body_txt <- paste(deparse(subset_seqs), collapse = "\n")
+  drop_at <- regexpr("keep_cols", body_txt)
+  subs_at <- regexpr("seqnames\\(gr\\) %in% seqs", body_txt)
+  if (drop_at < 0 || subs_at < 0 || drop_at > subs_at)
+    stop("subset_seqs must drop non-standard mcols BEFORE subsetting rows")
+  cat("  subset_seqs: list-valued columns dropped before the row subset\n")
+}
+
 main <- function() {
   min_len <- 50L
   ntrials <- 30
@@ -217,6 +252,7 @@ main <- function() {
               ntrials))
 
   check_claim_width(min_len)
+  check_subset_seqs_drops_first()
 
   # Order-invariance (determinism): the greedy trim RESULT must not depend on the
   # order features arrive in — that order is batch/thread-dependent. Use inputs

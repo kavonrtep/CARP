@@ -198,9 +198,25 @@ safe_import <- function(path) {
 # Ensures all retained columns are plain atomic vectors (not CharacterList).
 subset_seqs <- function(gr, seqs) {
   if (length(gr) == 0) return(gr)
+  # Drop every non-standard mcol BEFORE the row subset. Two reasons:
+  #
+  #   * ROBUSTNESS. A GFF3 attribute whose value contains a comma — GFF3's
+  #     multi-value separator — imports as a CompressedCharacterList, and
+  #     subsetting a DataFrame that contains one dies on the Bioconductor 3.14
+  #     stack this env pins via r-base 4.1 (S4Vectors 0.32.4):
+  #       'end' must be <= 'length(x)'  in vector_OR_factor_extract_ranges
+  #     It does not die on Bioconductor 3.18, so this is invisible in a newer
+  #     sandbox and only shows up in the container. Since the columns are
+  #     discarded two lines later anyway, never carry them through the subset.
+  #   * COST. DANTE carries a protein sequence per feature; dragging those
+  #     columns through every per-batch row subset is pure waste.
+  #
   # `%in%` on the seqnames Rle matches on run values (cheap); the old
   # `as.character(seqnames(gr))` expanded the whole tier's seqnames to a plain
   # character vector on every batch call -> O(n_batches x tier_features).
+  keep_cols <- intersect(.META_COLS, colnames(mcols(gr)))
+  mcols(gr) <- if (length(keep_cols) > 0)
+    mcols(gr)[, keep_cols, drop = FALSE] else NULL
   gr <- gr[seqnames(gr) %in% seqs]
   if (length(gr) == 0) return(gr)
   # Rebuild mcols with only the standardised columns, coerced to plain types
@@ -1828,10 +1844,28 @@ if (opt$max_workers > 0 && n_workers > opt$max_workers) {
 log_msg(sprintf("── Worker pool: %d concurrent worker(s) for %d batch(es) ─────",
                 n_workers, length(batches)))
 t_resolve <- tic("tier resolution (all batches)")
-results <- mclapply(batches,
-                    function(seqs) process_batch(seqs, data, opt$min_feature_length,
-                                                 trc_origin_def, trc_origin_sho),
-                    mc.cores = n_workers)
+# mclapply turns a worker error into a try-error whose as.character() carries the
+# message and the failing call, but NOT the stack — so a batch failure reported
+# only "Error in .Call2(...)" with no indication of which function reached it.
+# withCallingHandlers runs at signal time, while the stack is still intact, so the
+# frames can be logged before unwinding continues to mclapply's try().
+batch_worker <- function(seqs) {
+  withCallingHandlers(
+    process_batch(seqs, data, opt$min_feature_length,
+                  trc_origin_def, trc_origin_sho),
+    error = function(e) {
+      frames <- sys.calls()
+      txt <- vapply(frames, function(cl)
+        paste(deparse(cl, nlines = 1L), collapse = " "), character(1))
+      txt <- utils::tail(txt, 20L)
+      message("Batch [", paste(utils::head(seqs, 2), collapse = ","),
+              "] error: ", conditionMessage(e),
+              "\n  call stack (innermost last):\n    ",
+              paste(txt, collapse = "\n    "))
+    })
+}
+
+results <- mclapply(batches, batch_worker, mc.cores = n_workers)
 toc(t_resolve)
 log_mem("after tier resolution (parent)")
 
