@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0rc1
 
 > **Annotations change on repeat-dense genomes.** `dante_line` inferred where a
 > LINE ends from an all-vs-all alignment of its flanks, and in a large,
