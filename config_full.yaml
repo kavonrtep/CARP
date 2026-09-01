@@ -106,13 +106,31 @@ dante_tir_fallback_library_source: core
 dante_line_support_fraction: 0.5
 dante_line_min_group_alignments: 5
 # dante_line_max_extension (default 0): symmetric ESCAPE HATCH — a value > 0 caps
-#   BOTH sides of the LINE flank extension at that many bp. At 0 the per-side
-#   bounds come from max_extension_per_side in classification_vocabulary.yaml,
-#   which is ASYMMETRIC for LINE: 2000 bp 5' (inter-ORF + ORF1 + 5'UTR sit
-#   outside the ENDO+RT core) but only 800 bp 3' (ORF2 C-terminus + 3'UTR +
-#   polyA). The former shared 1500 was too tight 5' and too loose 3' at once.
+#   BOTH sides of the LINE flank extension at that many bp, and is a COMPLETE
+#   manual override: it disables both the per-side bounds and the span bound
+#   below, so what you set is never quietly tightened by a vocabulary value.
+#   At 0 the bounds come from two Class_I/LINE tables in
+#   classification_vocabulary.yaml (not config keys):
+#     max_extension_per_side  = 3400 bp 5', 2500 bp 3'
+#     max_core_to_3prime_end  = 4500 bp on (domain core + 3' extension), i.e.
+#                               the distance from the START of the domain core
+#                               to the element's 3' end; applied after the
+#                               per-side caps. LINE only — TIR is deliberately
+#                               not covered and stays on per-side bounds.
+#   The 3' per-side value is a BACKSTOP only (observed max 3' extension 2338 bp,
+#   p99 2180, so it never binds); the span is the real 3' constraint. Reason:
+#   the 3' extension is not a biological distance, it is the remainder after
+#   DANTE stops annotating the core — over 148 confirmed loci r(core length,
+#   3' extension) = -0.936, so the extension alone varies 13.8x (p90/p10) while
+#   the span varies only 1.16x (per-genome medians 3779-4247 bp, 7 genomes).
+#   MEASURED on 218 LINE loci across 7 genomes with BOTH ends observed (poly-A
+#   tail + a TSD clearing the chance floor), discarding saturated 20 bp matches
+#   and elements over 7500 bp: 5' p95 3360 -> 3400, span p95 4274 -> 4500 (just
+#   under the observed max 4507, so the guard fails toward truncation). These
+#   truncate 9 loci (4.1%) 5' and 1 (0.5%) 3'; the earlier flat 2000/800 caps
+#   truncated 125 (57.3%) and 157 (72.0%), losing 89,196 and 149,884 bp.
 #   Applies to DANTE_LINE only — dante_tir_fallback has no config key and reads
-#   its per-superfamily bounds (measured p95) from the same table.
+#   its per-superfamily bounds (measured p95) from max_extension_per_side.
 dante_line_max_extension: 0
 # Whole-element cap in bp (core + both flanks); the core is never trimmed.
 dante_line_max_element_length: 8000

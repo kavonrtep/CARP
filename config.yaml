@@ -77,12 +77,19 @@ dante_line_max_group_size: 1000
 # dante_line_min_group_alignments (default 5): groups with fewer flank
 #   alignments get no extension at all. 0 disables.
 # dante_line_max_extension (default 0): symmetric ESCAPE HATCH — a value > 0
-#   caps BOTH sides of the LINE flank extension at that many bp. At 0 the
-#   per-side bounds come from max_extension_per_side in
-#   classification_vocabulary.yaml, which is ASYMMETRIC for LINE (2000 bp 5' for
-#   inter-ORF + ORF1 + 5'UTR outside the ENDO+RT core, 800 bp 3' for the ORF2
-#   C-terminus + 3'UTR + polyA). dante_tir_fallback has no config key for this
-#   and reads its measured per-superfamily bounds from the same table.
+#   caps BOTH sides of the LINE flank extension at that many bp, and is a
+#   COMPLETE manual override (it disables the per-side bounds AND the span
+#   bound, so it is never quietly tightened by a vocabulary value). At 0 the
+#   bounds come from two Class_I/LINE tables in classification_vocabulary.yaml,
+#   both MEASURED on 218 confirmed loci across 7 genomes: max_extension_per_side
+#   = 3400 bp 5' / 2500 bp 3', and max_core_to_3prime_end = 4500 bp on (domain
+#   core + 3' extension) — the distance from the START of the core to the
+#   element's 3' end, applied after the per-side caps, LINE only. The 3'
+#   per-side value is a backstop that never binds in practice (observed max
+#   2338 bp); the span is the real 3' bound, because the 3' extension is only
+#   the remainder after the core annotation stops (r = -0.936 with core length).
+#   dante_tir_fallback has no config key for this and reads its measured
+#   per-superfamily bounds from max_extension_per_side.
 # dante_line_max_element_length (default 8000): whole-element cap in bp. The
 #   domain core is never trimmed, only the appended flanks. 0 disables.
 # screen_library_cross_class (default True): trim cross-class contamination out
