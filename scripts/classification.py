@@ -54,6 +54,8 @@ class Vocabulary:
     # ENFORCED per-side flank bounds (longest-prefix match). Scalar = both
     # sides; mapping = {"5prime": n, "3prime": n}. See the YAML comment.
     max_extension_per_side: dict[str, object]
+    # ENFORCED bound on (core length + 3' extension) -- see the YAML comment.
+    max_core_to_3prime_end: dict[str, int]
     # Ordered longest-first so longest match wins.
     tir_prefixes: tuple[tuple[str, str], ...]
     sources: frozenset[str] = field(default_factory=frozenset)
@@ -119,6 +121,7 @@ def load_vocabulary(path: str | Path | None = None) -> Vocabulary:
         tool_dialects=tool_dialects,
         max_consensus_length=dict(raw.get("max_consensus_length", {}) or {}),
         max_extension_per_side=dict(raw.get("max_extension_per_side", {}) or {}),
+        max_core_to_3prime_end=dict(raw.get("max_core_to_3prime_end", {}) or {}),
         tir_prefixes=tir_prefixes,
         sources=frozenset(tool_dialects.keys()),
     )
@@ -506,4 +509,28 @@ def max_extension_for_class(classification: str, side: str = "5prime",
             except (TypeError, ValueError):
                 continue
             best, best_depth = v, depth
+    return max(0, best)
+
+
+def max_core_to_3prime_end_for_class(classification: str, vocab=None) -> int:
+    """Bound in bp on (domain core length + 3' extension); 0 = unbounded.
+
+    Longest-prefix match against ``max_core_to_3prime_end``. This replaces a
+    per-side 3' cap for LINEs because the 3' extension is not a biological
+    distance -- it is the remainder after the domain annotation stops, and it
+    varies 13.8x across confirmed loci. The span it bounds varies only 1.16x.
+    """
+    try:
+        table = (vocab or load_vocabulary()).max_core_to_3prime_end or {}
+    except Exception:
+        return 0
+    best, best_depth = 0, -1
+    for prefix, value in table.items():
+        if classification == prefix or classification.startswith(prefix + "/"):
+            depth = len(prefix.split("/"))
+            if depth > best_depth:
+                try:
+                    best, best_depth = int(value), depth
+                except (TypeError, ValueError):
+                    continue
     return max(0, best)

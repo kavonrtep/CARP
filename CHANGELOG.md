@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+- **The DANTE_LINE flank bounds are now measured, not reasoned from element
+  structure.** `max_extension_per_side` for `Class_I/LINE` in
+  `classification_vocabulary.yaml`: **5' 2000 → 3400**, **3' 800 → 2500**.
+  LINE was the one entry in that table that was structural rather than empirical
+  (1.7.0rc1, "no ground-truth LINE boundary set exists") and it was too tight.
+  There is one now: **218 LINE loci across 7 genomes where both ends were
+  observed** — a poly-A tail found and a target-site duplication clearing a
+  measured chance floor — after discarding saturated 20 bp matches (not TSDs)
+  and elements over 7500 bp (not plant LINEs). On those loci the old flat
+  2000/800 truncated **125 (57.3 %)** elements on the 5' side and **157
+  (72.0 %)** on the 3', losing 89,196 bp and 149,884 bp; the new rules truncate
+  **9 (4.1 %)** and **1 (0.5 %)**.
+- **New `max_core_to_3prime_end` in `classification_vocabulary.yaml`
+  (`Class_I/LINE: 4500`) — the 3' bound changed shape.** The 3' extension is not
+  a biological distance: it is the remainder after DANTE stops annotating the
+  core, so over 148 confirmed loci Pearson r(core length, 3' extension) =
+  **−0.936**, the two being nearly a constant sum. The extension alone varies
+  **13.8×** (p90/p10) while the span from the core start varies only **1.16×**,
+  with per-genome medians of 3779–4247 bp across seven genomes — so a flat
+  per-side 3' cap was limiting the wrong quantity. The new table is
+  longest-prefix matched like the others and bounds (domain core length + 3'
+  extension), the distance from the START of the domain core to the element's 3'
+  end, applied after the per-side caps; that leaves the 3' per-side value a
+  **backstop only**. LINE only — TIR stays on per-side bounds and is
+  deliberately unchanged. `cap_extensions()` gained a `max_core_to_3prime_end`
+  parameter, so existing callers (`dante_tir_fallback`) are unaffected.
+- **A non-zero `dante_line_max_extension` is now a complete manual override.** It
+  disables the per-side bounds **and** the span bound; previously a vocabulary
+  bound could still tighten a value the user had set explicitly. The default is
+  unchanged (`0` = use the vocabulary). See
+  [`docs/configuration.md`](docs/configuration.md).
+- **What users see: LINE elements get longer** in `DANTE_LINE.gff3` and in
+  `Repeat_Annotation_Unified.gff3`. The RepeatMasker library is **unaffected**:
+  it is still built from the domain core only (`dante_line_library_source: core`,
+  1.7.0rc1), so the masking-layer numbers do not move.
+- **New test** `TestCoreToThreePrimeSpan` in
+  `tests/test_superfamily_extension_bounds.py` (now 26 cases): the span bound
+  applying after the per-side caps, the core never being trimmed by it, the
+  longest-prefix lookup, and the manual override disabling both bounds.
+
 ## 1.7.0rc1
 
 > **Annotations change on repeat-dense genomes.** `dante_line` inferred where a

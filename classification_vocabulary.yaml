@@ -264,9 +264,17 @@ max_consensus_length:
 # C-terminus + 3'UTR + polyA (~0.3-0.9 kb) on the 3' side. The previous shared
 # 1500 was therefore simultaneously too tight 5' and too loose 3'.
 max_extension_per_side:
+  # MEASURED, 2026-09-01, from 218 LINE loci across 7 genomes where BOTH ends
+  # were observed (poly-A tail found and a TSD clearing the chance floor), after
+  # discarding saturated 20 bp matches (not TSDs) and elements over 7500 bp
+  # (not plant LINEs). 5' p95 = 3360. The earlier 2000 came from element
+  # structure and truncated 57% of these loci.
   Class_I/LINE:
-    5prime: 2000
-    3prime: 800
+    5prime: 3400
+    # Backstop only -- the binding 3' constraint is max_core_to_3prime_end below.
+    # Observed max 3' extension is 2338 bp, p99 2180, so this never binds in
+    # practice; it exists so a pathological inference is still bounded.
+    3prime: 2500
   # Generic TIR: permissive enough not to truncate an unlisted superfamily.
   Class_II/Subclass_1/TIR: 6000
   Class_II/Subclass_1/TIR/EnSpm_CACTA: 5800    # p95 5812, n=5868
@@ -274,6 +282,35 @@ max_extension_per_side:
   Class_II/Subclass_1/TIR/Tc1_Mariner: 3200    # p95 3169, n=254
   Class_II/Subclass_1/TIR/hAT: 2300            # p95 2249, n=296
   Class_II/Subclass_1/TIR/PIF_Harbinger: 1400  # p95 1388, n=5592
+
+# ─────────────────────────────────────────────────────────────────────────
+# max_core_to_3prime_end — the 3' bound that actually works for LINEs, in bp.
+# Longest-prefix matched. Bounds (domain core length + 3' extension), i.e. the
+# distance from the START of the domain core to the END of the element.
+#
+# WHY NOT A PER-SIDE CAP. The 3' extension is not a biological distance. It is
+# whatever is left over after DANTE stops annotating the core, and it varies
+# 13.8x (p90/p10) across confirmed loci for exactly that reason. Measured over
+# 148 loci: Pearson r(core length, 3' extension) = -0.936 -- the two are nearly
+# a constant sum. What IS stable is this span, which varies only 1.16x, with
+# per-genome medians of 3779-4247 bp across seven genomes.
+#
+# Concretely: two Boechera elements both end ~3750 bp after their ENDO domain
+# starts, but one has a 2164 bp core with a 1568 bp extension and the other a
+# 3893 bp core with a 155 bp extension. No single per-side number fits both.
+#
+# 4500 sits just above the p95 of the span (4274 on the filtered set, 4409
+# unfiltered), the same p95 rule used for the TIR per-superfamily caps, and
+# deliberately below the observed max (4507) so the guard fails toward
+# truncation.
+#
+# Measured on the 218-locus filtered set, this rule truncates 1 locus (0.5%),
+# losing 7 bp in total. The flat 800 bp cap it replaces truncated 157 (72%),
+# losing 149,884 bp.
+#
+# LINE only. TIR was deliberately left on per-side bounds and is untested here.
+max_core_to_3prime_end:
+  Class_I/LINE: 4500
 
 aggregation_buckets:
   Mobile_elements:

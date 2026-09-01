@@ -186,3 +186,60 @@ is 2098, i.e. the distribution is clipped by the method, not by biology.
 "18.2% of confirmed loci exceed the 2000 bp 5' cap" is therefore a LOWER BOUND.
 Re-measuring the 5' side needs a wider window and a re-derived chance floor
 (a wider window raises the floor -- 2 kb needs 11 bp of TSD, 8 kb needs 12+).
+
+---
+
+# Wide-window re-measurement of the 5' side (and what it exposed)
+
+The 2100 bp upstream window censored the 5' extension (observed max 2100, p99
+2098 — clipped by the method, not biology). The chance floor barely moves with
+window size, so widening was cheap: measured on two more genomes, the null p99
+is 9 at 2000 bp and only 10 at 8000 bp.
+
+Re-ran all 7 genomes at `--up-window 6000 --floor 10`: **283 confirmed loci**,
+up from 148. But the extra loci are not all real.
+
+## The wide window admits non-TSD matches
+
+| 5' extension | n | median TSD score | median element length | over 7500 bp |
+|--------------|--:|-----------------:|----------------------:|-------------:|
+| under 2000   | 94|               13 |                  5632 |           0% |
+| 2000-3500    |131|               13 |                  6628 |           4% |
+| 3500-5000    | 23|               14 |                  7948 |          78% |
+| over 5000    | 35|           **20** |             **10160** |     **100%** |
+
+The long hits score HIGHER, not lower — so they are not weak chance matches.
+But a score of 20 is **saturated**: the scan's query is 20 bp, so 20 means the
+repeat is at least 20 bp and probably longer. That is not a TSD (published
+range 9-18 nt; our narrow-window set measured 11-17). And plant LINEs are 4-7 kb,
+so a 10.2 kb median element is not credible either. These are matches to some
+other repeat upstream, not the insertion's own duplication.
+
+**Lesson: widening the window is limited by SPECIFICITY, not by the chance
+floor.** The floor test (Phase 0) passes and still lets these through, because
+they are genuinely strong matches — just not TSDs.
+
+## Filtered result (score < 20, element <= 7500 bp): n = 218
+
+| quantity                | p50  | p90  | p95  |
+|-------------------------|-----:|-----:|-----:|
+| 5' extension            | 2209 | 3034 | 3360 |
+| ENDO start -> polyA end | 4069 | —    | 4274 |
+
+The 3' invariant is unchanged by the filter (p50 4069 / p95 4274 vs 4122 / 4393
+unfiltered), so the 3' conclusion does not depend on it.
+
+## Shipped values
+
+- `max_extension_per_side` `Class_I/LINE` 5prime **3400** (p95 3360), 3prime
+  **2500** (backstop only; observed max 2338, p99 2180).
+- `max_core_to_3prime_end` `Class_I/LINE` **4500** (p95 4274, max 4507).
+
+Effect on the 218 filtered loci — new rules truncate 9 (4.1%) at the 5' end and
+1 (0.5%) at the 3' end. The previous flat 2000/800 caps truncated 125 (57.3%)
+and 157 (72.0%), losing 89,196 bp and 149,884 bp.
+
+**Caveat on the filter:** screening on element length is partly circular for
+estimating the 5' extension, since element length includes it. The filter is
+biologically motivated (plant LINEs are 4-7 kb) rather than arbitrary, but the
+5' p95 of 3360 should be treated as approximate.

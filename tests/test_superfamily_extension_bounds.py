@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import classification
-from dante_line import cap_extensions, line_max_extension
+from dante_line import cap_extensions, line_max_extension, line_core_to_3prime_end
 from dante_tir_fallback import max_extension_for_subtype
 
 # medians measured from DANTE_TIR successes (wheat, Lycopus, Boechera)
@@ -29,8 +29,11 @@ MEASURED_MEDIAN = {
 
 class TestVocabularyLookup(unittest.TestCase):
     def test_line_bound_is_asymmetric(self):
-        self.assertEqual(classification.max_extension_for_class("Class_I/LINE", "5prime"), 2000)
-        self.assertEqual(classification.max_extension_for_class("Class_I/LINE", "3prime"), 800)
+        # MEASURED 2026-09-01 from 218 confirmed loci across 7 genomes; the
+        # earlier structure-derived 2000/800 truncated 57% and 72% of them.
+        self.assertEqual(classification.max_extension_for_class("Class_I/LINE", "5prime"), 3400)
+        # 3' is a backstop only -- max_core_to_3prime_end is the real bound.
+        self.assertEqual(classification.max_extension_for_class("Class_I/LINE", "3prime"), 2500)
 
     def test_longest_prefix_wins_over_generic(self):
         generic = classification.max_extension_for_class("Class_II/Subclass_1/TIR", "5prime")
@@ -124,12 +127,64 @@ class TestResolverPrecedence(unittest.TestCase):
         self.assertEqual(max_extension_for_subtype("EnSpm/CACTA", "5prime", 999), 999)
 
     def test_default_reads_the_vocabulary(self):
-        self.assertEqual(line_max_extension("5prime"), 2000)
-        self.assertEqual(line_max_extension("3prime"), 800)
+        self.assertEqual(line_max_extension("5prime"), 3400)
+        self.assertEqual(line_max_extension("3prime"), 2500)
 
     def test_subtype_label_is_sanitised(self):
         """DANTE writes 'EnSpm/CACTA'; the vocabulary key is 'EnSpm_CACTA'."""
         self.assertEqual(max_extension_for_subtype("EnSpm/CACTA", "5prime"), 5800)
+
+
+class TestCoreToThreePrimeSpan(unittest.TestCase):
+    """The 3' bound is on (core + extension), not on the extension alone.
+
+    Measured over 148 confirmed LINE loci: Pearson r(core length, 3' extension)
+    = -0.936, i.e. they are nearly a constant sum. The extension alone varies
+    13.8x (p90/p10); the span varies 1.16x. A flat per-side 3' cap therefore
+    limits a quantity that is not stable.
+    """
+
+    # two real Boechera elements that end ~3750 bp after their ENDO start
+    SHORT_CORE = (2164, 1568)   # short core, long leftover extension
+    LONG_CORE = (3893, 155)     # long core, almost nothing left over
+
+    def _cap(self, core, want):
+        return cap_extensions(core, 0, want, max_ext_5prime=3400,
+                              max_ext_3prime=2500, max_core_to_3prime_end=4500)[1]
+
+    def test_both_real_shapes_survive_the_span_rule(self):
+        for core, ext in (self.SHORT_CORE, self.LONG_CORE):
+            self.assertEqual(self._cap(core, ext), ext,
+                             f"core {core} + ext {ext} should not be truncated")
+
+    def test_flat_800_cap_would_have_truncated_the_short_core_element(self):
+        """The regression: the shipped flat cap clipped 72% of confirmed loci."""
+        core, ext = self.SHORT_CORE
+        flat = cap_extensions(core, 0, ext, max_ext_3prime=800)[1]
+        self.assertEqual(flat, 800)
+        self.assertLess(flat, ext)
+
+    def test_span_binds_when_the_inference_overruns(self):
+        # long core asking for far more than the span allows
+        self.assertEqual(self._cap(3893, 1500), 4500 - 3893)
+
+    def test_core_longer_than_the_span_yields_no_extension(self):
+        self.assertEqual(self._cap(4600, 500), 0)
+
+    def test_core_is_never_trimmed_by_the_span_rule(self):
+        e5, e3 = cap_extensions(4600, 300, 300, max_core_to_3prime_end=4500)
+        self.assertEqual(e3, 0)
+        self.assertEqual(e5, 300)      # the 5' side is untouched by this bound
+
+    def test_explicit_max_extension_is_a_complete_override(self):
+        """--max-extension must not be quietly tightened by a vocabulary bound."""
+        self.assertEqual(line_core_to_3prime_end(2500), 0)
+        self.assertEqual(line_core_to_3prime_end(), 4500)
+
+    def test_vocabulary_is_line_only(self):
+        self.assertEqual(
+            classification.max_core_to_3prime_end_for_class(
+                "Class_II/Subclass_1/TIR/EnSpm_CACTA"), 0)
 
 
 if __name__ == "__main__":

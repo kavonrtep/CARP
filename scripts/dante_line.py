@@ -925,9 +925,25 @@ def line_max_extension(side: str, explicit: int = 0) -> int:
         return 0
 
 
+def line_core_to_3prime_end(explicit: int = 0) -> int:
+    """Bound on (core length + 3' extension) for Class_I/LINE; 0 = unbounded.
+
+    A non-zero ``explicit`` (the CLI --max-extension) disables this bound as
+    well as the per-side ones, so --max-extension is a COMPLETE manual override:
+    the number given is the cap, with no vocabulary bound quietly tightening it.
+    """
+    if explicit:
+        return 0
+    try:
+        return classification.max_core_to_3prime_end_for_class("Class_I/LINE")
+    except Exception:
+        return 0
+
+
 def cap_extensions(core_len: int, ext_5prime: int, ext_3prime: int,
                    max_extension: int = 0, max_element_length: int = 0,
-                   max_ext_5prime: int = 0, max_ext_3prime: int = 0) -> Tuple[int, int]:
+                   max_ext_5prime: int = 0, max_ext_3prime: int = 0,
+                   max_core_to_3prime_end: int = 0) -> Tuple[int, int]:
     """Clamp a pair of inferred extensions to the biological length bounds.
 
     The flank alignment can propose an extension all the way to ``--flank``
@@ -946,6 +962,13 @@ def cap_extensions(core_len: int, ext_5prime: int, ext_3prime: int,
     shared cap cut into the MEDIAN real element for four of five TIR
     superfamilies.
 
+    ``max_core_to_3prime_end`` bounds ``core_len + ext_3prime`` -- the distance
+    from the START of the domain core to the element's 3' end. For LINEs this is
+    the bound that works: measured over 148 confirmed loci, the 3' extension
+    varies 13.8x (p90/p10) while this span varies 1.16x, because the extension is
+    only the remainder after the domain annotation stops (r = -0.936 between core
+    length and 3' extension). It is applied after the per-side caps.
+
     ``max_extension`` bounds each side independently. ``max_element_length``
     then bounds the whole element; when the two sides together exceed the
     remaining budget it is split evenly, except that a side asking for less than
@@ -962,6 +985,9 @@ def cap_extensions(core_len: int, ext_5prime: int, ext_3prime: int,
         ext_5prime = min(ext_5prime, cap5)
     if cap3 > 0:
         ext_3prime = min(ext_3prime, cap3)
+
+    if max_core_to_3prime_end > 0:
+        ext_3prime = min(ext_3prime, max(0, max_core_to_3prime_end - core_len))
 
     if max_element_length > 0:
         budget = max(0, max_element_length - core_len)
@@ -1015,7 +1041,8 @@ def create_line_elements(patterns: List[FeatureGroup], alignment_lengths: Dict[s
             base_end - base_start + 1, raw_5prime, raw_3prime,
             max_extension=max_extension, max_element_length=max_element_length,
             max_ext_5prime=line_max_extension("5prime", max_extension),
-            max_ext_3prime=line_max_extension("3prime", max_extension))
+            max_ext_3prime=line_max_extension("3prime", max_extension),
+            max_core_to_3prime_end=line_core_to_3prime_end(max_extension))
 
         # Calculate extended boundaries based on strand
         if pattern.strand == '+':

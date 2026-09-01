@@ -38,8 +38,15 @@ def curve(fa, seqnames, windows, n=250, min_k=8, max_k=20, seed=0):
         print(f"  {W:8d}{len(v):6d}{q_(.5):8d}{q_(.9):6d}{q_(.95):6d}{q_(.99):6d}{v[-1]:6d}"
               f"{q_(.99) + 1:30d}")
 
-D = "/nfsroot/projects/darwin/runs/tmp3/GCA_982474395.1/carp_output"
-fa = Faidx(f"{D}/genome_cleaned.fasta")
-names = [n for n in fa.idx if fa.length(n) > 2_000_000][:40]
-print(f"### Lycopus  ({len(names)} sequences)")
-curve(fa, names, [500, 1000, 2000, 4000, 8000])
+import sys as _sys
+_args = _sys.argv[1:]
+if not _args:
+    _args = ["/nfsroot/projects/darwin/runs/tmp3/GCA_982474395.1/carp_output/genome_cleaned.fasta::Lycopus"]
+for _spec in _args:
+    _fa, _, _lab = _spec.partition("::")
+    fa = Faidx(_fa)
+    names = [n for n in fa.idx if fa.length(n) > 2_000_000][:40]
+    if not names:
+        names = sorted(fa.idx, key=lambda n: -fa.length(n))[:40]
+    print(f"### {_lab or _fa}  ({len(names)} sequences)")
+    curve(fa, names, [2000, 4000, 6000, 8000])
