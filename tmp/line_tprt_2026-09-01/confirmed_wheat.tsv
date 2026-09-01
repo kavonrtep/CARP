@@ -1,0 +1,4 @@
+seq	strand	score	tsd_len	polya_len	polya_offset	ext5	ext3	elem_len
+CP155611.1	+	17	17	16	117	493	133	4631
+CP155611.1	-	17	17	17	118	1808	135	5951
+CP155613.1	+	15	15	15	129	185	144	4379

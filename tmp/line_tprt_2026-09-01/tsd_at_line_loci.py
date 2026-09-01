@@ -115,4 +115,5 @@ def main():
     print(f"  >>> END-TO-END YIELD (tail AND TSD above floor): "
           f"{100*above_floor/n:.1f}% of all LINE loci")
 
-main()
+if __name__ == "__main__":
+    main()

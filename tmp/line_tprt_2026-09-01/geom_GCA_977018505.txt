@@ -1,0 +1,11 @@
+### GCA_977018505   confirmed loci = 64
+                            p10  median    p90    max
+  TRUE 5' extension        1705    1959   2074   2100
+  TRUE 3' extension         204     302    461   2235
+  full element length      5950    6234   6407   8102
+  poly-A run length          15      17     22     29
+  TSD matched length         13      16     20     20
+
+  current shipped caps: 5' = 2000 bp, 3' = 800 bp
+  confirmed loci whose TRUE 3' extension EXCEEDS the 800 bp cap: 3/64 (5%)
+  confirmed loci whose TRUE 5' extension EXCEEDS the 2000 bp cap: 20/64 (31%)

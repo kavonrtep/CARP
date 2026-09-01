@@ -141,3 +141,48 @@ The larger prize is elsewhere and available at ~100 % of loci: the ~1.6 kb of
 conserved element between the RT domain end and the tail, with the measured
 identity cliff (73-85 % within-family inside the element, ~42 % beyond) as a
 principled per-locus stopping rule that needs no TSD.
+
+---
+
+# Pooled confirmed geometry — 148 loci, 7 genomes
+
+A "confirmed" locus is one where BOTH ends were observed: a poly-A tail found
+(>=15 A, <=1 mismatch, within 2500 bp of the domain core) AND a TSD that clears
+the chance floor and beats every decoy window.
+
+| quantity                              | p10  | median | p90  | p90/p10 |
+|---------------------------------------|-----:|-------:|-----:|--------:|
+| domain core (ENDO..RT annotated span)  | 2142 |   3933 | 4009 |   1.87x |
+| 3' extension (core end -> poly-A end)  |  147 |    348 | 2028 |  13.80x |
+| **ENDO start -> poly-A end**           | 3733 |   4175 | 4346 |**1.16x**|
+
+**Pearson r(core length, 3' extension) = -0.936.** The two are nearly a constant
+sum. The "3' extension" is not a biological distance at all -- it is the
+leftover after DANTE stops annotating, and it varies 13.8-fold for that reason.
+What is stable is the distance from the ENDO domain START to the end of the
+poly-A tail, which varies only 1.16-fold and whose per-genome medians span
+3779-4247 bp across all seven genomes (+-6%).
+
+Percentiles of that invariant: p90 4346, p95 4409, p99 4938, max 6158.
+
+## Rule comparison, all 148 loci
+
+| rule                        | truncates      | total bp lost | median loss |
+|-----------------------------|---------------:|--------------:|------------:|
+| shipped: flat 800 bp cap    | 58/148 (39.2%) |        57,080 |     1017 bp |
+| flat 1800 bp cap            | 30/148 (20.3%) |         6,732 |      228 bp |
+| 4200 - core                 | 62/148 (41.9%) |         8,926 |       59 bp |
+| **4500 - core**             |  **4/148 (2.7%)** |     3,233 |      438 bp |
+
+`4500 - core` sits just above the p95 of the invariant (4409), matching how the
+TIR per-superfamily caps were set. The flat caps are worse at every level: a
+flat 800 truncates 39% of confirmed loci by a median of 1017 bp each.
+
+## LIMITATION — the 5' numbers are censored
+
+The TSD search window is 2100 bp upstream of the core, so a 5' extension longer
+than ~2100 bp CANNOT be measured by this design. Observed 5' max is 2100 and p99
+is 2098, i.e. the distribution is clipped by the method, not by biology.
+"18.2% of confirmed loci exceed the 2000 bp 5' cap" is therefore a LOWER BOUND.
+Re-measuring the 5' side needs a wider window and a re-derived chance floor
+(a wider window raises the floor -- 2 kb needs 11 bp of TSD, 8 kb needs 12+).
