@@ -103,3 +103,41 @@ because a chance 12-mer with mismatches outscores a perfect 5-mer. Use only the
 The **geometry self-check** (do the two TSD copies actually match in the genome?)
 is permanent, and is what separates "the coordinates are wrong" from "the finder
 is wrong". It should read ~100%.
+
+---
+
+# The Phase 2 go/no-go: end-to-end TSD yield at real LINE loci
+
+`tsd_at_line_loci.py` runs the whole chain — poly-A anchor, candidate TSD from
+the 20 bp after the tail, bounded upstream search, per-locus decoy null.
+
+| genome   | LINE loci | poly-A tail | TSD above floor | **end-to-end** |
+|----------|----------:|------------:|----------------:|---------------:|
+| Boechera |       343 |      22.2 % |  22.4 % of tailed |      **5.0 %** |
+| Lycopus  |        53 |       5.7 % |          33.3 %  |      **1.9 %** |
+| wheat    | 22050 (300 sampled) | 3.7 % |     18.2 %  |      **0.7 %** |
+
+**Wheat is the worst** — and it is the genome that motivated the whole
+investigation. That is the expected biology, not a parameter artifact: the
+signature only survives in young insertions, and wheat's LINEs are ancient.
+
+**The search window is not the limit.** Doubling the tail search (2500 -> 5000)
+adds tails but ZERO additional confirmed loci — Boechera 5.0 % -> 5.0 %
+(76 -> 105 tails), wheat 0.7 % -> 0.7 % (11 -> 12 tails). The extra tails are
+background A-runs with no TSD behind them, so the TSD test doubles as a
+validator of the tail calls, and it says the stringent setting is right.
+
+Relaxing `--min-run` 15 -> 12 doubles end-to-end yield on Boechera (5.0 % ->
+10.2 %) but calls a tail at 55-74 % of loci, against a measured 3' enrichment
+that collapses to ~1.2x by min-run 10. That extra yield is noise.
+
+## Verdict
+
+At 0.7-5.0 % of loci — worst exactly where the problem is most severe — the
+TPRT signature **cannot carry the boundary annotation**. Build it only as a
+small high-confidence rank, not as the mechanism.
+
+The larger prize is elsewhere and available at ~100 % of loci: the ~1.6 kb of
+conserved element between the RT domain end and the tail, with the measured
+identity cliff (73-85 % within-family inside the element, ~42 % beyond) as a
+principled per-locus stopping rule that needs no TSD.
