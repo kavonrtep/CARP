@@ -2,6 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Communication style
+
+- Use plain, simple English. Prefer short sentences and common words over
+  jargon. If a technical term is needed, define it briefly the first time.
+- Every number must say what it represents: the quantity, the unit, and
+  what it was computed from (e.g. "1,204 contigs (of 5,310 total) shorter
+  than 10 kb", not "1,204 filtered"). Percentages need a denominator.
+- When reporting results, state the interpretation, not just the value:
+  what does this number mean for the task, and is it good, bad, or unclear?
+- Explain the reasoning behind a choice (method, parameter, filter) in
+  one or two sentences. If there was an alternative, name it and say why
+  it was not used.
+- Prefer a concrete example over an abstract description.
+- If something is uncertain or an assumption was made, say so explicitly.
+- Structure long outputs: what was done → what was found → what it means
+  → what is next. Keep each part short.
+- Do not assume I remember earlier context; restate key facts briefly
+  when they matter for the current step.
+
 ## Repository Overview
 
 This is an Assembly Repeat Annotation Pipeline that uses multiple bioinformatics tools to comprehensively identify and classify repetitive elements in genomic sequences. The pipeline is implemented as a Snakemake workflow and is designed to run in a Singularity container environment.
