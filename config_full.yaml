@@ -86,9 +86,8 @@ dante_line_max_group_size: 1000
 # extended through the neighbouring high-copy repeat. support_fraction scales the
 # support requirement with the size of the group (0 = the old fixed "3rd
 # largest"); min_group_alignments drops groups with too few partners to place a
-# boundary; the two caps bound each side and the whole element in bp, trimming
-# only the appended flanks and never the domain core. 0 disables any of them.
-# See docs/configuration.md.
+# boundary; the caps bound each side and the whole element in bp, trimming only
+# the appended flanks and never the domain core. See docs/configuration.md.
 # Cross-class library screen — trims a span that belongs to an incompatible
 # class out of a consensus, which no within-class reduction can see. See
 # docs/configuration.md.
@@ -106,7 +105,16 @@ dante_line_library_source: core
 dante_tir_fallback_library_source: core
 dante_line_support_fraction: 0.5
 dante_line_min_group_alignments: 5
-dante_line_max_extension: 1500
+# dante_line_max_extension (default 0): symmetric ESCAPE HATCH — a value > 0 caps
+#   BOTH sides of the LINE flank extension at that many bp. At 0 the per-side
+#   bounds come from max_extension_per_side in classification_vocabulary.yaml,
+#   which is ASYMMETRIC for LINE: 2000 bp 5' (inter-ORF + ORF1 + 5'UTR sit
+#   outside the ENDO+RT core) but only 800 bp 3' (ORF2 C-terminus + 3'UTR +
+#   polyA). The former shared 1500 was too tight 5' and too loose 3' at once.
+#   Applies to DANTE_LINE only — dante_tir_fallback has no config key and reads
+#   its per-superfamily bounds (measured p95) from the same table.
+dante_line_max_extension: 0
+# Whole-element cap in bp (core + both flanks); the core is never trimmed.
 dante_line_max_element_length: 8000
 
 # Memory available to this run, in GB — the scheduler's allocation, not a

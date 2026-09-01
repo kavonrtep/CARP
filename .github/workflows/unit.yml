@@ -72,6 +72,9 @@ jobs:
       - name: dante_line consensus-boundary guards (masks, caps, support rule)
         run: python tests/test_dante_line_boundaries.py
 
+      - name: Per-superfamily / per-side extension bounds
+        run: python tests/test_superfamily_extension_bounds.py
+
       - name: Cross-class library screen (conflict rule, ownership, trimming)
         run: python tests/test_screen_library_cross_class.py
 

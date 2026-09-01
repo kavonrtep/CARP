@@ -295,11 +295,18 @@ for _key, _default, _lo, _hi in (("cross_class_min_identity", 80.0, 0.0, 100.0),
 #     behaviour.
 #   dante_line_min_group_alignments (default 5): groups with fewer flank
 #     alignments get no extension; too few partners to place a boundary. 0 off.
-#   dante_line_max_extension (default 1500): per-side cap in bp. Deliberately
-#     tighter than a full-length LINE needs. A truncated consensus still masks
-#     its family; an over-extended one mislabels its neighbour genome-wide, and
-#     a false positive here is amplified across the whole RepeatMasker search.
-#     0 off.
+#   dante_line_max_extension (default 0 = use the vocabulary): symmetric
+#     per-side cap in bp, an escape hatch that overrides both sides. At the
+#     default 0 the bounds come from max_extension_per_side in
+#     classification_vocabulary.yaml, which is ASYMMETRIC for LINE -- 2000 bp
+#     5' (inter-ORF + ORF1 + 5'UTR sit outside the ENDO+RT core) but only 800 bp
+#     3' (ORF2 C-terminus + 3'UTR + polyA). The former shared 1500 was too tight
+#     5' and too loose 3' at once. Deliberately tighter than a full-length LINE
+#     needs either way: a truncated consensus still masks its family; an
+#     over-extended one mislabels its neighbour genome-wide, and a false
+#     positive here is amplified across the whole RepeatMasker search.
+#     dante_tir_fallback takes no such knob -- its per-side bounds are per
+#     superfamily from the same table (measured p95, medians span 6x).
 #   dante_line_max_element_length (default 8000): whole-element cap in bp. The
 #     domain core is never trimmed, only the appended flanks. No plant LINE is
 #     longer than this; full-length elements run 4-7 kb. 0 off.
@@ -311,7 +318,7 @@ if (isinstance(config["dante_line_support_fraction"], bool)
     raise ValueError("Invalid value for dante_line_support_fraction: must be a number in [0, 1].")
 
 for _key, _default in (("dante_line_min_group_alignments", 5),
-                       ("dante_line_max_extension", 1500),
+                       ("dante_line_max_extension", 0),
                        ("dante_line_max_element_length", 8000)):
     if _key not in config:
         config[_key] = _default
