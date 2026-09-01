@@ -51,6 +51,9 @@ class Vocabulary:
     # Advisory per-class consensus length bounds (longest-prefix match).
     # Reported on, never enforced -- see the YAML comment.
     max_consensus_length: dict[str, int]
+    # ENFORCED per-side flank bounds (longest-prefix match). Scalar = both
+    # sides; mapping = {"5prime": n, "3prime": n}. See the YAML comment.
+    max_extension_per_side: dict[str, object]
     # Ordered longest-first so longest match wins.
     tir_prefixes: tuple[tuple[str, str], ...]
     sources: frozenset[str] = field(default_factory=frozenset)
@@ -115,6 +118,7 @@ def load_vocabulary(path: str | Path | None = None) -> Vocabulary:
         aggregation_buckets=frozenset((raw.get("aggregation_buckets", {}) or {}).keys()),
         tool_dialects=tool_dialects,
         max_consensus_length=dict(raw.get("max_consensus_length", {}) or {}),
+        max_extension_per_side=dict(raw.get("max_extension_per_side", {}) or {}),
         tir_prefixes=tir_prefixes,
         sources=frozenset(tool_dialects.keys()),
     )
@@ -466,3 +470,40 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def max_extension_for_class(classification: str, side: str = "5prime",
+                            vocab=None) -> int:
+    """ENFORCED per-side flank bound in bp for ``classification``; 0 = unbounded.
+
+    Longest-prefix match against ``max_extension_per_side`` -- so
+    ``Class_II/Subclass_1/TIR/EnSpm_CACTA`` (5800) beats the generic
+    ``Class_II/Subclass_1/TIR`` (6000), and an unlisted TIR superfamily still
+    gets the generic bound. A scalar entry applies to both sides; a mapping
+    gives ``5prime``/``3prime`` separately (LINE is genuinely asymmetric).
+
+    Used by dante_line.py and dante_tir_fallback.py so both layers read one
+    table instead of each hard-coding a shared number.
+    """
+    if side not in ("5prime", "3prime"):
+        raise ValueError("side must be '5prime' or '3prime'")
+    try:
+        table = (vocab or load_vocabulary()).max_extension_per_side or {}
+    except Exception:
+        return 0
+    best, best_depth = 0, -1
+    for prefix, value in table.items():
+        if classification == prefix or classification.startswith(prefix + "/"):
+            depth = len(prefix.split("/"))
+            if depth <= best_depth:
+                continue
+            if isinstance(value, dict):
+                v = value.get(side, 0)
+            else:
+                v = value
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                continue
+            best, best_depth = v, depth
+    return max(0, best)

@@ -28,6 +28,9 @@ from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional, Set
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import classification  # noqa: E402
+
 # Import alignment function from global_local_aln module
 try:
     from global_local_aln import run_all_vs_all_alignment
@@ -903,8 +906,28 @@ def load_alignment_lengths(output_dir: Path) -> Dict[str, Dict[str, int]]:
     return dict(alignment_lengths)
 
 
+def line_max_extension(side: str, explicit: int = 0) -> int:
+    """Per-side flank bound in bp for Class_I/LINE; 0 means unbounded.
+
+    ``explicit`` (the CLI --max-extension) wins when set, so the old symmetric
+    behaviour stays reachable. Otherwise the bound comes from
+    ``max_extension_per_side`` in classification_vocabulary.yaml, which is
+    ASYMMETRIC for LINE: the domain core is ORF2 (ENDO+RT), so the 5' side still
+    has inter-ORF + ORF1 + 5'UTR to cover (~2 kb) while the 3' side has only the
+    ORF2 C-terminus + 3'UTR + polyA (~0.8 kb). The previous shared 1500 was
+    therefore too tight 5' and too loose 3' at the same time.
+    """
+    if explicit:
+        return explicit
+    try:
+        return classification.max_extension_for_class("Class_I/LINE", side)
+    except Exception:
+        return 0
+
+
 def cap_extensions(core_len: int, ext_5prime: int, ext_3prime: int,
-                   max_extension: int = 0, max_element_length: int = 0) -> Tuple[int, int]:
+                   max_extension: int = 0, max_element_length: int = 0,
+                   max_ext_5prime: int = 0, max_ext_3prime: int = 0) -> Tuple[int, int]:
     """Clamp a pair of inferred extensions to the biological length bounds.
 
     The flank alignment can propose an extension all the way to ``--flank``
@@ -913,6 +936,15 @@ def cap_extensions(core_len: int, ext_5prime: int, ext_3prime: int,
     ENDO+RT core of roughly 2.1 kb -- so the extensions are capped rather than
     the elements discarded: the domain core is always kept, only the appended
     flank is trimmed.
+
+    ``max_ext_5prime`` / ``max_ext_3prime`` bound the two sides SEPARATELY and
+    take precedence over ``max_extension`` on the side they are set for; they
+    come from ``max_extension_per_side`` in classification_vocabulary.yaml, which
+    is per superfamily for TIR (medians span 6x: PIF_Harbinger 951 bp vs
+    EnSpm_CACTA 3544 bp) and asymmetric for LINE (the core is ORF2, so the 5'
+    side has ORF1 + 5'UTR to cover but the 3' side only 3'UTR + polyA). A single
+    shared cap cut into the MEDIAN real element for four of five TIR
+    superfamilies.
 
     ``max_extension`` bounds each side independently. ``max_element_length``
     then bounds the whole element; when the two sides together exceed the
@@ -924,9 +956,12 @@ def cap_extensions(core_len: int, ext_5prime: int, ext_3prime: int,
 
     Either bound is disabled by passing 0.
     """
-    if max_extension > 0:
-        ext_5prime = min(ext_5prime, max_extension)
-        ext_3prime = min(ext_3prime, max_extension)
+    cap5 = max_ext_5prime if max_ext_5prime > 0 else max_extension
+    cap3 = max_ext_3prime if max_ext_3prime > 0 else max_extension
+    if cap5 > 0:
+        ext_5prime = min(ext_5prime, cap5)
+    if cap3 > 0:
+        ext_3prime = min(ext_3prime, cap3)
 
     if max_element_length > 0:
         budget = max(0, max_element_length - core_len)
@@ -978,7 +1013,9 @@ def create_line_elements(patterns: List[FeatureGroup], alignment_lengths: Dict[s
 
         ext_5prime, ext_3prime = cap_extensions(
             base_end - base_start + 1, raw_5prime, raw_3prime,
-            max_extension=max_extension, max_element_length=max_element_length)
+            max_extension=max_extension, max_element_length=max_element_length,
+            max_ext_5prime=line_max_extension("5prime", max_extension),
+            max_ext_3prime=line_max_extension("3prime", max_extension))
 
         # Calculate extended boundaries based on strand
         if pattern.strand == '+':
@@ -1496,11 +1533,15 @@ Examples:
                        help='Groups with fewer flank alignments than this get no extension at '
                             'all: too few partners to place a boundary, so the element keeps '
                             'its domain core. 0 disables (default: 5)')
-    parser.add_argument('--max-extension', type=int, default=1500,
-                       help='Cap on each side\'s extension in bp. Deliberately tighter than a '
-                            'full-length LINE needs: a truncated consensus still masks its '
-                            'family, an over-extended one mislabels its neighbour genome-wide. '
-                            '0 disables (default: 1500)')
+    parser.add_argument('--max-extension', type=int, default=0,
+                       help='SYMMETRIC ESCAPE HATCH: a value > 0 caps BOTH sides at that many '
+                            'bp, overriding the per-side bounds. At the default 0 the bounds '
+                            'come from max_extension_per_side in classification_vocabulary.yaml, '
+                            'which is asymmetric for LINE (2000 bp 5\', 800 bp 3\'): the core is '
+                            'ORF2, so ORF1 + 5\'UTR lie outside it 5\' but only 3\'UTR + polyA 3\'. '
+                            'Deliberately tighter than a full-length LINE needs either way: a '
+                            'truncated consensus still masks its family, an over-extended one '
+                            'mislabels its neighbour genome-wide (default: 0)')
     parser.add_argument('--library-source', choices=['core', 'element'], default='core',
                        help="Which span of each element seeds the RepeatMasker library. "
                             "'core' (default) uses only the span DANTE actually annotated "

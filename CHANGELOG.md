@@ -112,11 +112,12 @@
   new arguments default to the **old** behaviour, so `dante_tir_fallback` — which
   imports this function — is unchanged until it opts in; a parity test asserts
   byte-identical output under the legacy settings.
-- **New `dante_line_max_extension` (default `1500`) and
-  `dante_line_max_element_length` (default `8000`).** Biological bounds on a LINE:
-  full-length plant elements run 4–7 kb around an ENDO+RT core of ~2.1 kb, so the
-  16–22 kb consensi the uncapped inference produced cannot be real. The per-side cap
-  is deliberately tighter than a full-length element strictly needs, per the policy
+- **New `dante_line_max_extension` (default `0` — per-side bounds from the
+  vocabulary, below) and `dante_line_max_element_length` (default `8000`).**
+  Biological bounds on a LINE: full-length plant elements run 4–7 kb around an
+  ENDO+RT core of ~2.1 kb, so the 16–22 kb consensi the uncapped inference
+  produced cannot be real. The per-side cap is deliberately tighter than a
+  full-length element strictly needs, per the policy
   above; measured on wheat the choice costs little either way (5.82 % of the genome
   at 2500, 5.44 % at 1500, 5.04 % at 500 — the residue after the support rule is not
   mostly in the extensions), so it is set where truncation is cheap and
@@ -220,6 +221,42 @@
   screen — where the truncation point is undefined — and enforced at build time in
   `dante_line` and `dante_tir_fallback`, where the core is known and only the flanks
   are trimmed.
+- **The per-side cap is now per superfamily and per side as well, and it is
+  measured.** The whole-element bound above still lets one flank take the entire
+  budget, and the shared symmetric `1500` was the wrong *shape*, not just the wrong
+  number: over **13,760 element-sides whose boundaries are exactly known** (DANTE_TIR
+  primary elements carrying both TIRs and a TSD, across wheat, Lycopus and Boechera),
+  the median core→boundary distance spans **6×** between superfamilies
+  (`PIF_Harbinger` 951 bp vs `EnSpm_CACTA` 3,544 bp) — so `1500` cut into the
+  **median real element** for four of five superfamilies while sitting ~4× too loose
+  for `PIF_Harbinger`. New `max_extension_per_side` in
+  `classification_vocabulary.yaml`, longest-prefix matched like `max_consensus_length`
+  but **enforced** rather than advisory: a scalar caps both sides, a mapping gives
+  `5prime` / `3prime` separately. `dante_tir_fallback` previously had **no per-side
+  cap at all** — only the whole-element bound — and now caps each flank at the
+  measured p95 of its superfamily: `EnSpm_CACTA` 5800, `MuDR_Mutator` 5700,
+  `Tc1_Mariner` 3200, `hAT` 2300, `PIF_Harbinger` 1400, generic TIR 6000. p95 and not
+  p99, because per the policy above these guards must fail toward truncation.
+  `cap_extensions()` — shared by both layers by import — gained `max_ext_5prime` /
+  `max_ext_3prime`, which take precedence over `max_extension` on the side they are
+  set for; symmetric callers are unaffected.
+- **`dante_line_max_extension` default `1500` → `0`.** At `0` the bounds come from
+  that table, where LINE is **asymmetric**: **2000 bp 5′, 800 bp 3′**. It follows the
+  element — the core is ORF2, so inter-ORF + ORF1 + 5′UTR lie outside it on the 5′
+  side but only the ORF2 C-terminus + 3′UTR + polyA on the 3′ side — so the shared
+  `1500` was too tight 5′ and too loose 3′ at the same time. LINE is the one entry in
+  the table that is **not** measured (no ground-truth LINE boundary set exists), hence
+  structural rather than empirical. A non-zero value is still accepted as a symmetric
+  override of both sides, so the previous behaviour stays reachable. See
+  [`docs/configuration.md`](docs/configuration.md).
+- **New test** `tests/test_superfamily_extension_bounds.py` (19 cases), wired into
+  `unit.yml`: longest-prefix lookup and the generic-TIR fallback, scalar-vs-mapping
+  entries, per-side precedence over the symmetric cap and over an explicit CLI value,
+  the whole-element budget still applying after the per-side caps, the core still
+  never being trimmed, the `EnSpm/CACTA` → `EnSpm_CACTA` label sanitisation, and two
+  bounds checks that would catch a regression in the numbers themselves — that the
+  shared `1500` truncated the median real element and that each superfamily bound
+  admits it.
 - **Fix: the counting pass no longer runs when it cannot change the answer.** Adding
   the group-scaled rule above made `analyze_alignment_lengths` unconditionally
   two-pass, which silently doubled I/O for `dante_tir_fallback` — a caller that had

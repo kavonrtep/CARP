@@ -76,9 +76,15 @@ dante_line_max_group_size: 1000
 #   fixed "3rd largest", which a 3-member group satisfies by construction.
 # dante_line_min_group_alignments (default 5): groups with fewer flank
 #   alignments get no extension at all. 0 disables.
-# dante_line_max_extension (default 1500) / dante_line_max_element_length
-#   (default 8000): per-side and whole-element caps in bp. The domain core is
-#   never trimmed, only the appended flanks. 0 disables.
+# dante_line_max_extension (default 0): symmetric ESCAPE HATCH — a value > 0
+#   caps BOTH sides of the LINE flank extension at that many bp. At 0 the
+#   per-side bounds come from max_extension_per_side in
+#   classification_vocabulary.yaml, which is ASYMMETRIC for LINE (2000 bp 5' for
+#   inter-ORF + ORF1 + 5'UTR outside the ENDO+RT core, 800 bp 3' for the ORF2
+#   C-terminus + 3'UTR + polyA). dante_tir_fallback has no config key for this
+#   and reads its measured per-superfamily bounds from the same table.
+# dante_line_max_element_length (default 8000): whole-element cap in bp. The
+#   domain core is never trimmed, only the appended flanks. 0 disables.
 # screen_library_cross_class (default True): trim cross-class contamination out
 #   of the RepeatMasker library. Every other reduction CARP runs is WITHIN a
 #   class, so a consensus that is part LINE and part LTR is invisible to all of
@@ -98,7 +104,7 @@ dante_line_library_source: core
 dante_tir_fallback_library_source: core
 dante_line_support_fraction: 0.5
 dante_line_min_group_alignments: 5
-dante_line_max_extension: 1500
+dante_line_max_extension: 0
 dante_line_max_element_length: 8000
 # max_memory_gb (default 0 = auto-detect): memory available to this run, in GB —
 #   the allocation the scheduler granted (qsub -l mem=128gb), not a per-rule

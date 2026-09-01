@@ -492,6 +492,25 @@ def max_element_length_for_subtype(subtype: str, explicit: int = 0) -> int:
     return best
 
 
+def max_extension_for_subtype(subtype: str, side: str, explicit: int = 0) -> int:
+    """Per-side flank bound in bp for a TIR subtype; 0 means unbounded.
+
+    ``explicit`` (the CLI value) wins when set. Otherwise the bound comes from
+    ``max_extension_per_side`` in classification_vocabulary.yaml, which holds the
+    MEASURED p95 of the true core->boundary distance per superfamily. This
+    matters more than the whole-element bound: PIF_Harbinger's median flank is
+    951 bp while EnSpm_CACTA's is 3544 bp, so a shared cap either truncates
+    CACTA or lets Harbinger run four times too far.
+    """
+    if explicit:
+        return explicit
+    canonical = f"Class_II/Subclass_1/TIR/{sanitize_label(subtype)}"
+    try:
+        return classification.max_extension_for_class(canonical, side)
+    except Exception:
+        return 0
+
+
 def create_tir_elements(
     anchors: List[TIRAnchor],
     alignment_lengths: Dict[str, Dict[str, int]],
@@ -519,7 +538,11 @@ def create_tir_elements(
             base_end - base_start + 1, raw_5prime, raw_3prime,
             max_extension=max_extension,
             max_element_length=max_element_length_for_subtype(
-                anchor.subtype, max_element_length))
+                anchor.subtype, max_element_length),
+            max_ext_5prime=max_extension_for_subtype(
+                anchor.subtype, "5prime", max_extension),
+            max_ext_3prime=max_extension_for_subtype(
+                anchor.subtype, "3prime", max_extension))
 
         if anchor.strand == "+":
             element_start = base_start - ext_5prime if ext_5prime > 0 else base_start
@@ -1075,8 +1098,14 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
                              "extension: too few partners to place a boundary, so the "
                              "element keeps its TPase anchor. 0 disables (default: 5)")
     parser.add_argument("--max-extension", type=int, default=0,
-                        help="Cap on each side's extension in bp. 0 = no per-side cap; "
-                             "the whole-element bound below still applies (default: 0)")
+                        help="SYMMETRIC ESCAPE HATCH: a value > 0 caps BOTH sides at that many "
+                             "bp for EVERY subtype, overriding the per-superfamily bounds. At "
+                             "the default 0 each flank is capped per superfamily from "
+                             "max_extension_per_side in classification_vocabulary.yaml "
+                             "(EnSpm_CACTA 5800, MuDR_Mutator 5700, Tc1_Mariner 3200, hAT 2300, "
+                             "PIF_Harbinger 1400, generic TIR 6000 -- measured p95 of the true "
+                             "core->boundary distance). The whole-element bound still applies "
+                             "on top (default: 0)")
     parser.add_argument("--library-source", choices=["core", "element"], default="core",
                         help="Which span seeds the RepeatMasker library. 'core' (default) "
                              "uses only the TPase anchor span DANTE annotated and leaves "

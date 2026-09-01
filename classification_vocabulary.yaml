@@ -235,6 +235,46 @@ max_consensus_length:
   Class_II/Subclass_2/Helitron: 30000
   rDNA: 15000
 
+# ─────────────────────────────────────────────────────────────────────────
+# max_extension_per_side — how far a domain-anchored core may be extended on
+# ONE side, in bp. Longest-prefix match, same as max_consensus_length.
+#
+# ENFORCED (unlike max_consensus_length): dante_line and dante_tir_fallback cap
+# each flank at this value. A scalar applies to both sides; a mapping gives
+# 5prime/3prime separately.
+#
+# The TIR numbers are MEASURED, not guessed: the p95 of the true core->boundary
+# distance over 13,760 element-sides from DANTE_TIR primary successes (elements
+# with tir_seq5 + tir_seq3 + tsd, so the boundary is exact) across wheat,
+# Lycopus and Boechera. Medians span 6x between superfamilies (PIF_Harbinger
+# 951 bp vs EnSpm_CACTA 3544 bp), which is why one shared cap cannot work: the
+# old shared 1500 would have cut into the MEDIAN real element for four of five
+# superfamilies. p95 rather than p99 is deliberate -- these guards must fail
+# toward truncation (an over-extended consensus poisons the whole RM search,
+# a truncated one costs a little masking).
+#
+# CAVEAT: the observed maxima cluster at 5989/5953/6077, which looks like a
+# search-window limit inside DANTE_TIR itself, so the CACTA and MuDR
+# distributions are probably censored near 6 kb and their true p95 may be
+# higher. Raising these is the safer direction if that is ever confirmed.
+#
+# LINE is asymmetric and NOT measured -- no ground-truth LINE boundary set
+# exists. It follows element structure: the core is ORF2 (ENDO+RT), leaving
+# inter-ORF + ORF1 + 5'UTR (~1.5-2.5 kb) on the 5' side but only the ORF2
+# C-terminus + 3'UTR + polyA (~0.3-0.9 kb) on the 3' side. The previous shared
+# 1500 was therefore simultaneously too tight 5' and too loose 3'.
+max_extension_per_side:
+  Class_I/LINE:
+    5prime: 2000
+    3prime: 800
+  # Generic TIR: permissive enough not to truncate an unlisted superfamily.
+  Class_II/Subclass_1/TIR: 6000
+  Class_II/Subclass_1/TIR/EnSpm_CACTA: 5800    # p95 5812, n=5868
+  Class_II/Subclass_1/TIR/MuDR_Mutator: 5700   # p95 5632, n=1750
+  Class_II/Subclass_1/TIR/Tc1_Mariner: 3200    # p95 3169, n=254
+  Class_II/Subclass_1/TIR/hAT: 2300            # p95 2249, n=296
+  Class_II/Subclass_1/TIR/PIF_Harbinger: 1400  # p95 1388, n=5592
+
 aggregation_buckets:
   Mobile_elements:
     description: Union of all Class_I and Class_II features
