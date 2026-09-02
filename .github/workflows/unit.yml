@@ -75,6 +75,9 @@ jobs:
       - name: Per-superfamily / per-side extension bounds
         run: python tests/test_superfamily_extension_bounds.py
 
+      - name: LINE confirmed-element extraction (poly-A, TSD, determinism)
+        run: python tests/test_line_confirmed_elements.py
+
       - name: Cross-class library screen (conflict rule, ownership, trimming)
         run: python tests/test_screen_library_cross_class.py
 

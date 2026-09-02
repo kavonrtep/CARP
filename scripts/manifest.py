@@ -69,6 +69,14 @@ OUTPUTS = {
     # ── per-tool / per-class GFF3s ───────────────────────────────────
     "dante_filtered_gff3":          "DANTE_filtered.gff3",
     "dante_ltr_gff3":               "DANTE_LTR.gff3",
+    # LINE elements whose BOTH ends were directly observed -- a poly-A tail plus
+    # a target-site duplication -- rather than inferred from flank alignment.
+    # EVALUATION OUTPUT: nothing downstream consumes it, so the annotation is
+    # identical whether or not it is produced. Listed here so the determinism
+    # gate covers it: the decoy windows that calibrate each TSD are drawn from a
+    # per-locus seed, and this is what proves that holds run to run.
+    "line_confirmed_fasta":         "DANTE_LINE/LINE_confirmed_elements.fasta",
+    "line_confirmed_tsv":           "DANTE_LINE/LINE_confirmed_elements.tsv",
     # Tandem LTR-RT (LTR_RT_TR) containers — one per head-to-tail shared-LTR
     # array, each listing its member element IDs. Always present; header-only
     # when no tandems are detected. See docs/archive/dante_ltr_tandem_feature_request.md.

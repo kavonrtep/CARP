@@ -117,8 +117,21 @@ least **11 bp** to stand out at all, which many decayed TSDs are not.
 So the scar is **too rare to find elements with, but reliable enough to measure
 them with**. That is precisely how it is used: the limits in step 3 above come
 from 218 elements across 7 genomes where a poly-A tail and an intact TSD made the
-true end directly visible. The pipeline does not search for these features at run
-time; it inherits the numbers they produced.
+true end directly visible. The boundary rules the pipeline applies at run time
+inherit those numbers rather than re-deriving them.
+
+The search itself does run at run time, but **only as an evaluation output**:
+`line_confirmed_elements` (default `true`, see
+[docs/configuration.md](configuration.md#dante_line)) writes the confirmed subset
+to `DANTE_LINE/LINE_confirmed_elements.{fasta,tsv}` for ~4 s on a 5.4 Gb genome.
+Nothing consumes those files — the annotation is byte-identical whether they are
+written or not — so the yield above can be measured across many genomes before
+anything is allowed to depend on it. Adding them to the LINE library was tested
+on two genomes and moved masking by +28.2 % and +0.7 %: clean (0.7–0.9 %
+contamination against DANTE_LTR / DANTE_TIR / TideCluster, against the cores' own
+8.8–11.4 %) but far too genome-dependent to enable blindly, because the gain
+tracks how much LINE the core library already misses rather than the confirmation
+rate.
 
 ---
 

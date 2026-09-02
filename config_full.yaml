@@ -156,6 +156,36 @@ dante_line_max_extension: 0
 # Whole-element cap in bp (core + both flanks); the core is never trimmed.
 dante_line_max_element_length: 8000
 
+# EVALUATION OUTPUT — IT FEEDS NOTHING. With line_confirmed_elements: true
+#   (default) the run writes the subset of LINE elements whose BOTH ends were
+#   directly OBSERVED rather than inferred from flank alignment — a poly-A tail
+#   plus a target-site duplication (TSD), the two marks target-primed reverse
+#   transcription leaves behind — to:
+#     DANTE_LINE/LINE_confirmed_elements.fasta  (RepeatMasker headers,
+#                                                name#Class_I/LINE — usable
+#                                                as a library as-is)
+#     DANTE_LINE/LINE_confirmed_elements.tsv    (per-element evidence: TSD
+#                                                sequence/length/score, poly-A
+#                                                length, extensions, element
+#                                                length)
+#   Nothing consumes them: not the RepeatMasker library, not the unified
+#   annotation, not any downstream rule. THE ANNOTATION IS BYTE-IDENTICAL
+#   WHETHER THIS IS ON OR OFF. They exist so the idea can be judged across many
+#   genomes before anything depends on it.
+#   Not enabled as a library source because the benefit is genome-dependent:
+#   adding them to the LINE library moved masking +28.2% (Boechera stricta, 25
+#   confirmed) and +0.7% (GCA_986270105, 250 confirmed). Clean in both cases
+#   (0.7-0.9% contamination vs the cores' own 8.8-11.4%), but the gain tracks
+#   how much LINE the core library already misses, not the confirmation rate.
+#   RELIABILITY: a confirmed call is right ~97% of the time — the poly-A and TSD
+#   tests are statistically independent, so their error rates multiply (measured
+#   joint false-positive rate 0.073%, exactly the product of the two).
+#   YIELD: only 0.7-5.0% of LINE loci confirm, depending on how recently LINEs
+#   were active; ancient, decayed populations (wheat) yield least.
+#   COST: negligible — ~4 s on a 5.4 Gb genome with 11,900 LINE loci.
+#   See docs/line_boundaries.md for the derivation.
+line_confirmed_elements: true
+
 # Memory available to this run, in GB — the scheduler's allocation, not a
 # per-rule figure. 0 = auto-detect (AGENT_MEMORY, then the scheduler environment
 # PBS_RESC_MEM / SLURM_MEM_PER_NODE / ..., then the cgroup limit, then

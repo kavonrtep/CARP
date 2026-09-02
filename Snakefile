@@ -317,6 +317,22 @@ if (isinstance(config["dante_line_support_fraction"], bool)
         or not 0.0 <= config["dante_line_support_fraction"] <= 1.0):
     raise ValueError("Invalid value for dante_line_support_fraction: must be a number in [0, 1].")
 
+# Emit the subset of LINE elements whose BOTH ends were directly observed --
+# a poly-A tail plus a target-site duplication, the two marks target-primed
+# reverse transcription leaves behind. Their extent is measured rather than
+# inferred, so they are the only LINEs in the run that need no boundary guard.
+#
+# EVALUATION OUTPUT: it feeds nothing. Not the RepeatMasker library, not the
+# unified annotation, not any downstream rule. It exists so the idea can be
+# judged across many genomes before anything depends on it -- measured on two,
+# adding these to the LINE library moved masking +28.2% and +0.7%, clean in both
+# (0.7-0.9% contamination vs the cores' own 8.8-11.4%) but far too
+# genome-dependent to enable blindly. Costs ~4 s on a 5.4 Gb genome.
+if "line_confirmed_elements" not in config:
+    config["line_confirmed_elements"] = True
+if not isinstance(config["line_confirmed_elements"], bool):
+    raise ValueError("Invalid value for line_confirmed_elements: must be true or false.")
+
 for _key, _default in (("dante_line_min_group_alignments", 5),
                        ("dante_line_max_extension", 0),
                        ("dante_line_max_element_length", 8000)):
@@ -533,7 +549,12 @@ rule all:
         F"{config['output_dir']}/repeat_annotation_report.html",
         F"{config['output_dir']}/Libraries/library_health.tsv",
         F"{config['output_dir']}/Repeat_Annotation_Unified.gff3",
-        F"{config['output_dir']}/.classifications_validated"
+        F"{config['output_dir']}/.classifications_validated",
+        # Evaluation output only — nothing downstream consumes these, so the
+        # annotation is identical whether or not this is enabled.
+        *([F"{config['output_dir']}/DANTE_LINE/LINE_confirmed_elements.fasta",
+           F"{config['output_dir']}/DANTE_LINE/LINE_confirmed_elements.tsv"]
+          if config["line_confirmed_elements"] else [])
 
 rule clean_genome_fasta:
     """
@@ -1048,6 +1069,44 @@ rule dante_line:
         [ -f {output.line_regions} ]          || : > {output.line_regions}
         [ -f {output.line_regions_extended} ] || : > {output.line_regions_extended}
         """
+
+# Elements whose both ends were OBSERVED (poly-A tail + target-site duplication),
+# rather than inferred from flank alignment. Deliberately terminal: nothing
+# consumes these outputs, so enabling or disabling this rule cannot change the
+# annotation. See scripts/line_confirmed_elements.py for the evidence behind the
+# thresholds and why a confirmed call is ~97% reliable.
+rule line_confirmed_elements:
+    input:
+        gff=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
+        genome=genome_fasta_cleaned,
+        fai=F"{genome_fasta_cleaned}.fai"
+    output:
+        fasta=F"{config['output_dir']}/DANTE_LINE/LINE_confirmed_elements.fasta",
+        tsv=F"{config['output_dir']}/DANTE_LINE/LINE_confirmed_elements.tsv"
+    log:
+        stdout=F"{config['output_dir']}/DANTE_LINE/line_confirmed_elements.log",
+        stderr=F"{config['output_dir']}/DANTE_LINE/line_confirmed_elements.err"
+    benchmark:
+        F"{config['output_dir']}/benchmarks/line_confirmed_elements.tsv"
+    conda:
+        "envs/dante_line.yaml"
+    threads: 1
+    shell:
+        """
+        exec > {log.stdout} 2> {log.stderr}
+        set -euo pipefail
+        set -x
+
+        scripts_dir=$(realpath scripts)
+        export PATH="$scripts_dir:$PATH"
+
+        line_confirmed_elements.py \
+            -g {input.genome} \
+            -a {input.gff} \
+            -o {output.fasta} \
+            -t {output.tsv}
+        """
+
 
 rule dante_ltr:
     input:
