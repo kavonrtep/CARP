@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.7.0rc3
+## 1.7.0rc4
 
 - **LINE elements with both ends directly observed are now annotated as
   `Status=complete`, with their measured boundaries.** `dante_line` normally
@@ -53,6 +53,29 @@
 
 - New test `tests/test_line_complete_elements.py` (21 cases), wired into the
   `unit` CI job.
+
+- **`numpy` is now declared explicitly in `envs/dante_line.yaml`.**
+  `scripts/line_complete_elements.py` imports it at module level, but the
+  environment never listed it — it arrived transitively through
+  `parasail-python`. A parasail release that stopped depending on numpy would
+  have broken the `dante_line` rule **at run time**, not only in CI; that is how
+  it surfaced, with `tests/test_line_complete_elements.py` failing on
+  `ModuleNotFoundError: numpy`. The `unit` CI job's environment lacked numpy too,
+  so the new test could not run at all — added there as well.
+
+- **The CI dependency guard now follows repo-local imports.**
+  `tests/test_ci_runner_deps.py` parsed only a test's *own* imports: it saw
+  `line_complete_elements`, recognised it as repo-local and skipped it, never
+  learning that the test needs numpy — so the guard passed while CI failed. It
+  now resolves repo-local imports recursively, and a test inherits the
+  dependencies of the modules it imports. When following a local module it counts
+  **module-scope imports only** — those are required to import it, whereas an
+  import inside a function body is lazy and only matters if that function runs.
+  `scripts/global_local_aln.py` imports `parasail` that way deliberately, so the
+  module stays importable in a lightweight test environment; counting
+  function-level imports flagged **3** tests that pass today. Negative-tested:
+  removing numpy from the `unit` environment again makes the guard exit 1, naming
+  the exact test and module.
 
 ## 1.7.0rc2
 
