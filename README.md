@@ -210,6 +210,28 @@ is the single source of truth in
 expanded hierarchy is also in
 [docs/output_reference.md](docs/output_reference.md).
 
+## LINE identification
+
+A LINE is found from the inside out. DANTE first locates the protein domains a
+LINE encodes — the endonuclease (ENDO) and reverse transcriptase (RT), sometimes
+with RNase H (RH). Where two or three of these sit close together on the same
+strand, the span they cover is taken as the element's **core**. This is the only
+part observed directly.
+
+A LINE extends beyond its domains, so CARP estimates how far. It takes up to
+10 kb of flanking sequence on each side — stopping early at any tandem array,
+LTR retrotransposon or DNA transposon already annotated — and compares the
+flanks of many copies of the same family to one another. The element is extended
+out to the distance where at least half the copies still match. Where that
+agreement fades on its own, the boundary is accepted; where it simply runs to the
+edge of the search window, no boundary was found and a deliberately tight limit
+is applied instead.
+
+The full element, core plus extensions, is reported in `DANTE_LINE.gff3` and the
+unified annotation. **The RepeatMasker library is built from the cores only.** An
+inferred boundary that is slightly wrong costs one locus; a wrong consensus in
+the library mislabels every sequence it matches, genome-wide.
+
 ## Other top-level outputs
 
 A short selection (full directory tree in
