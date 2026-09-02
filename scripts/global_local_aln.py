@@ -856,7 +856,7 @@ def _run_pair(pair_data, args):
 
 
 def _compare_sequences(sequences, fasta_file, args, verbose,
-                       use_prefilter, prefilter_identity):
+                       use_prefilter, prefilter_identity, prefilter_kmer=0):
     """Run MMseqs2 prefilter + all-vs-all parasail comparison for one set of
     sequences and return the list of result dicts (no file is written).
 
@@ -1067,7 +1067,8 @@ def run_all_vs_all_alignment(
     with open(tmp_out, 'w') as fh:
         if len(groups) <= 1:
             _flush(_compare_sequences(sequences, fasta_file, args, verbose,
-                                      use_prefilter, prefilter_identity), fh)
+                                      use_prefilter, prefilter_identity,
+                                      prefilter_kmer), fh)
         else:
             seq_dict = dict(sequences)
             if verbose:
@@ -1086,7 +1087,8 @@ def run_all_vs_all_alignment(
                         for sid, seq in group_seqs:
                             handle.write(f">{sid}\n{seq}\n")
                     _flush(_compare_sequences(group_seqs, group_fasta, args, verbose,
-                                              use_prefilter, prefilter_identity), fh)
+                                              use_prefilter, prefilter_identity,
+                                              prefilter_kmer), fh)
                 finally:
                     if os.path.exists(group_fasta):
                         os.remove(group_fasta)
