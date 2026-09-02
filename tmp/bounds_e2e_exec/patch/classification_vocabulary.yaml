@@ -1,0 +1,448 @@
+# ============================================================================
+# CARP repeat-classification vocabulary
+# ============================================================================
+# Authoritative, machine-readable list of repeat classifications recognised
+# by the Comprehensive Annotation of Repeats Pipeline (CARP).
+#
+# Canonical form is slash-separated (required by RepeatMasker and used
+# internally). Underscores inside a path component are ALWAYS part of the
+# component's name (e.g. Ty1_copia, Tc1_Mariner) — never separators.
+#
+# This file is the single source of truth; scripts/classification.py and
+# scripts/classification.R load it and perform all normalisation against it.
+# Tool-native dialects (pipe-separated from DANTE, fully underscore-encoded
+# from DANTE_TIR) are translated into canonical form via the aliases and
+# tool_dialects sections below.
+#
+# ----------------------------------------------------------------------------
+# Update policy
+# ----------------------------------------------------------------------------
+#  * Add a new classification by appending it (in canonical slash form) to
+#    `classifications`. If it is reachable under an existing leaf alias
+#    (Ty1/copia -> Ty1_copia, etc.) no alias update is needed.
+#  * Add a new leaf-name alias only when a tool emits a spelling that cannot
+#    be resolved by generic separator conversion.
+#  * Add a new tool dialect when a new upstream tool is integrated.
+#  * README.md lists the user-facing subset; this file is the superset.
+# ============================================================================
+
+version: 1
+canonical_separator: "/"
+
+# ---------------------------------------------------------------------------
+# Hierarchical classifications
+# ---------------------------------------------------------------------------
+# Every recognised classification listed exactly once, in canonical form.
+# Intermediate nodes ARE included because DANTE/DANTE_LTR can emit them
+# when lineage resolution is incomplete (e.g. just "Class_I/LTR/Ty1_copia"
+# with no sub-lineage). Any string that normalises to an entry here is
+# accepted by the pipeline without warning.
+# ---------------------------------------------------------------------------
+classifications:
+  # ── Mobile_element — synthetic root above Class_I and Class_II ─────────
+  # Used when overlap-resolution at a single locus produces a mixed
+  # Class_I/Class_II label set whose only common ancestor is "TE of some
+  # kind". Emitted by data/benchmark/resolve_overlaps.py for the resolved
+  # reference and (optionally, with --resolve-pred) for the prediction
+  # side. Not produced by any upstream tool (DANTE/RepeatMasker/etc.) on
+  # its own — they always commit to Class_I or Class_II — so seeing
+  # `Mobile_element` outside the resolve_overlaps step is a bug.
+  - Mobile_element
+
+  # ── Class I — retroelements (REXdb Viridiplantae v4.0 tree) ─────────────
+  # Reference: https://github.com/repeatexplorer/rexdb README and
+  # Viridiplantae_v4.0.classification. Every leaf below corresponds to an
+  # entry in that file except SINE (present in the tree, no sequences yet).
+  - Class_I
+  - Class_I/DIRS
+  - Class_I/LINE
+  - Class_I/LTR
+  - Class_I/LTR/Ty1_copia
+  - Class_I/LTR/Ty1_copia/Ale
+  - Class_I/LTR/Ty1_copia/Alesia
+  - Class_I/LTR/Ty1_copia/Alexandra
+  - Class_I/LTR/Ty1_copia/Angela
+  - Class_I/LTR/Ty1_copia/Bianca
+  - Class_I/LTR/Ty1_copia/Bryana
+  - Class_I/LTR/Ty1_copia/Bryco
+  - Class_I/LTR/Ty1_copia/Ferco
+  - Class_I/LTR/Ty1_copia/Gymco-I
+  - Class_I/LTR/Ty1_copia/Gymco-II
+  - Class_I/LTR/Ty1_copia/Gymco-III
+  - Class_I/LTR/Ty1_copia/Gymco-IV
+  - Class_I/LTR/Ty1_copia/Ikeros
+  - Class_I/LTR/Ty1_copia/Ivana
+  - Class_I/LTR/Ty1_copia/Lyco
+  - Class_I/LTR/Ty1_copia/Osser
+  - Class_I/LTR/Ty1_copia/SIRE
+  - Class_I/LTR/Ty1_copia/TAR
+  - Class_I/LTR/Ty1_copia/Tork
+  - Class_I/LTR/Ty1_copia/Ty1-outgroup
+  - Class_I/LTR/Ty3_gypsy
+  - Class_I/LTR/Ty3_gypsy/chromovirus
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Chlamyvir
+  - Class_I/LTR/Ty3_gypsy/chromovirus/chromo-outgroup
+  - Class_I/LTR/Ty3_gypsy/chromovirus/chromo-unclass
+  - Class_I/LTR/Ty3_gypsy/chromovirus/CRM
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Ferney
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Galadriel
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Reina
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Tcn1
+  - Class_I/LTR/Ty3_gypsy/chromovirus/Tekay
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/non-chromo-outgroup
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Athila
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Ogre
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/Retand
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatI
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatII
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tat/TatIII
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Tatius
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/Phygy
+  - Class_I/LTR/Ty3_gypsy/non-chromovirus/Selgy
+  - Class_I/pararetrovirus
+  - Class_I/Penelope
+  - Class_I/SINE
+
+  # ── Class II — DNA transposons ──────────────────────────────────────────
+  # TIR subfamilies below Class_II/Subclass_1/TIR come from REXdb v4.0 plus
+  # MITE (and MITE/Stowaway), which REXdb omits because MITEs are non-
+  # autonomous and carry no protein domains — they enter the pipeline via
+  # DANTE_TIR's structural caller and user custom libraries.
+  - Class_II
+  - Class_II/Subclass_1
+  - Class_II/Subclass_1/TIR
+  - Class_II/Subclass_1/TIR/EnSpm_CACTA
+  - Class_II/Subclass_1/TIR/hAT
+  - Class_II/Subclass_1/TIR/Kolobok
+  - Class_II/Subclass_1/TIR/Merlin
+  - Class_II/Subclass_1/TIR/MITE
+  - Class_II/Subclass_1/TIR/MITE/Stowaway
+  - Class_II/Subclass_1/TIR/MuDR_Mutator
+  - Class_II/Subclass_1/TIR/Novosib
+  - Class_II/Subclass_1/TIR/P
+  - Class_II/Subclass_1/TIR/PIF_Harbinger
+  - Class_II/Subclass_1/TIR/PiggyBac
+  - Class_II/Subclass_1/TIR/Sola1
+  - Class_II/Subclass_1/TIR/Sola2
+  - Class_II/Subclass_1/TIR/Tc1_Mariner
+  - Class_II/Subclass_2
+  - Class_II/Subclass_2/Helitron
+
+  # rDNA --------------------------------------------------------------------
+  # rDNA is a parent class; 45S and 5S are sub-arrays, each with subunits.
+  # Schema v3 (was flat rDNA_45S / rDNA_5S top-level): 45S/5S are now nested
+  # under a single rDNA parent so the report groups them. This renames the
+  # rDNA per-class GFF3/BigWig outputs — see docs/output_schema.md.
+  - rDNA
+  - rDNA/45S_rDNA
+  - rDNA/45S_rDNA/18S
+  - rDNA/45S_rDNA/25S
+  - rDNA/45S_rDNA/5.8S
+  - rDNA/45S_rDNA/IGS
+  - rDNA/45S_rDNA/ITS1
+  - rDNA/45S_rDNA/ITS2
+  - rDNA/5S_rDNA
+  - rDNA/5S_rDNA/5S
+
+# ---------------------------------------------------------------------------
+# Leaf-name aliases
+# ---------------------------------------------------------------------------
+# Alternative spellings of individual path components. The normaliser
+# rewrites the LHS to the RHS *inside a single component* before hierarchy
+# parsing. This is what disambiguates "Ty1/copia" (DANTE convention, one
+# leaf containing a slash) from "Ty1_copia/Ale" (canonical, two levels).
+#
+# Mechanism:
+#   1. Any component equal to a key on the left is rewritten to the value.
+#   2. Applied per-component, so it never affects separators.
+# ---------------------------------------------------------------------------
+leaf_aliases:
+  "Ty1/copia":      Ty1_copia
+  "Ty3/gypsy":      Ty3_gypsy
+  "EnSpm/CACTA":    EnSpm_CACTA
+  "MuDR/Mutator":   MuDR_Mutator
+  "PIF/Harbinger":  PIF_Harbinger
+  "Tc1/Mariner":    Tc1_Mariner
+
+# ---------------------------------------------------------------------------
+# Special classes produced by RepeatMasker's default classification scheme
+# ---------------------------------------------------------------------------
+# These live outside the Class_I/Class_II hierarchy. User-supplied custom
+# libraries may extend Satellite with sub-paths (e.g. Satellite/FabTR-1);
+# such extensions are accepted even though they are not enumerated above.
+# The other three do NOT take sub-paths — monomer sequences belong in the
+# Original_names attribute, not in Name.
+# ---------------------------------------------------------------------------
+special_classes:
+  Satellite:
+    description: Tandem repeat / satellite from RepeatMasker default library
+    accepts_subpath: true
+    examples:
+      - Satellite
+      - Satellite/FabTR-1
+      - Satellite/FabTR_PisTR-B
+  Simple_repeat:
+    description: Simple sequence repeats (SSRs) from RepeatMasker
+    accepts_subpath: false
+  Low_complexity:
+    description: Low-complexity regions from RepeatMasker
+    accepts_subpath: false
+  Unknown:
+    description: RepeatMasker fallback when classification cannot be resolved
+    accepts_subpath: false
+
+# ---------------------------------------------------------------------------
+# Aggregation buckets (report-only)
+# ---------------------------------------------------------------------------
+# These labels appear in summary_statistics.csv, split-by-class GFF3
+# filenames, and density-track outputs. They are NOT feature classifications;
+# they are groupings computed by pipeline scripts. Kept here so reporting
+# code has a canonical reference (and so Tandem_repeats/Satellite cannot
+# be confused — Tandem_repeats is the bucket; Satellite is a RepeatMasker
+# leaf class).
+# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────
+# max_consensus_length — the longest a de-novo consensus of a class can
+# plausibly be, in bp. Longest-prefix match: Class_I/LINE beats Class_I.
+#
+# Advisory, not enforced. `screen_library_cross_class.py` REPORTS a consensus
+# that exceeds its class bound in the audit TSV; nothing truncates on this
+# number, because where to cut an over-long consensus is not defined by its
+# length alone. The LINE bound is enforced at build time instead, by
+# dante_line's --max-element-length.
+#
+# Its purpose is to make a boundary regression visible: CARP shipped 16-22 kb
+# `Class_I/LINE` consensi for several releases and nothing anywhere said that
+# was impossible.
+max_consensus_length:
+  # Full-length plant LINEs run 4-7 kb around an ENDO+RT core of ~2.1 kb.
+  Class_I/LINE: 8000
+  # LTR-RTs span a wide range; Ogre/Tat elements reach ~25 kb.
+  Class_I/LTR: 30000
+  # TIR superfamilies differ by more than an order of magnitude, so the bound is
+  # per superfamily; the generic entry covers anything not listed.
+  Class_II/Subclass_1/TIR: 25000
+  # CACTA elements are the long tail of the TIR world (~20 kb, some larger).
+  Class_II/Subclass_1/TIR/EnSpm_CACTA: 30000
+  # Mutator element size varies hugely.
+  Class_II/Subclass_1/TIR/MuDR_Mutator: 25000
+  Class_II/Subclass_1/TIR/hAT: 15000
+  Class_II/Subclass_1/TIR/PIF_Harbinger: 12000
+  Class_II/Subclass_1/TIR/Tc1_Mariner: 10000
+  Class_II/Subclass_2/Helitron: 30000
+  rDNA: 15000
+
+# ─────────────────────────────────────────────────────────────────────────
+# max_extension_per_side — how far a domain-anchored core may be extended on
+# ONE side, in bp. Longest-prefix match, same as max_consensus_length.
+#
+# ENFORCED (unlike max_consensus_length): dante_line and dante_tir_fallback cap
+# each flank at this value. A scalar applies to both sides; a mapping gives
+# 5prime/3prime separately.
+#
+# The TIR numbers are MEASURED, not guessed: the p95 of the true core->boundary
+# distance over 13,760 element-sides from DANTE_TIR primary successes (elements
+# with tir_seq5 + tir_seq3 + tsd, so the boundary is exact) across wheat,
+# Lycopus and Boechera. Medians span 6x between superfamilies (PIF_Harbinger
+# 951 bp vs EnSpm_CACTA 3544 bp), which is why one shared cap cannot work: the
+# old shared 1500 would have cut into the MEDIAN real element for four of five
+# superfamilies. p95 rather than p99 is deliberate -- these guards must fail
+# toward truncation (an over-extended consensus poisons the whole RM search,
+# a truncated one costs a little masking).
+#
+# CAVEAT: the observed maxima cluster at 5989/5953/6077, which looks like a
+# search-window limit inside DANTE_TIR itself, so the CACTA and MuDR
+# distributions are probably censored near 6 kb and their true p95 may be
+# higher. Raising these is the safer direction if that is ever confirmed.
+#
+# LINE is asymmetric and NOT measured -- no ground-truth LINE boundary set
+# exists. It follows element structure: the core is ORF2 (ENDO+RT), leaving
+# inter-ORF + ORF1 + 5'UTR (~1.5-2.5 kb) on the 5' side but only the ORF2
+# C-terminus + 3'UTR + polyA (~0.3-0.9 kb) on the 3' side. The previous shared
+# 1500 was therefore simultaneously too tight 5' and too loose 3'.
+max_extension_per_side:
+  # MEASURED, 2026-09-01, from 218 LINE loci across 7 genomes where BOTH ends
+  # were observed (poly-A tail found and a TSD clearing the chance floor), after
+  # discarding saturated 20 bp matches (not TSDs) and elements over 7500 bp
+  # (not plant LINEs). 5' p95 = 3360. The earlier 2000 came from element
+  # structure and truncated 57% of these loci.
+  Class_I/LINE:
+    5prime: 3400
+    # Backstop only -- the binding 3' constraint is max_core_to_3prime_end below.
+    # Observed max 3' extension is 2338 bp, p99 2180, so this never binds in
+    # practice; it exists so a pathological inference is still bounded.
+    3prime: 2500
+  # Generic TIR: permissive enough not to truncate an unlisted superfamily.
+  Class_II/Subclass_1/TIR: 6000
+  Class_II/Subclass_1/TIR/EnSpm_CACTA: 5800    # p95 5812, n=5868
+  Class_II/Subclass_1/TIR/MuDR_Mutator: 5700   # p95 5632, n=1750
+  Class_II/Subclass_1/TIR/Tc1_Mariner: 3200    # p95 3169, n=254
+  Class_II/Subclass_1/TIR/hAT: 2300            # p95 2249, n=296
+  Class_II/Subclass_1/TIR/PIF_Harbinger: 1400  # p95 1388, n=5592
+
+# ─────────────────────────────────────────────────────────────────────────
+# max_core_to_3prime_end — the 3' bound that actually works for LINEs, in bp.
+# Longest-prefix matched. Bounds (domain core length + 3' extension), i.e. the
+# distance from the START of the domain core to the END of the element.
+#
+# WHY NOT A PER-SIDE CAP. The 3' extension is not a biological distance. It is
+# whatever is left over after DANTE stops annotating the core, and it varies
+# 13.8x (p90/p10) across confirmed loci for exactly that reason. Measured over
+# 148 loci: Pearson r(core length, 3' extension) = -0.936 -- the two are nearly
+# a constant sum. What IS stable is this span, which varies only 1.16x, with
+# per-genome medians of 3779-4247 bp across seven genomes.
+#
+# Concretely: two Boechera elements both end ~3750 bp after their ENDO domain
+# starts, but one has a 2164 bp core with a 1568 bp extension and the other a
+# 3893 bp core with a 155 bp extension. No single per-side number fits both.
+#
+# 4500 sits just above the p95 of the span (4274 on the filtered set, 4409
+# unfiltered), the same p95 rule used for the TIR per-superfamily caps, and
+# deliberately below the observed max (4507) so the guard fails toward
+# truncation.
+#
+# Measured on the 218-locus filtered set, this rule truncates 1 locus (0.5%),
+# losing 7 bp in total. The flat 800 bp cap it replaces truncated 157 (72%),
+# losing 149,884 bp.
+#
+# LINE only. TIR was deliberately left on per-side bounds and is untested here.
+max_core_to_3prime_end:
+  Class_I/LINE: 4500
+
+aggregation_buckets:
+  Mobile_elements:
+    description: Union of all Class_I and Class_II features
+    produced_by: calculate_statistics_and_make_groups.R
+  Simple_repeats:
+    description: Plural form used in top-level symlink; same features as Simple_repeat leaf
+    produced_by: Snakefile symlinking rule
+  Tandem_repeats:
+    description: >-
+      Union of every tandem-repeat / satellite call surviving the
+      Repeat_Annotation_Unified tier resolution — TideCluster default
+      clusters (TRC_*), TideCluster short-monomer clusters,
+      TideHunter short tandems, and any RepeatMasker Satellite/* leaf.
+      Replaces the historical "Satellites" bucket (which counted only
+      TideCluster default).
+    produced_by: calculate_statistics_and_make_groups.R
+    distinct_from: Satellite   # RepeatMasker leaf class, much smaller
+  All_Ty1_Copia:
+    description: All Class_I/LTR/Ty1_copia/* lineages combined
+    produced_by: calculate_statistics_and_make_groups.R
+  All_Ty3_Gypsy:
+    description: All Class_I/LTR/Ty3_gypsy/* lineages combined (both chromovirus and non-chromovirus)
+    produced_by: calculate_statistics_and_make_groups.R
+
+# ---------------------------------------------------------------------------
+# Tool-native dialects
+# ---------------------------------------------------------------------------
+# Documents how each upstream tool encodes classifications, so the
+# normaliser can dispatch on the source rather than sniffing separators.
+# Fields list GFF3 attribute names (or column indices for tabular outputs)
+# where the classification appears unmodified from the tool.
+# ---------------------------------------------------------------------------
+tool_dialects:
+  DANTE:
+    separator: "|"
+    leaf_may_contain_slash: true       # Ty1/copia, EnSpm/CACTA, ...
+    leaf_may_contain_underscore: false
+    gff3_attributes: [Final_Classification]
+    notes: >
+      Pipe-separated hierarchy. Leaf names from REXdb use "/" as an
+      intra-name separator (Ty1/copia, Ty3/gypsy, EnSpm/CACTA, ...).
+      Normaliser must apply leaf_aliases BEFORE splitting on "|".
+
+  DANTE_LTR:
+    separator: "|"
+    leaf_may_contain_slash: true
+    gff3_attributes: [Final_Classification, Name]
+    notes: Same dialect as DANTE; inherits REXdb leaf conventions.
+
+  DANTE_LINE:
+    separator: "|"
+    leaf_may_contain_slash: false
+    gff3_attributes: [Final_Classification]
+    notes: LINE has no sub-lineage resolution; always Class_I|LINE.
+
+  DANTE_TIR:
+    separator: "_"
+    leaf_may_contain_underscore: true   # hAT, Tc1_Mariner, EnSpm_CACTA, ...
+    gff3_attributes: [Classification]
+    fasta_header_suffix_form: "#Class_II/Subclass_{1,2}/TIR_<LEAF>"
+    # DANTE_TIR uses "_" as hierarchy separator in GFF3 Classification,
+    # but "/" in FASTA headers except for the final "TIR_<leaf>" join.
+    # Canonical recognition requires explicit prefix-to-slash-form pairs,
+    # because tokens themselves contain underscores (Class_II, Subclass_1)
+    # and leaves contain underscores (Tc1_Mariner, EnSpm_CACTA). The
+    # normaliser matches the longest "underscore" prefix and substitutes
+    # the corresponding "canonical" form, leaving the remainder untouched.
+    hierarchy_prefixes:
+      # Fully underscore-encoded (GFF3 Classification attribute)
+      - underscore: "Class_II_Subclass_1_TIR_"
+        canonical:  "Class_II/Subclass_1/TIR/"
+      - underscore: "Class_II_Subclass_2_TIR_"
+        canonical:  "Class_II/Subclass_2/TIR/"
+      - underscore: "Class_II_Subclass_1_"
+        canonical:  "Class_II/Subclass_1/"
+      - underscore: "Class_II_Subclass_2_"
+        canonical:  "Class_II/Subclass_2/"
+      # Mixed form used in DANTE_TIR FASTA headers
+      # (#Class_II/Subclass_1/TIR_hAT — slashes for hierarchy, "_" before leaf)
+      - underscore: "Class_II/Subclass_1/TIR_"
+        canonical:  "Class_II/Subclass_1/TIR/"
+      - underscore: "Class_II/Subclass_2/TIR_"
+        canonical:  "Class_II/Subclass_2/TIR/"
+    notes: >
+      Because tokens contain "_" (Class_II, Subclass_1) AND leaves contain
+      "_" (Tc1_Mariner, EnSpm_CACTA, MuDR_Mutator, PIF_Harbinger, hAT),
+      the prefix → canonical mapping must be enumerated explicitly rather
+      than derived by regex. Leaves pass through unchanged.
+
+  DANTE_TIR_FALLBACK:
+    separator: "/"
+    leaf_may_contain_underscore: true
+    gff3_attributes: [Classification]
+    fasta_header_format: ">name#Class_II/Subclass_1/TIR/<LEAF>"
+    produced_by: scripts/dante_tir_fallback.py
+    already_canonical: true
+    notes: >
+      Partial TIR elements rescued from DANTE TPase domain flanks when
+      primary DANTE_TIR misses them. Emits canonical slash form directly
+      (dante_tir_fallback.py builds the string as
+      "Class_II/Subclass_1/TIR/{subtype_slug}"). No translation needed —
+      recorded here so the validator (D6) can still target it by source
+      and so future changes to the fallback script's output format land
+      here rather than drifting silently.
+
+  RepeatMasker:
+    separator: "/"
+    leaf_may_contain_underscore: true
+    sources:
+      - path: RM_on_combined_library.out
+        column: 11
+      - path: any .gff3 converted from .out by clean_rm_output.R
+        gff3_attributes: [Name, Original_names]
+    notes: >
+      Already canonical slash form when the input library uses canonical
+      headers. Simple_repeat monomer id is carried in Original_names, not
+      folded into the classification.
+
+  TideCluster:
+    separator: "/"
+    gff3_attributes: [annotation]
+    annotation_suffix_pattern: ' \([0-9.]+%25\)$'
+    # The "annotation" attribute appends " (NN.N%25)" similarity score —
+    # normaliser must strip this trailing pattern before parsing.
+    notes: >
+      TideCluster itself does not classify; it looks up hits in the
+      user-supplied tandem_repeat_library and writes library header
+      (e.g. Satellite/FabTR_PisTR-B) plus a similarity suffix.
+
+  custom_library:
+    separator: "/"
+    gff3_attributes: []
+    fasta_header_format: ">name#class/subclass[/...]"
+    notes: User-supplied FASTA; required to use canonical form on input.

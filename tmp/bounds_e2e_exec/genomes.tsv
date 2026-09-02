@@ -1,0 +1,3 @@
+# tag	assembly	baseline_run	why
+GCA_973357735.1	/nfsroot/projects/darwin/genomes/GCA_973357735.1/GCA_973357735.1_daLatSqua1.hap1.1_genomic.fasta	run-000232	sensitive: 494 of 550 LINE elements hit a cap under rc1
+GCA_937616625.2	/nfsroot/projects/darwin/genomes/GCA_937616625.2/GCA_937616625.2_ddMerAnnu1.2_genomic.fasta	run-000230	control: only 8 of 633 capped, should barely move
