@@ -30,7 +30,14 @@ the two are nearly a constant sum. What *is* stable is the span from the START o
 the domain core to the element's 3' end, which varies **1.16x**.
 
 So `main` replaces the flat 3' cap with a **4500 bp bound on that span** and
-raises the 5' cap to **3400 bp**.
+raises the 5' cap to **3400 bp** — but only for an element whose flank inference
+actually **converged**. A first run of this package (2026-09-02) showed why that
+qualifier is needed: on GCA_973357735.1 the raw 5' inference has median 7,613 bp
+against a 10,000 bp search window, so for 63% of elements the alignment never
+found a boundary and the cap was the only thing setting element length. Ungated,
+the looser bounds raised total extension 74.7% and put 322 of 550 elements above
+7 kb. An element whose inference exceeds its allowance now falls back to the
+1.7.0rc1 values (5' 2000 / 3' 800) instead.
 
 **This is the only behaviour change on main that has never been through a full
 pipeline run.**
@@ -63,9 +70,12 @@ difference.
 
 ## What to expect, and what would be alarming
 
-The change lets LINE elements grow, so `Class_I/LINE` should rise **slightly**.
-A local A/B on one small genome moved **4 of 343 elements (+0.25% extension)`**,
-so single-digit-percent moves are the expectation.
+The change lets LINE elements grow where the inference converged, so
+`Class_I/LINE` should rise **slightly**. Measured at the dante_line step on the
+two genomes below: the control was unchanged in element length (+3.6% total
+extension), and the sensitive genome moved its median element from 4,960 to
+6,033 bp. This run measures what that does to the FULL annotation, which the
+dante_line step alone cannot show.
 
 | observation | reading |
 |---|---|

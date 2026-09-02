@@ -284,6 +284,35 @@ max_extension_per_side:
   Class_II/Subclass_1/TIR/PIF_Harbinger: 1400  # p95 1388, n=5592
 
 # ─────────────────────────────────────────────────────────────────────────
+# unconverged_max_extension_per_side — the bound to use when the flank
+# inference did NOT determine a boundary, in bp. Longest-prefix matched.
+#
+# THE DISTINCTION. dante_line infers how far an element extends by aligning the
+# flanks of many copies. Sometimes that alignment stops on its own, well inside
+# the search window -- the evidence chose a length. Sometimes it runs until it
+# hits the window edge, and the "length" is then just wherever we stopped
+# looking. Those are different confidence classes and must not get the same
+# allowance.
+#
+# Measured on GCA_973357735.1 (550 LINE elements): the raw 5' inference has
+# median 7,613 bp and max 9,999 against a 10,000 bp search window -- i.e. for
+# 63% of elements it never converged at all. Granting those the same generous
+# bound as a converged element pushed the median element to 7,429 bp and put 322
+# of 550 over 7 kb, above the documented 4-7 kb plant LINE range. On a genome
+# where the inference does converge (GCA_937616625.2) NO element is affected by
+# this table, so the correction is free there.
+#
+# So: if the raw inference is within max_extension_per_side (and, for 3',
+# within max_core_to_3prime_end), it is trusted and kept. If it exceeds that, no
+# boundary was found and the element falls back to the value below -- which is
+# deliberately the conservative 1.7.0rc1 cap. Fails toward truncation, as every
+# guard here does.
+unconverged_max_extension_per_side:
+  Class_I/LINE:
+    5prime: 2000
+    3prime: 800
+
+# ─────────────────────────────────────────────────────────────────────────
 # max_core_to_3prime_end — the 3' bound that actually works for LINEs, in bp.
 # Longest-prefix matched. Bounds (domain core length + 3' extension), i.e. the
 # distance from the START of the domain core to the END of the element.
