@@ -232,6 +232,9 @@ unified annotation. **The RepeatMasker library is built from the cores only.** A
 inferred boundary that is slightly wrong costs one locus; a wrong consensus in
 the library mislabels every sequence it matches, genome-wide.
 
+How the limits were measured, and which alternative approaches were tested and
+rejected, is in [docs/line_boundaries.md](docs/line_boundaries.md).
+
 ## Other top-level outputs
 
 A short selection (full directory tree in
@@ -258,6 +261,8 @@ A high-level workflow schematic is in
 - [docs/configuration.md](docs/configuration.md) — every configuration parameter
 - [docs/unified_annotation_gff3_spec.md](docs/unified_annotation_gff3_spec.md) —
   `Repeat_Annotation_Unified.gff3` field contract
+- [docs/line_boundaries.md](docs/line_boundaries.md) — how LINE boundaries are
+  decided, and what was tried and rejected
 - [docs/development.md](docs/development.md) — building the container, releasing,
   regenerating the workflow diagram
 - [CHANGELOG.md](CHANGELOG.md) — release history
