@@ -128,24 +128,69 @@ def _stdlib() -> set:
         "__future__",
     }
 
-def py_third_party(path: pathlib.Path) -> set:
+def _local_module_path(mod: str):
+    for d in LOCAL_MODULE_DIRS:
+        f = d / f"{mod}.py"
+        if f.exists():
+            return f
+        pkg = d / mod / "__init__.py"
+        if pkg.exists():
+            return pkg
+    return None
+
+
+def _direct_imports(path: pathlib.Path, top_level_only: bool = False) -> set:
+    """Modules imported by ``path``.
+
+    ``top_level_only`` counts only imports at module scope. An import inside a
+    function body is LAZY -- the module still imports without it, and it only
+    matters if that function is called. scripts/global_local_aln.py imports
+    parasail that way on purpose, precisely so the module can be imported in a
+    lightweight test environment. Counting those would flag three tests that
+    genuinely pass today.
+    """
     try:
         tree = ast.parse(path.read_text())
-    except SyntaxError:
+    except (SyntaxError, OSError):
         return set()
+    nodes = tree.body if top_level_only else list(ast.walk(tree))
     mods = set()
-    for n in ast.walk(tree):
+    for n in nodes:
         if isinstance(n, ast.Import):
             mods.update(a.name.split(".")[0] for a in n.names)
         elif isinstance(n, ast.ImportFrom) and n.level == 0 and n.module:
             mods.add(n.module.split(".")[0])
+    return mods
+
+
+def py_third_party(path: pathlib.Path, _seen=None) -> set:
+    """Third-party modules a test needs, INCLUDING through repo-local imports.
+
+    A test that imports a repo-local module inherits that module's dependencies.
+    Only following direct imports missed exactly that: a test imported
+    scripts/line_complete_elements.py, which imports numpy, and the guard passed
+    while CI failed with ModuleNotFoundError. So repo-local modules are followed
+    rather than skipped.
+    """
+    seen = _seen if _seen is not None else set()
+    rp = str(path.resolve())
+    if rp in seen:
+        return set()
+    seen.add(rp)
+
     std = _stdlib()
     out = set()
-    for m in mods:
+    # For a followed repo-local module only module-scope imports are required to
+    # import it; for the test file itself take everything, since a test that
+    # imports lazily still means to use it.
+    for m in _direct_imports(path, top_level_only=_seen is not None):
         if m in std or m == "tests":
             continue
-        if _is_local_module(m):
-            continue  # repo-local module (root / scripts / tests on sys.path)
+        local = _local_module_path(m)
+        if local is not None:
+            # repo-local: inherit whatever IT needs
+            out |= py_third_party(local, seen)
+            continue
         out.add(m)
     return out
 

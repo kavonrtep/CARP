@@ -12,3 +12,8 @@ dependencies:
   - mmseqs2=18.8cc5c
   - blast=2.17.0
   - pyyaml=6.0.3
+  # Used by scripts/line_complete_elements.py for the TSD scan. It arrived
+  # transitively via parasail-python until now; declared explicitly so a
+  # parasail release that stops depending on it cannot break the pipeline
+  # at run time.
+  - numpy

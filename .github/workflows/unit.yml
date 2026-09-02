@@ -24,6 +24,7 @@ jobs:
           create-args: >-
             python=3.11
             pyyaml
+            numpy
             r-base
             r-yaml
             r-jsonlite
