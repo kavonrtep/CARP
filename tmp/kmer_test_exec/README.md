@@ -1,11 +1,20 @@
 # k-mer prefilter test — run this on the exec host
 
-## The one command
+## Commands
 
 ```bash
 cd /nfsroot/projects/darwin/runs/tmp3/kmer_test
-./RUN.sh
+./RUN.sh --check      # verify environment + inputs, runs nothing   <-- DO THIS FIRST
+./RUN.sh --setup      # only if --check says the environment was not found
+./RUN.sh              # run the calibration arm and score it
 ```
+
+`--check` costs a second and tells you whether the environment and every input
+file are readable before you commit hours to the run.
+
+If no environment is found, `--setup` builds one with conda/mamba into
+`./conda_env` from the pinned `dante_line_env.yaml` (seqkit, parasail-python,
+mmseqs2, pyyaml — the same versions the validated container was built with).
 
 That runs the calibration arm (3 genomes x 2 settings, 6 jobs in parallel at 32
 threads each) and prints the scored result against the pre-registered rule.
@@ -20,6 +29,11 @@ Other modes:
 ./RUN.sh --score      # re-print the scores without re-running
 ./RUN.sh --validate   # the held-out genomes -- ONLY if calibration passes
 ```
+
+Knobs: `THREADS=32` per job, `SIF=/path/to/image.sif`, `ENV_PREFIX=/path/for/env`.
+
+If a job fails, its exit code and the last lines of its log are printed and its
+`DONE_` marker is removed, so simply re-running retries only what failed.
 
 Safe to re-run: finished jobs are skipped via `results/DONE_*`. To redo one,
 delete its `results/DONE_<tag>_k<k>` file.
