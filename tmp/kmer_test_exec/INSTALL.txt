@@ -1,0 +1,8 @@
+Copy this directory to the exec host, then run it:
+
+    cp -r <this_dir> /nfsroot/projects/darwin/runs/tmp3/kmer_test
+    cd /nfsroot/projects/darwin/runs/tmp3/kmer_test
+    ./RUN.sh
+
+(/nfsroot is read-only from the agent sandbox, which is why it is staged here
+instead of being written there directly.)
