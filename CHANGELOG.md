@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0rc2
 
 - **The DANTE_LINE flank bounds are now measured, not reasoned from element
   structure.** `max_extension_per_side` for `Class_I/LINE` in
@@ -43,8 +43,8 @@
   → **7,429 bp**, and **322 of 550** elements over 7 kb against a documented plant
   LINE range of 4–7 kb. With the gate: **1,896,685 bp** total, median **6,033 bp**,
   **22** elements over 7 kb. On a control genome whose inference does converge the
-  gate changes nothing — byte-identical output. `cap_extensions()` gained
-  `unconverged_5prime` / `unconverged_3prime`, resolved by
+  gate costs nothing — its output is byte-identical to the ungated one.
+  `cap_extensions()` gained `unconverged_5prime` / `unconverged_3prime`, resolved by
   `classification.unconverged_max_extension_for_class()`. LINE only — TIR is
   deliberately untouched.
 - **Two bounds bugs fixed while implementing it.** `cap_extensions()` conflated
@@ -59,7 +59,14 @@
   [`docs/configuration.md`](docs/configuration.md).
 - **What users see: LINE elements get longer where the inference converged**
   (where it did not they stay on the 1.7.0rc1 bounds), in `DANTE_LINE.gff3` and in
-  `Repeat_Annotation_Unified.gff3`. The RepeatMasker library is **unaffected**:
+  `Repeat_Annotation_Unified.gff3`. Measured there, not just at the `dante_line`
+  step: on the control genome `Class_I/LINE` is the **only** class that changes
+  (**+3,390 bp**, identical feature count), and on the sensitive one total
+  annotated moves **+0.14 %** with `Class_I/LINE` going **0.56 % → 0.66 %** of the
+  genome, **78 %** of that gain coming from previously unannotated sequence. What
+  it takes from other classes is edge-shaped: the displaced rDNA is entirely at
+  array edges, and genuine rDNA arrays (> 10 kb) lost **exactly 0 bp**.
+  The RepeatMasker library is **unaffected**:
   it is still built from the domain core only (`dante_line_library_source: core`,
   1.7.0rc1), so the masking-layer numbers do not move.
 - **New tests** `TestCoreToThreePrimeSpan` and `TestConvergenceGate` in
