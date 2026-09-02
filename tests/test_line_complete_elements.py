@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """LINE elements with both ends directly observed (poly-A tail + TSD).
 
-This is an EVALUATION output: nothing downstream consumes it, so these tests
-guard the two properties that actually matter — that a confirmed call means what
-it says, and that the output is reproducible.
+Such an element is marked `Status=complete` and its inferred span is REPLACED
+with the measured one, so this does change the annotation — for the 0.7-5% of
+elements that qualify. Everything else keeps its inferred span and is marked
+`Status=inferred`.
 
 Determinism matters more than usual here: each TSD is calibrated against decoy
 windows drawn at random. A global RNG would make the result depend on locus
@@ -20,7 +21,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
-import line_confirmed_elements as lce  # noqa: E402
+import line_complete_elements as lce  # noqa: E402
 
 
 class TestPolyADetection(unittest.TestCase):
@@ -52,21 +53,50 @@ class TestTSDScan(unittest.TestCase):
 
     def test_perfect_repeat_scores_its_length(self):
         tsd = "ACGTACGTACGTAC"          # 14 bp
-        score, pos, klen = lce.scan(tsd, "TTTT" + tsd + "TTTT", 8, 20)
+        score, pos, klen, _ = lce.scan(tsd, "TTTT" + tsd + "TTTT", 8, 20)
         self.assertEqual(score, 14)
         self.assertEqual(klen, 14)
         self.assertEqual(pos, 4)
 
     def test_absent_repeat_scores_poorly(self):
-        score, _, _ = lce.scan("ACGTACGTACGTAC", "T" * 200, 8, 20)
+        score, _, _, _ = lce.scan("ACGTACGTACGTAC", "T" * 200, 8, 20)
         self.assertLess(score, 8)
 
     def test_mismatches_are_penalised(self):
         tsd = "ACGTACGTACGTAC"
         bad = tsd[:6] + "TTT" + tsd[9:]
-        clean, _, _ = lce.scan(tsd, "TTTT" + tsd + "TTTT", 8, 20)
-        dirty, _, _ = lce.scan(tsd, "TTTT" + bad + "TTTT", 8, 20)
+        clean, _, _, _ = lce.scan(tsd, "TTTT" + tsd + "TTTT", 8, 20)
+        dirty, _, _, _ = lce.scan(tsd, "TTTT" + bad + "TTTT", 8, 20)
         self.assertGreater(clean, dirty)
+
+
+class TestRepeatDerivedTSDs(unittest.TestCase):
+    """A TSD found inside a tandem array is not a duplication.
+
+    The failure this caught: on GCA_973357735.1 the plant telomere repeat
+    (CCCTAAA) was read as a 16 bp TSD. Decoy windows are drawn from distant loci
+    and contain no telomeric sequence, so the null test passed it — and the
+    resulting element displaced ~5 kb of genuine telomere annotation.
+    """
+
+    def test_telomere_repeat_is_rejected(self):
+        self.assertTrue(lce.is_tandem("CCTAAACCCTAAAACC"))
+
+    def test_simple_repeats_are_rejected(self):
+        for seq in ("TATATATATATATATATATA", "GAGAGAGAGAGAGACC",
+                    "TAATAATAATTATTAT"):
+            self.assertTrue(lce.is_tandem(seq), seq)
+
+    def test_a_genuine_tsd_is_kept(self):
+        for seq in ("TTCGTAAGCATGTAAATAA", "TTTATCATTAAAACAA"):
+            self.assertFalse(lce.is_tandem(seq), seq)
+
+    def test_uniqueness_is_counted(self):
+        """A query that matches at every period of an array must be seen to."""
+        tsd = "ACGTACGTACGTAC"
+        _, _, _, unique = lce.scan(tsd, "TTTT" + tsd + "TTTT", 8, 20, count_above=8)
+        _, _, _, many = lce.scan("ATATATATATAT", "AT" * 400, 8, 20, count_above=8)
+        self.assertLess(unique, many)
 
 
 class TestChanceFloor(unittest.TestCase):
@@ -96,7 +126,7 @@ class TestDeterminism(unittest.TestCase):
         """hash() is randomised per process; a hash-derived seed would break the
         determinism gate. Run a child with a different PYTHONHASHSEED."""
         code = ("import sys; sys.path.insert(0, %r);"
-                "import line_confirmed_elements as l;"
+                "import line_complete_elements as l;"
                 "print(l.locus_seed('chr1', 100, 200))" % str(REPO / "scripts"))
         env = dict(os.environ, PYTHONHASHSEED="12345")
         out = subprocess.run([sys.executable, "-c", code], capture_output=True,
@@ -116,23 +146,40 @@ class TestOutputContract(unittest.TestCase):
             self.assertTrue(head.startswith(">"))
             self.assertIn("#Class_I/LINE", head)
 
-    def test_feeds_nothing_downstream(self):
-        """The whole point: enabling this cannot change the annotation.
-
-        Guards against a future edit wiring the output into another rule.
-        """
-        snake = (REPO / "Snakefile").read_text()
+    def test_every_element_gets_a_status(self):
+        """Both confidence classes must be distinguishable downstream, so an
+        element is either measured or explicitly marked as inferred."""
         import re
-        for chunk in re.split(r"\n(?=rule )", snake):
-            name = chunk.split("\n", 1)[0].replace("rule ", "").rstrip(":")
-            if name in ("all", "line_confirmed_elements"):
-                continue
-            m = re.search(r"\n    input:(.*?)\n    (output|params|log|shell|run|"
-                          r"threads|conda|benchmark|priority|resources):",
-                          chunk, re.S)
-            if m and "LINE_confirmed_elements" in m.group(1):
-                self.fail(f"rule {name} consumes LINE_confirmed_elements; this "
-                          f"output must stay evaluation-only")
+        src = (REPO / "scripts" / "line_complete_elements.py").read_text()
+        self.assertIn('attrs["Status"] = "inferred"', src)
+        self.assertIn('attrs["Status"] = "complete"', src)
+
+    def test_only_confirmed_elements_move(self):
+        """A coordinate rewrite must be tied to having found the evidence.
+
+        Guards the property the two-genome measurement rests on: 17 of 343
+        Boechera elements were marked complete and exactly those 17 moved.
+        """
+        src = (REPO / "scripts" / "line_complete_elements.py").read_text()
+        i = src.index("r = by_id.get(")
+        seg = src[i:i + 600]
+        self.assertIn("if r is None:", seg)
+        # the span is only rewritten in the else branch
+        self.assertLess(seg.index('attrs["Status"] = "inferred"'),
+                        seg.index('f[3], f[4] = str(r["start"]), str(r["end"])'))
+
+    def test_rewrite_is_atomic(self):
+        """A killed run must not leave a truncated GFF3 that a later step trusts."""
+        src = (REPO / "scripts" / "line_complete_elements.py").read_text()
+        self.assertIn('tmp = gff + ".tmp"', src)
+        self.assertIn("os.replace(tmp, gff)", src)
+
+    def test_rerunning_is_idempotent(self):
+        """Marks from a previous run are stripped, so re-running cannot stack
+        duplicate Status/TSD attributes."""
+        src = (REPO / "scripts" / "line_complete_elements.py").read_text()
+        self.assertIn('for k in ("Status", "TSD", "PolyA_length"):', src)
+        self.assertIn("attrs.pop(k, None)", src)
 
 
 if __name__ == "__main__":

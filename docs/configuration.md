@@ -132,7 +132,7 @@ them; `dante_line_max_extension` does **not** apply here.
 | `dante_line_min_group_alignments` | `5` | LINE groups with fewer flank alignments than this get **no** extension — too few partners to place a boundary, so the element keeps its ENDO/RT domain core. Most runaway extensions came from groups of 3–4 members. `0` disables. |
 | `dante_line_max_extension` | `0` (use the measured bounds) | Symmetric **escape hatch** on the DANTE_LINE flank extension: any value > 0 caps **both** sides at that many bp. It is a **complete manual override** — it disables the per-side bounds, the core→3' end span bound, *and* the unconverged-inference gate, so a value you set is never quietly tightened by a vocabulary number. At the default `0` the bounds are read from `classification_vocabulary.yaml` and are **measured, not guessed** — 3400 bp 5', a 2500 bp 3' backstop, a 4500 bp cap on (domain core + 3' extension), and a tighter 2000 bp 5' / 800 bp 3' fallback for an element whose flank inference never converged; see **LINE flank bounds are not config keys** below the table. Why a bound at all: the uncapped inference can reach `--flank` (10,000) per side, producing 16–22 kb "LINE" consensi; no plant LINE is that long. The bounds are deliberately set to fail toward truncation: DANTE_LINE returns elements whose boundaries are inferred, not observed, so a **truncated** consensus is the safe failure — it still masks its own family — whereas an over-extended one mislabels whatever its tail matches across the entire genome. Extensions are trimmed, not dropped; the domain core is always kept. This key reaches **DANTE_LINE only**; the DANTE_TIR fallback has no equivalent config key and always reads its per-superfamily bounds from `max_extension_per_side` (see [DANTE_TIR](#dante_tir)). |
 | `dante_line_max_element_length` | `8000` | Cap in bp on the whole LINE element (core + both extensions). The equivalent bound for the DANTE_TIR fallback is not a config key: it is read per TIR superfamily from `max_consensus_length` in `classification_vocabulary.yaml`, because CACTA genuinely reaches ~20 kb where `Tc1_Mariner` cannot. Applied last, after the per-side bounds (`dante_line_max_extension` / `max_extension_per_side`) and the `max_core_to_3prime_end` span bound; when the two sides together exceed the remaining budget it is split evenly, except that a side asking for less than its half keeps what it asked for and yields the rest. A core already at or over this length gets no extension and is **never itself trimmed**. Full-length plant LINEs run 4–7 kb around an ENDO+RT core of ~2.1 kb. `0` disables. |
-| `line_confirmed_elements` | `True` | Write the subset of LINE elements whose **both ends were directly observed** rather than inferred from flank alignment — a poly-A tail plus a target-site duplication (TSD), the two marks target-primed reverse transcription leaves behind — to `DANTE_LINE/LINE_confirmed_elements.fasta` (RepeatMasker header convention, `name#Class_I/LINE`, so it is directly usable as a library) and `DANTE_LINE/LINE_confirmed_elements.tsv` (per-element evidence: TSD sequence, length and score, poly-A length, extensions, element length). **These files feed nothing** — see *Confirmed LINE elements are an evaluation output* below. Cost is negligible (~4 s on a 5.4 Gb genome with 11,900 LINE loci). `False` skips the rule. |
+| `line_complete_elements` | `True` | Mark LINE elements whose **both ends were directly observed** — a poly-A tail plus a target-site duplication (TSD) — as `Status=complete` in `DANTE_LINE.gff3`, **replace their inferred span with the measured one**, and record the evidence (`TSD=`, `PolyA_length=`). Every other element gets `Status=inferred`. Sequences also go to `DANTE_LINE/LINE_complete_elements.fasta` (RepeatMasker header convention, so it is usable as a library directly). Because the span changes this **does affect the annotation**, for the 0.7–5 % of elements that qualify — see *Confirmed LINE boundaries* below. ~4 s on a 5.4 Gb genome. `False` skips it. |
 
 **LINE flank bounds are not config keys.** At the default `dante_line_max_extension:
 0`, how far `dante_line` may extend an ENDO/RT domain core is read from three
@@ -208,29 +208,34 @@ previously shipped flat 2000 / 800 caps truncated **125 (57.3 %)** and **157
 (72.0 %)**, losing 89,196 bp and 149,884 bp respectively. Edit the tables in
 `classification_vocabulary.yaml` to change them.
 
-**Confirmed LINE elements are an evaluation output — they feed nothing.** With
-`line_confirmed_elements: True` (the default) the run writes
-`DANTE_LINE/LINE_confirmed_elements.{fasta,tsv}` and **stops there**. No rule
-consumes them: not the RepeatMasker library, not the unified annotation, not any
-downstream rule. **The annotation is byte-identical whether this is on or off.**
-They exist so the idea can be judged across many genomes before anything depends
-on it.
+**Confirmed LINE boundaries — `Status=complete`.** `dante_line` normally *infers*
+where an element ends by aligning the flanks of many copies. A small minority need
+no inference: where a recent insertion still carries both a **poly-A tail** and a
+**target-site duplication (TSD)**, the extent was measured directly.
 
-Why they are not a library source: measured on two genomes, adding them to the
-LINE library changed masking by **+28.2 %** (*Boechera stricta*, 25 confirmed
-elements) and **+0.7 %** (GCA_986270105, 250 confirmed). Both were clean — the new
-masking is 0.7–0.9 % contaminated against DANTE_LTR / DANTE_TIR / TideCluster,
-better than the cores' own 8.8–11.4 % — but the benefit tracks how much LINE the
-core library already misses rather than the confirmation rate, which is far too
-genome-dependent to enable blindly.
+Those elements are marked `Status=complete`, **their span is replaced with the
+measured one**, and the evidence is recorded as attributes. Every other element
+carries `Status=inferred`, so the two confidence classes are distinguishable
+downstream.
 
-Reliability and yield, for expectation-setting: a confirmed call is right about
-**97 %** of the time — the poly-A and TSD tests are statistically independent, so
-their error rates multiply, giving a measured joint false-positive rate of
-**0.073 %**, exactly the product of the two individual rates. Only **0.7–5.0 %** of
-LINE loci confirm, depending on how recently LINEs were active in the genome;
-ancient, decayed LINE populations (wheat, for example) yield least. Full
-derivation in [docs/line_boundaries.md](line_boundaries.md).
+Because the span changes, this **does affect the annotation** — for the 0.7–5 % of
+elements that qualify. Measured on two genomes: `Class_I/LINE` +55,889 bp on one
+(32 elements complete; total annotation +0.028 %, essentially all from previously
+unannotated sequence) and no change at all on the other (nothing qualified). The
+measured boundary is much longer than the inferred one — median +1,740 bp at the
+5′ end, +1,558 bp at the 3′ end — which is why the span is replaced rather than
+merely labelled.
+
+A confirmed call is right about **97 %** of the time. The poly-A and TSD tests are
+statistically independent, so their error rates multiply: 2.8 % spurious poly-A ×
+2.6 % chance TSD = 0.073 % predicted, 0.073 % observed over 2,743 loci in four
+genomes. Two guards reject a candidate TSD that is itself a tandem repeat, or that
+matches more than `--max-tsd-hits` places in its window — a real duplication is
+unique, one taken from inside a tandem array is not. Without them the plant
+telomere repeat was read as a 16 bp TSD on one genome, displacing ~5 kb of genuine
+telomere annotation.
+
+Background: [docs/line_boundaries.md](line_boundaries.md).
 
 ## TideCluster (1.16.0)
 

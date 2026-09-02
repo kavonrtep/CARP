@@ -328,10 +328,10 @@ if (isinstance(config["dante_line_support_fraction"], bool)
 # adding these to the LINE library moved masking +28.2% and +0.7%, clean in both
 # (0.7-0.9% contamination vs the cores' own 8.8-11.4%) but far too
 # genome-dependent to enable blindly. Costs ~4 s on a 5.4 Gb genome.
-if "line_confirmed_elements" not in config:
-    config["line_confirmed_elements"] = True
-if not isinstance(config["line_confirmed_elements"], bool):
-    raise ValueError("Invalid value for line_confirmed_elements: must be true or false.")
+if "line_complete_elements" not in config:
+    config["line_complete_elements"] = True
+if not isinstance(config["line_complete_elements"], bool):
+    raise ValueError("Invalid value for line_complete_elements: must be true or false.")
 
 for _key, _default in (("dante_line_min_group_alignments", 5),
                        ("dante_line_max_extension", 0),
@@ -549,12 +549,7 @@ rule all:
         F"{config['output_dir']}/repeat_annotation_report.html",
         F"{config['output_dir']}/Libraries/library_health.tsv",
         F"{config['output_dir']}/Repeat_Annotation_Unified.gff3",
-        F"{config['output_dir']}/.classifications_validated",
-        # Evaluation output only — nothing downstream consumes these, so the
-        # annotation is identical whether or not this is enabled.
-        *([F"{config['output_dir']}/DANTE_LINE/LINE_confirmed_elements.fasta",
-           F"{config['output_dir']}/DANTE_LINE/LINE_confirmed_elements.tsv"]
-          if config["line_confirmed_elements"] else [])
+        F"{config['output_dir']}/.classifications_validated"
 
 rule clean_genome_fasta:
     """
@@ -1011,7 +1006,11 @@ rule dante_line:
         line_rep_lib=F"{config['output_dir']}/DANTE_LINE/LINE_rep_lib.fasta",
         gff_out=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
         line_regions=F"{config['output_dir']}/DANTE_LINE/LINE_regions.fasta",
-        line_regions_extended=F"{config['output_dir']}/DANTE_LINE/LINE_regions_extended.fasta"
+        line_regions_extended=F"{config['output_dir']}/DANTE_LINE/LINE_regions_extended.fasta",
+        # Sequences of the elements marked Status=complete below. Always created
+        # (empty when the feature is off or nothing qualifies) so the DAG is
+        # independent of the knob.
+        complete_fasta=F"{config['output_dir']}/DANTE_LINE/LINE_complete_elements.fasta"
     params:
         output_dir=F"{config['output_dir']}/DANTE_LINE",
         max_group_size=config["dante_line_max_group_size"],
@@ -1019,7 +1018,8 @@ rule dante_line:
         min_group_alignments=config["dante_line_min_group_alignments"],
         max_extension=config["dante_line_max_extension"],
         max_element_length=config["dante_line_max_element_length"],
-        library_source=config["dante_line_library_source"]
+        library_source=config["dante_line_library_source"],
+        mark_complete=config["line_complete_elements"]
     log:
         stdout=F"{config['output_dir']}/DANTE_LINE/dante_line.log",
         stderr=F"{config['output_dir']}/DANTE_LINE/dante_line.err"
@@ -1068,45 +1068,21 @@ rule dante_line:
         [ -f {output.gff_out} ]               || echo "##gff-version 3" > {output.gff_out}
         [ -f {output.line_regions} ]          || : > {output.line_regions}
         [ -f {output.line_regions_extended} ] || : > {output.line_regions_extended}
+
+        # Mark the elements whose BOTH ends were directly observed -- a poly-A
+        # tail plus a target-site duplication -- and replace their inferred span
+        # with the measured one. Runs inside this rule because it rewrites this
+        # rule's own GFF3; a separate rule cannot write another rule's output.
+        # Costs ~4 s on a 5.4 Gb genome.
+        if [ "{params.mark_complete}" = "True" ] && [ -s {output.gff_out} ]; then
+            line_complete_elements.py \
+                -g {input.genome} \
+                -a {output.gff_out} \
+                -o {output.complete_fasta} \
+                --annotate-gff3
+        fi
+        [ -f {output.complete_fasta} ] || : > {output.complete_fasta}
         """
-
-# Elements whose both ends were OBSERVED (poly-A tail + target-site duplication),
-# rather than inferred from flank alignment. Deliberately terminal: nothing
-# consumes these outputs, so enabling or disabling this rule cannot change the
-# annotation. See scripts/line_confirmed_elements.py for the evidence behind the
-# thresholds and why a confirmed call is ~97% reliable.
-rule line_confirmed_elements:
-    input:
-        gff=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
-        genome=genome_fasta_cleaned,
-        fai=F"{genome_fasta_cleaned}.fai"
-    output:
-        fasta=F"{config['output_dir']}/DANTE_LINE/LINE_confirmed_elements.fasta",
-        tsv=F"{config['output_dir']}/DANTE_LINE/LINE_confirmed_elements.tsv"
-    log:
-        stdout=F"{config['output_dir']}/DANTE_LINE/line_confirmed_elements.log",
-        stderr=F"{config['output_dir']}/DANTE_LINE/line_confirmed_elements.err"
-    benchmark:
-        F"{config['output_dir']}/benchmarks/line_confirmed_elements.tsv"
-    conda:
-        "envs/dante_line.yaml"
-    threads: 1
-    shell:
-        """
-        exec > {log.stdout} 2> {log.stderr}
-        set -euo pipefail
-        set -x
-
-        scripts_dir=$(realpath scripts)
-        export PATH="$scripts_dir:$PATH"
-
-        line_confirmed_elements.py \
-            -g {input.genome} \
-            -a {input.gff} \
-            -o {output.fasta} \
-            -t {output.tsv}
-        """
-
 
 rule dante_ltr:
     input:

@@ -122,12 +122,12 @@ dante_line_support_fraction: 0.5
 dante_line_min_group_alignments: 5
 dante_line_max_extension: 0
 dante_line_max_element_length: 8000
-# line_confirmed_elements (default true): also write the LINE elements whose BOTH
+# line_complete_elements (default true): also write the LINE elements whose BOTH
 #   ends were OBSERVED (poly-A tail + target-site duplication) to
 #   DANTE_LINE/LINE_confirmed_elements.{fasta,tsv}. EVALUATION OUTPUT ONLY —
 #   nothing consumes it, so the annotation is byte-identical either way. ~4 s on
 #   a 5.4 Gb genome. See docs/line_boundaries.md.
-line_confirmed_elements: true
+line_complete_elements: true
 # max_memory_gb (default 0 = auto-detect): memory available to this run, in GB —
 #   the allocation the scheduler granted (qsub -l mem=128gb), not a per-rule
 #   figure. Sets the default resources.mem_mb of every memory-gated rule, so one

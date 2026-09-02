@@ -232,6 +232,11 @@ unified annotation. **The RepeatMasker library is built from the cores only.** A
 inferred boundary that is slightly wrong costs one locus; a wrong consensus in
 the library mislabels every sequence it matches, genome-wide.
 
+A small minority of LINEs need no inference: where a recent insertion still
+carries both a poly-A tail and a target-site duplication, the element's extent is
+**measured**, and it is annotated as `Status=complete` with its true boundaries.
+Every other element carries `Status=inferred`.
+
 How the limits were measured, and which alternative approaches were tested and
 rejected, is in [docs/line_boundaries.md](docs/line_boundaries.md).
 

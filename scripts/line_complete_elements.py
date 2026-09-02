@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract LINE elements whose BOTH ends were directly observed.
+"""Mark LINE elements whose BOTH ends were directly observed as `complete`.
 
 WHAT THIS IS FOR. dante_line infers where a LINE ends by aligning the flanks of
 many copies. That inference is what the boundary guards exist to bound. A small
@@ -8,14 +8,20 @@ two marks target-primed reverse transcription leaves behind — a poly-A tail at
 3' end, and a target-site duplication (TSD), a short run of host DNA copied on
 both sides. Where both are found, the element's extent is MEASURED, not guessed.
 
-This script emits that subset, as sequences and as an evidence table.
+This script rewrites those elements in DANTE_LINE.gff3: their span is replaced
+with the MEASURED one, they are marked `Status=complete`, and the evidence (TSD
+sequence, poly-A length) is recorded as attributes. The sequences are also
+written to FASTA.
 
-IT FEEDS NOTHING. The output is deliberately not used by the RepeatMasker
-library, the unified annotation, or any downstream rule. It exists so the idea
-can be evaluated across many genomes before anything depends on it. Measured on
-two genomes, adding these elements to the LINE library changed masking by +28.2%
-and +0.7% respectively -- real, clean (0.7-0.9% contamination, better than the
-cores' own 8.8-11.4%), but far too genome-dependent to enable blindly.
+WHY THE SPAN IS REPLACED. The inferred boundary is substantially shorter than the
+measured one -- median +1,740 bp at the 5' end and +1,558 bp at the 3' end on
+Boechera, agreeing within 50 bp for essentially no element. Where the true extent
+is known there is no reason to keep an estimate, so the element is extended to it.
+
+THIS THEREFORE CHANGES THE ANNOTATION, for the small minority of elements that
+qualify (0.7-5% of loci). Every other element keeps its inferred boundary and is
+marked `Status=inferred`, so the two confidence classes are distinguishable
+downstream.
 
 WHY A CONFIRMED CALL IS TRUSTWORTHY. The two tests are statistically independent,
 so their error rates multiply rather than overlap. Measured by running the
@@ -114,8 +120,22 @@ def longest_run(seq: str, ch: str = "A", max_mismatch: int = 1):
     return best, at
 
 
+def is_tandem(seq: str, min_identity: float = 0.85) -> int:
+    """Shortest period at which ``seq`` is its own tandem repeat; 0 if none.
+
+    A genuine TSD is arbitrary host sequence. A periodic one came from inside a
+    tandem array, where a short direct repeat is found trivially.
+    """
+    n = len(seq)
+    for period in range(1, n // 2 + 1):
+        rep = (seq[:period] * (n // period + 1))[:n]
+        if sum(a == b for a, b in zip(seq, rep)) / n >= min_identity:
+            return period
+    return 0
+
+
 def scan(query: str, window: str, min_k: int = 8, max_k: int = 20,
-         mismatch_penalty: int = 2):
+         mismatch_penalty: int = 2, count_above: int = None):
     """Best direct-repeat match of ``query``'s prefix anywhere in ``window``.
 
     Score for a prefix of length k with m matches is m - penalty*(k-m), so a
@@ -142,7 +162,12 @@ def scan(query: str, window: str, min_k: int = 8, max_k: int = 20,
         best = np.where(upd, sc, best)
         best_k = np.where(upd, k, best_k)
     p = int(np.argmax(best))
-    return int(best[p]), p, int(best_k[p])
+    # How many places in the window match this well? A target-site duplication
+    # is a UNIQUE pair; a query taken from inside a tandem array matches at every
+    # period, and decoy windows drawn from elsewhere in the genome will not
+    # contain that array, so the null test alone does not catch it.
+    n_above = int((best > count_above).sum()) if count_above is not None else 0
+    return int(best[p]), p, int(best_k[p]), n_above
 
 
 def locus_seed(seqname: str, start: int, end: int) -> int:
@@ -243,8 +268,18 @@ def confirm(el, fa, args):
     win = reg[w0:c5]
     if len(query) < args.min_tsd or len(win) < 100:
         return None
-    score, pos, klen = scan(query, win, args.min_tsd, args.max_tsd)
-    if score <= floor_for(args.tsd_window):
+    fl = floor_for(args.tsd_window)
+    score, pos, klen, n_above = scan(query, win, args.min_tsd, args.max_tsd,
+                                     count_above=fl)
+    if score <= fl:
+        return None
+    # A genuine duplication is unique in its window.
+    if n_above > args.max_tsd_hits:
+        return None
+    # ...and is not itself a tandem repeat. Caught a telomeric CCCTAAA array
+    # being read as a 16 bp TSD, which then displaced 5 kb of real telomere
+    # annotation downstream.
+    if is_tandem(query[:klen]):
         return None
 
     rng = random.Random(locus_seed(seq, cs, ce))
@@ -258,8 +293,15 @@ def confirm(el, fa, args):
     elem = reg[w0 + pos:tail_end]
     if len(elem) < args.min_length or len(elem) > args.max_length:
         return None
+    # measured span back in GENOME coordinates (the work above is in element
+    # orientation, so the two extensions swap on the minus strand)
+    if strand == "+":
+        g_start, g_end = cs - ext5, ce + ext3
+    else:
+        g_start, g_end = cs - ext3, ce + ext5
     return dict(id=eid, seq=seq, strand=strand, pattern=ptype,
                 core_start=cs, core_end=ce, core_len=ce - cs + 1,
+                start=max(1, g_start), end=g_end,
                 ext5=ext5, ext3=ext3, elem_len=len(elem),
                 tsd_len=klen, tsd_score=score, tsd_seq=query[:klen],
                 polya_len=run, sequence=elem)
@@ -273,7 +315,10 @@ def main():
     ap.add_argument("-g", "--genome", required=True, help="genome FASTA (needs .fai)")
     ap.add_argument("-a", "--gff", required=True, help="DANTE_LINE.gff3")
     ap.add_argument("-o", "--out-fasta", required=True)
-    ap.add_argument("-t", "--out-tsv", required=True)
+    ap.add_argument("--annotate-gff3", action="store_true",
+                    help="rewrite the input GFF3: extend confirmed elements to "
+                         "their measured span, mark every element Status=complete "
+                         "or Status=inferred, and record the evidence.")
     ap.add_argument("--tail-search", type=int, default=2500,
                     help="how far past the core to look for the poly-A tail (bp)")
     ap.add_argument("--min-tail", type=int, default=15,
@@ -285,6 +330,10 @@ def main():
     ap.add_argument("--min-tsd", type=int, default=8)
     ap.add_argument("--max-tsd", type=int, default=20)
     ap.add_argument("--decoys", type=int, default=6)
+    ap.add_argument("--max-tsd-hits", type=int, default=3,
+                    help="reject a candidate TSD matching more than this many "
+                         "places in its window; a real duplication is unique, a "
+                         "query from inside a tandem array is not")
     ap.add_argument("--min-length", type=int, default=1000)
     ap.add_argument("--max-length", type=int, default=7500,
                     help="a plant LINE is 4-7 kb; longer is not credible")
@@ -308,24 +357,59 @@ def main():
     print(f"both ends observed: {len(rows)} ({100 * len(rows) / n:.1f}%)" if n
           else "both ends observed: 0")
 
-    cols = ["id", "seq", "strand", "pattern", "core_start", "core_end", "core_len",
-            "ext5", "ext3", "elem_len", "tsd_len", "tsd_score", "tsd_seq", "polya_len"]
-    tmp = args.out_tsv + ".tmp"
-    with open(tmp, "w") as fh:
-        fh.write("\t".join(cols) + "\n")
-        for r in rows:
-            fh.write("\t".join(str(r[c]) for c in cols) + "\n")
-    os.replace(tmp, args.out_tsv)
-
     tmp = args.out_fasta + ".tmp"
     with open(tmp, "w") as fh:
         for r in rows:
-            # RepeatMasker header convention, so the file is directly usable as a
-            # library by anyone evaluating it.
-            fh.write(f">{r['id']}_confirmed#Class_I/LINE\n{r['sequence']}\n")
+            # RepeatMasker header convention, so the file is usable as a library
+            # directly by anyone evaluating it.
+            fh.write(f">{r['id']}_complete#Class_I/LINE\n{r['sequence']}\n")
     os.replace(tmp, args.out_fasta)
-    print(f"wrote {args.out_fasta} and {args.out_tsv}")
+    print(f"wrote {args.out_fasta}")
+
+    if args.annotate_gff3:
+        annotate_gff3(args.gff, rows)
+        print(f"marked {len(rows)} elements Status=complete in {args.gff}")
     return 0
+
+
+def annotate_gff3(gff: str, rows) -> None:
+    """Rewrite DANTE_LINE.gff3: extend confirmed elements to their measured span.
+
+    Every LINE_element gains a `Status` attribute so the two confidence classes
+    are distinguishable; confirmed ones additionally carry the evidence and take
+    the measured coordinates. Rewritten atomically (.tmp + os.replace) so a
+    killed run cannot leave a truncated GFF3 that a later step then trusts.
+    """
+    by_id = {r["id"]: r for r in rows}
+    out = []
+    with open(gff) as fh:
+        for line in fh:
+            if line.startswith("#"):
+                out.append(line)
+                continue
+            f = line.rstrip("\n").split("\t")
+            if len(f) < 9 or f[2] != "LINE_element":
+                out.append(line)
+                continue
+            attrs = dict(kv.split("=", 1) for kv in f[8].rstrip(";").split(";") if "=" in kv)
+            # strip any marks from a previous run so re-running is idempotent
+            for k in ("Status", "TSD", "PolyA_length"):
+                attrs.pop(k, None)
+            r = by_id.get(attrs.get("ID"))
+            if r is None:
+                attrs["Status"] = "inferred"
+            else:
+                f[3], f[4] = str(r["start"]), str(r["end"])
+                attrs["Status"] = "complete"
+                attrs["TSD"] = r["tsd_seq"]
+                attrs["PolyA_length"] = str(r["polya_len"])
+            f[8] = ";".join(f"{k}={v}" for k, v in attrs.items())
+            out.append("\t".join(f) + "\n")
+
+    tmp = gff + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.writelines(out)
+    os.replace(tmp, gff)
 
 
 if __name__ == "__main__":

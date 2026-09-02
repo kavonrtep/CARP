@@ -2,40 +2,54 @@
 
 ## Unreleased
 
-- **New rule `line_confirmed_elements` and config key of the same name
-  (default `true`): the LINE elements whose BOTH ends were observed, not
-  inferred.** Writes `DANTE_LINE/LINE_confirmed_elements.fasta` (RepeatMasker
-  header convention, `name#Class_I/LINE`, directly usable as a library) and
-  `DANTE_LINE/LINE_confirmed_elements.tsv` (per-element evidence: TSD sequence,
-  length and score, poly-A length, 5'/3' extensions, element length). A
-  confirmed element carries a poly-A tail **and** a target-site duplication —
-  the two marks target-primed reverse transcription leaves behind — so its
-  extent is measured rather than reasoned from flank alignment. Yield is
-  **0.7–5.0 % of LINE loci** depending on how recently LINEs were active; cost
-  is **3.7 s for 11,900 loci** on a 5.4 Gb genome. `false` skips the rule. See
-  [`docs/configuration.md`](docs/configuration.md) and
-  [`docs/line_boundaries.md`](docs/line_boundaries.md).
-- **These two files FEED NOTHING — they are an evaluation output.** No rule
-  consumes them: not the RepeatMasker library, not the unified annotation. The
-  annotation is **byte-identical** whether the rule runs or not, and a test
-  enforces it by parsing the Snakefile for any rule taking them as input. The
-  point is to accumulate evidence across many genomes before anything depends
-  on them. Not wired into the LINE library because the gain is too
-  genome-dependent to enable blindly: adding the confirmed elements moved
-  masking **+28.2 %** on Boechera stricta (25 confirmed elements) but **+0.7 %**
-  on GCA_986270105 (250 confirmed) — clean in both (new masking 0.7–0.9 %
-  contaminated, against the cores' own 8.8–11.4 %).
-- **A confirmed call is right ~97 % of the time.** The poly-A and TSD tests are
-  statistically independent, so their error rates multiply: 2.8 % spurious
-  poly-A × 2.6 % chance TSD = **0.073 % predicted, 0.073 % observed** over 2,743
-  loci in 4 genomes.
-- **Deterministic by construction.** Decoy windows are seeded per locus from
-  `zlib.crc32` of the coordinates — never a global RNG, never `hash()` (Python
-  randomises that per process) — so the output cannot depend on locus order,
-  thread count or `PYTHONHASHSEED`. Both files are in `manifest.py::OUTPUTS`, so
-  the run-to-run determinism gate covers them.
-- **New test** `tests/test_line_confirmed_elements.py` (14 cases), wired into
-  the `unit` CI job.
+- **LINE elements with both ends directly observed are now annotated as
+  `Status=complete`, with their measured boundaries.** `dante_line` normally
+  *infers* where an element ends by aligning many copies' flanks. Where a recent
+  insertion still carries both a **poly-A tail** and a **target-site duplication
+  (TSD)** — the two marks target-primed reverse transcription leaves behind — the
+  extent is measured instead. Those elements are marked `Status=complete` in
+  `DANTE_LINE.gff3`, **their inferred span is replaced with the measured one**,
+  and the evidence is recorded as `TSD=` and `PolyA_length=` attributes. Every
+  other element carries `Status=inferred`. Sequences are also written to
+  `DANTE_LINE/LINE_complete_elements.fasta` in RepeatMasker header convention, so
+  the file is usable as a library directly. New config key
+  `line_complete_elements` (default `true`); ~4 s on a 5.4 Gb genome. See
+  [docs/configuration.md](docs/configuration.md) and
+  [docs/line_boundaries.md](docs/line_boundaries.md).
+
+- **This changes the annotation for the 0.7–5 % of elements that qualify.** The
+  measured boundary is much longer than the inferred one — median **+1,740 bp**
+  at the 5′ end and **+1,558 bp** at the 3′ end — which is why the span is
+  replaced rather than merely labelled. Measured at the unified-annotation level
+  on two genomes: `Class_I/LINE` **+55,889 bp** on one (32 elements complete,
+  total annotation +0.028 %, essentially all of it from previously unannotated
+  sequence, displacement limited to 338 bp of `Low_complexity` and less
+  elsewhere) and **no change at all** on the other, where nothing qualified.
+
+- **A confirmed call is right about 97 % of the time.** The poly-A and TSD tests
+  are statistically independent, so their error rates multiply rather than
+  overlap: measured by running the identical chain on the element's 5′ side,
+  where a LINE has no tail so any hit is spurious by construction, 2.8 % spurious
+  poly-A × 2.6 % chance TSD predicts 0.073 %, and 0.073 % was observed over 2,743
+  loci in four genomes.
+
+- **Two guards reject repeat-derived TSDs.** A candidate is discarded if it is
+  itself a tandem repeat, or if it matches more than `--max-tsd-hits` places in
+  its search window: a real duplication is unique, one taken from inside a tandem
+  array is not, and decoy windows drawn from distant loci cannot catch it.
+  Without them the plant telomere repeat (`CCCTAAA`) was read as a 16 bp TSD on
+  one genome, and the resulting element displaced ~5 kb of genuine telomere
+  annotation. The guards remove 2.8 % of otherwise-confirmed elements and leave
+  no periodic TSD in 884 across four genomes.
+
+- **Determinism:** the decoy windows that calibrate each TSD are seeded per locus
+  from `zlib.crc32` of its coordinates — never a global RNG, never `hash()`
+  (which Python randomises per process) — so the output cannot depend on locus
+  order, thread count or `PYTHONHASHSEED`. `LINE_complete_elements.fasta` is in
+  `manifest.py::OUTPUTS`, so the run-to-run determinism gate covers it.
+
+- New test `tests/test_line_complete_elements.py` (21 cases), wired into the
+  `unit` CI job.
 
 ## 1.7.0rc2
 

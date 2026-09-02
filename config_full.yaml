@@ -156,18 +156,14 @@ dante_line_max_extension: 0
 # Whole-element cap in bp (core + both flanks); the core is never trimmed.
 dante_line_max_element_length: 8000
 
-# EVALUATION OUTPUT — IT FEEDS NOTHING. With line_confirmed_elements: true
+# EVALUATION OUTPUT — IT FEEDS NOTHING. With line_complete_elements: true
 #   (default) the run writes the subset of LINE elements whose BOTH ends were
 #   directly OBSERVED rather than inferred from flank alignment — a poly-A tail
 #   plus a target-site duplication (TSD), the two marks target-primed reverse
 #   transcription leaves behind — to:
-#     DANTE_LINE/LINE_confirmed_elements.fasta  (RepeatMasker headers,
+#     DANTE_LINE/LINE_complete_elements.fasta  (RepeatMasker headers,
 #                                                name#Class_I/LINE — usable
 #                                                as a library as-is)
-#     DANTE_LINE/LINE_confirmed_elements.tsv    (per-element evidence: TSD
-#                                                sequence/length/score, poly-A
-#                                                length, extensions, element
-#                                                length)
 #   Nothing consumes them: not the RepeatMasker library, not the unified
 #   annotation, not any downstream rule. THE ANNOTATION IS BYTE-IDENTICAL
 #   WHETHER THIS IS ON OR OFF. They exist so the idea can be judged across many
@@ -184,7 +180,7 @@ dante_line_max_element_length: 8000
 #   were active; ancient, decayed populations (wheat) yield least.
 #   COST: negligible — ~4 s on a 5.4 Gb genome with 11,900 LINE loci.
 #   See docs/line_boundaries.md for the derivation.
-line_confirmed_elements: true
+line_complete_elements: true
 
 # Memory available to this run, in GB — the scheduler's allocation, not a
 # per-rule figure. 0 = auto-detect (AGENT_MEMORY, then the scheduler environment
