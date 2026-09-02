@@ -61,8 +61,38 @@ class loses ~1% of itself (TRC_33 1.2%, rDNA 18S 0.8%), which is what boundary
 adjustment at contact points looks like, rather than a LINE consuming an array.
 Total annotation moves +0.14% and LINE moves +0.10 points of genome.
 
-**The one thing worth a look is the rDNA.** A LINE extending into 45S rDNA is
-not biologically expected, and 11 kb of it survives the gate. It may be genuine
-contact at array edges — LINEs do insert near rDNA — but it is the least
-plausible of the displaced classes and the reason to look before shipping,
-rather than a reason not to ship.
+## The rDNA question — checked, and it is benign
+
+The 11 kb of displaced 45S rDNA was the one implausible-looking item. It is not
+what it looked like.
+
+**Every base pair of it is at an array edge.** Of 11,085 bp of overlap between
+gated LINE features and rc1 rDNA arrays, 100% lies within 100 bp of an array end
+(distance 0 for every large case) and **0 bp is more than 1 kb inside an array**.
+
+And the affected "arrays" are not arrays:
+
+| rc1 rDNA array size | arrays | total bp | bp lost to LINE | % lost |
+|---|---:|---:|---:|---:|
+| under 200 bp | 352 | 21,164 | **9,511** | 44.9% |
+| 200 bp – 1 kb | 462 | 309,990 | 408 | 0.13% |
+| 1 – 10 kb | 799 | 3,898,575 | 1,166 | 0.03% |
+| **over 10 kb (the real arrays)** | 5 | 55,277 | **0** | **0.00%** |
+
+86% of the loss comes from rDNA fragments **under 200 bp** — isolated 44–585 bp
+calls, of which the largest single overlap is 585 bp. All five genuine rDNA
+arrays (10.5–11.9 kb) lost **exactly zero**.
+
+So no LINE is extending into ribosomal DNA. LINE features are absorbing short,
+isolated rDNA-labelled fragments that sit at their own boundaries. A 46 bp "rDNA"
+call is a RepeatMasker hit to the rDNA library, not a ribosomal gene, and folding
+it into an adjacent LINE is at worst neutral. (Stated as observation: the
+fragments' small size and isolation are measured, their spuriousness is
+inferred.)
+
+## Verdict
+
+The gated bounds are safe to ship on this evidence. The control genome is a
+clean no-op; the sensitive genome gains 0.10 points of genome as LINE, 78% of it
+from previously unannotated sequence, and the displacement is confined to array
+edges and short fragments with the real satellite and rDNA arrays untouched.
