@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+- **New rule `line_confirmed_elements` and config key of the same name
+  (default `true`): the LINE elements whose BOTH ends were observed, not
+  inferred.** Writes `DANTE_LINE/LINE_confirmed_elements.fasta` (RepeatMasker
+  header convention, `name#Class_I/LINE`, directly usable as a library) and
+  `DANTE_LINE/LINE_confirmed_elements.tsv` (per-element evidence: TSD sequence,
+  length and score, poly-A length, 5'/3' extensions, element length). A
+  confirmed element carries a poly-A tail **and** a target-site duplication —
+  the two marks target-primed reverse transcription leaves behind — so its
+  extent is measured rather than reasoned from flank alignment. Yield is
+  **0.7–5.0 % of LINE loci** depending on how recently LINEs were active; cost
+  is **3.7 s for 11,900 loci** on a 5.4 Gb genome. `false` skips the rule. See
+  [`docs/configuration.md`](docs/configuration.md) and
+  [`docs/line_boundaries.md`](docs/line_boundaries.md).
+- **These two files FEED NOTHING — they are an evaluation output.** No rule
+  consumes them: not the RepeatMasker library, not the unified annotation. The
+  annotation is **byte-identical** whether the rule runs or not, and a test
+  enforces it by parsing the Snakefile for any rule taking them as input. The
+  point is to accumulate evidence across many genomes before anything depends
+  on them. Not wired into the LINE library because the gain is too
+  genome-dependent to enable blindly: adding the confirmed elements moved
+  masking **+28.2 %** on Boechera stricta (25 confirmed elements) but **+0.7 %**
+  on GCA_986270105 (250 confirmed) — clean in both (new masking 0.7–0.9 %
+  contaminated, against the cores' own 8.8–11.4 %).
+- **A confirmed call is right ~97 % of the time.** The poly-A and TSD tests are
+  statistically independent, so their error rates multiply: 2.8 % spurious
+  poly-A × 2.6 % chance TSD = **0.073 % predicted, 0.073 % observed** over 2,743
+  loci in 4 genomes.
+- **Deterministic by construction.** Decoy windows are seeded per locus from
+  `zlib.crc32` of the coordinates — never a global RNG, never `hash()` (Python
+  randomises that per process) — so the output cannot depend on locus order,
+  thread count or `PYTHONHASHSEED`. Both files are in `manifest.py::OUTPUTS`, so
+  the run-to-run determinism gate covers them.
+- **New test** `tests/test_line_confirmed_elements.py` (14 cases), wired into
+  the `unit` CI job.
+
 ## 1.7.0rc2
 
 - **The DANTE_LINE flank bounds are now measured, not reasoned from element
