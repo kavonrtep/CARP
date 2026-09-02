@@ -1,7 +1,0 @@
-### wheat tail5000   loci=300
-  poly-A tail (>=15 A within 5000 bp): 12 (4.0% of loci)
-  TSD match length at those loci (score == matched length when perfect):
-     median 5   p75 6   p90 8   max 17
-  clearing the 2100 bp chance floor (score > 10): 2/12 (16.7% of tailed loci)
-  beating every decoy: 3/12 (25.0%)
-  >>> END-TO-END YIELD (tail AND TSD above floor): 0.7% of all LINE loci

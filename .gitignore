@@ -9,3 +9,22 @@
 # Upstream tool clones for scaling analysis (not part of the pipeline)
 scratch/
 carp-example-report/
+
+# tmp/ is a scratch area for analysis harnesses. Keep the small things that are
+# worth reading later -- the scripts (*.py, *.sh), their write-ups (*.md), env
+# specs (*.yaml) and the ground-truth tables (gt_*.tsv) -- and never the run
+# outputs they generate. A single `git add -f tmp/<dir>` once swept 176 MB of
+# intermediate FASTAs and alignment tables into the repo; these rules mean a
+# plain `git add tmp/...` cannot repeat that.
+tmp/**/*.fasta
+tmp/**/*.fa
+tmp/**/*.fasta.*
+tmp/**/*.gff3
+tmp/**/*.bed
+tmp/**/*.tmp
+tmp/**/*_alignment.tsv
+tmp/**/*_aln_length.tsv
+tmp/**/*.log
+tmp/**/*.txt
+tmp/**/results/
+tmp/**/conda_env/
