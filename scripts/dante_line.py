@@ -1420,7 +1420,8 @@ def run_mmseqs_clustering(input_fasta: str, output_dir: Path, threads: int = 1) 
 
 def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments: int = 3,
                          verbose: bool = False, max_group_size: Optional[int] = None,
-                         support_fraction: float = 0.0, min_group_alignments: int = 0) -> None:
+                         support_fraction: float = 0.0, min_group_alignments: int = 0,
+                         prefilter_identity: float = 0.8) -> None:
     """Run all-vs-all alignment analysis on prime sequences.
 
     For 5' sequences: use --end 3 (3' end fixed, analyze 5' similarity)
@@ -1482,7 +1483,8 @@ def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments:
                 score_threshold=20,
                 threads=threads,
                 verbose=verbose,
-                max_group_size=max_group_size
+                max_group_size=max_group_size,
+                prefilter_identity=prefilter_identity
             )
             print(f"    → {output_name}")
         except Exception as e:
@@ -1560,6 +1562,18 @@ Examples:
                        help='Groups with fewer flank alignments than this get no extension at '
                             'all: too few partners to place a boundary, so the element keeps '
                             'its domain core. 0 disables (default: 5)')
+    parser.add_argument('--prefilter-identity', type=float, default=0.8,
+                       help='Minimum identity for the mmseqs prefilter that decides which '
+                            'flank PAIRS are aligned at all. It compares the 30 nt adjacent '
+                            'to the domain core. This gates the whole extension layer: at the '
+                            'default 0.8 only 0.2-16%% of possible pairs are admitted, and most '
+                            'groups then fall below --min-group-alignments and get no extension. '
+                            'Measured on Boechera with families defined from the core, 0.8 admits '
+                            'only ~10%% of genuine same-family pairs (their median identity over '
+                            'that window is 0.63). LOWER VALUES ADMIT MORE PAIRS AND PRODUCE MORE '
+                            'AND LONGER EXTENSIONS -- the same lever that produced chimeric '
+                            'consensi -- so change it only against measured boundary purity '
+                            '(default: 0.8)')
     parser.add_argument('--max-extension', type=int, default=0,
                        help='SYMMETRIC ESCAPE HATCH: a value > 0 caps BOTH sides at that many '
                             'bp, overriding the per-side bounds. At the default 0 the bounds '
@@ -1598,6 +1612,8 @@ Examples:
     args = parser.parse_args()
     if args.max_group_size is not None and args.max_group_size < 2:
         parser.error("--max-group-size must be >= 2")
+    if not 0.0 <= args.prefilter_identity <= 1.0:
+        parser.error("--prefilter-identity must be between 0 and 1")
     if not 0.0 <= args.support_fraction <= 1.0:
         parser.error("--support-fraction must be between 0 and 1")
     for name, value in (("--min-group-alignments", args.min_group_alignments),
@@ -1718,7 +1734,8 @@ Examples:
                              min_num_alignments=args.min_num_alignments,
                              verbose=args.verbose, max_group_size=args.max_group_size,
                              support_fraction=args.support_fraction,
-                             min_group_alignments=args.min_group_alignments)
+                             min_group_alignments=args.min_group_alignments,
+                             prefilter_identity=args.prefilter_identity)
 
         # Load alignment lengths and create LINE elements
         print("\nCreating LINE_element features from alignment data...")
