@@ -4,7 +4,8 @@
 
 - **The DANTE_LINE flank bounds are now measured, not reasoned from element
   structure.** `max_extension_per_side` for `Class_I/LINE` in
-  `classification_vocabulary.yaml`: **5' 2000 → 3400**, **3' 800 → 2500**.
+  `classification_vocabulary.yaml`: **5' 2000 → 3400**, **3' 800 → 2500** —
+  granted to an element whose flank inference converged, see the gate below.
   LINE was the one entry in that table that was structural rather than empirical
   (1.7.0rc1, "no ground-truth LINE boundary set exists") and it was too tight.
   There is one now: **218 LINE loci across 7 genomes where both ends were
@@ -28,19 +29,45 @@
   **backstop only**. LINE only — TIR stays on per-side bounds and is
   deliberately unchanged. `cap_extensions()` gained a `max_core_to_3prime_end`
   parameter, so existing callers (`dante_tir_fallback`) are unaffected.
+- **Those looser bounds are granted only where the flank inference actually
+  converged.** New `unconverged_max_extension_per_side` table in
+  `classification_vocabulary.yaml` (`Class_I/LINE`: **5' 2000**, **3' 800** —
+  deliberately the 1.7.0rc1 values). A side whose raw inferred extension is
+  **within** its allowance stopped on evidence and keeps its full length; a side
+  that **exceeds** the allowance never found a boundary, and falls back to the
+  conservative bound. An end-to-end check on GCA_973357735.1 is why: the raw 5'
+  inference there has median **7,613 bp against a 10,000 bp search window**, so
+  for **63 % of its 550 elements** the alignment ran out of window rather than
+  finding an end. The cap was the only thing setting element length, so raising it
+  merely made elements longer — total extension **+74.7 %**, median element 4,960
+  → **7,429 bp**, and **322 of 550** elements over 7 kb against a documented plant
+  LINE range of 4–7 kb. With the gate: **1,896,685 bp** total, median **6,033 bp**,
+  **22** elements over 7 kb. On a control genome whose inference does converge the
+  gate changes nothing — byte-identical output. `cap_extensions()` gained
+  `unconverged_5prime` / `unconverged_3prime`, resolved by
+  `classification.unconverged_max_extension_for_class()`. LINE only — TIR is
+  deliberately untouched.
+- **Two bounds bugs fixed while implementing it.** `cap_extensions()` conflated
+  "no bound configured" with "a bound of zero", letting a core longer than the
+  span escape unclamped instead of yielding no extension; and the fallback could
+  **loosen** a bound (a core past the span has an allowance of 0, below the 800
+  fallback), so the clamp now takes the tighter of the two.
 - **A non-zero `dante_line_max_extension` is now a complete manual override.** It
-  disables the per-side bounds **and** the span bound; previously a vocabulary
-  bound could still tighten a value the user had set explicitly. The default is
-  unchanged (`0` = use the vocabulary). See
+  disables the per-side bounds, the span bound **and** the convergence gate;
+  previously a vocabulary bound could still tighten a value the user had set
+  explicitly. The default is unchanged (`0` = use the vocabulary). See
   [`docs/configuration.md`](docs/configuration.md).
-- **What users see: LINE elements get longer** in `DANTE_LINE.gff3` and in
+- **What users see: LINE elements get longer where the inference converged**
+  (where it did not they stay on the 1.7.0rc1 bounds), in `DANTE_LINE.gff3` and in
   `Repeat_Annotation_Unified.gff3`. The RepeatMasker library is **unaffected**:
   it is still built from the domain core only (`dante_line_library_source: core`,
   1.7.0rc1), so the masking-layer numbers do not move.
-- **New test** `TestCoreToThreePrimeSpan` in
-  `tests/test_superfamily_extension_bounds.py` (now 26 cases): the span bound
+- **New tests** `TestCoreToThreePrimeSpan` and `TestConvergenceGate` in
+  `tests/test_superfamily_extension_bounds.py` (now 34 cases): the span bound
   applying after the per-side caps, the core never being trimmed by it, the
-  longest-prefix lookup, and the manual override disabling both bounds.
+  longest-prefix lookup, a converged side keeping its full length against a
+  runaway side falling back, the fallback never loosening a bound, and the manual
+  override disabling all three bounds.
 
 ## 1.7.0rc1
 

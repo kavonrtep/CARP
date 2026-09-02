@@ -107,16 +107,37 @@ dante_line_support_fraction: 0.5
 dante_line_min_group_alignments: 5
 # dante_line_max_extension (default 0): symmetric ESCAPE HATCH — a value > 0 caps
 #   BOTH sides of the LINE flank extension at that many bp, and is a COMPLETE
-#   manual override: it disables both the per-side bounds and the span bound
-#   below, so what you set is never quietly tightened by a vocabulary value.
-#   At 0 the bounds come from two Class_I/LINE tables in
+#   manual override: it disables the per-side bounds, the span bound AND the
+#   convergence gate below, so what you set is never quietly tightened by a
+#   vocabulary value. At 0 the bounds come from three Class_I/LINE tables in
 #   classification_vocabulary.yaml (not config keys):
-#     max_extension_per_side  = 3400 bp 5', 2500 bp 3'
+#     max_extension_per_side  = 3400 bp 5', 2500 bp 3' — the allowance for an
+#                               extension the flank alignment CONVERGED on.
 #     max_core_to_3prime_end  = 4500 bp on (domain core + 3' extension), i.e.
 #                               the distance from the START of the domain core
 #                               to the element's 3' end; applied after the
 #                               per-side caps. LINE only — TIR is deliberately
 #                               not covered and stays on per-side bounds.
+#     unconverged_max_extension_per_side
+#                             = 2000 bp 5', 800 bp 3' — used INSTEAD of the
+#                               allowance for a side whose inference never found
+#                               a boundary. LINE only, TIR not covered.
+#   CONVERGED vs NOT. dante_line infers an element's length by aligning the
+#   flanks of many copies. If that alignment stops on its own, inside the search
+#   window, the evidence chose a length: a raw extension within its allowance is
+#   trusted and kept in full. If the raw extension EXCEEDS the allowance the
+#   alignment ran to the window edge — the "length" is just where we stopped
+#   looking — so the element falls back to unconverged_max_extension_per_side
+#   (the conservative 1.7.0rc1 values). The fallback can never LOOSEN a bound:
+#   the clamp takes the tighter of the fallback and the allowance, since a core
+#   already past the 4500 bp span has an allowance of 0.
+#   MEASURED on GCA_973357735.1 (550 LINE elements): the raw 5' inference has
+#   median 7,613 bp against a 10,000 bp window — 63% never converged. Giving
+#   those the converged allowance raised total extension 74.7%, moved the median
+#   element from 4,960 to 7,429 bp and put 322 of 550 over 7 kb, above the
+#   documented 4-7 kb plant LINE range. With the gate: median 6,033 bp, 22 over
+#   7 kb. On a genome whose inference does converge the gate changes nothing
+#   (byte-identical result).
 #   The 3' per-side value is a BACKSTOP only (observed max 3' extension 2338 bp,
 #   p99 2180, so it never binds); the span is the real 3' constraint. Reason:
 #   the 3' extension is not a biological distance, it is the remainder after

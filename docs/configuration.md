@@ -130,23 +130,61 @@ them; `dante_line_max_extension` does **not** apply here.
 | `dante_tir_fallback_library_source` | `core` | The same choice for the DANTE_TIR fallback: `core` seeds the library from the TPase anchor span only. The fallback exists to cover TIR elements where DANTE_TIR found no complete structural element but DANTE still reports a TPase, so it is the least reliable layer in the pipeline and 85 % of its base pairs are inferred flank. `element` restores the previous behaviour. |
 | `dante_line_support_fraction` | `0.5` | Fraction of a LINE group's flank alignments that must reach the extension kept for that group. `dante_line` sets an element's boundary to the *k*-th largest of its pairwise flank alignments; `k` used to be `--min-num-alignments` (3) regardless of group size, which is satisfiable by construction — a group with exactly three alignments has its third-largest **equal to its minimum**, so nothing is filtered. `k` is now `max(min_num_alignments, ceil(support_fraction × n_alignments))`, so a handful of near-identical outlier pairs cannot set the boundary for a large group. Measured on a wheat run: `LINE_group_2147` took a 5,968 bp extension from 3 of its 51 partners, where the 25th percentile of the same group was 751 bp. `0` restores the previous behaviour. Must be in [0, 1]. |
 | `dante_line_min_group_alignments` | `5` | LINE groups with fewer flank alignments than this get **no** extension — too few partners to place a boundary, so the element keeps its ENDO/RT domain core. Most runaway extensions came from groups of 3–4 members. `0` disables. |
-| `dante_line_max_extension` | `0` (use the measured bounds) | Symmetric **escape hatch** on the DANTE_LINE flank extension: any value > 0 caps **both** sides at that many bp. It is a **complete manual override** — it disables the per-side bounds *and* the core→3' end span bound, so a value you set is never quietly tightened by a vocabulary number. At the default `0` the bounds are read from `classification_vocabulary.yaml` and are **measured, not guessed** — 3400 bp 5', a 2500 bp 3' backstop, and a 4500 bp cap on (domain core + 3' extension); see **LINE flank bounds are not config keys** below the table. Why a bound at all: the uncapped inference can reach `--flank` (10,000) per side, producing 16–22 kb "LINE" consensi; no plant LINE is that long. The bounds are deliberately set to fail toward truncation: DANTE_LINE returns elements whose boundaries are inferred, not observed, so a **truncated** consensus is the safe failure — it still masks its own family — whereas an over-extended one mislabels whatever its tail matches across the entire genome. Extensions are trimmed, not dropped; the domain core is always kept. This key reaches **DANTE_LINE only**; the DANTE_TIR fallback has no equivalent config key and always reads its per-superfamily bounds from `max_extension_per_side` (see [DANTE_TIR](#dante_tir)). |
+| `dante_line_max_extension` | `0` (use the measured bounds) | Symmetric **escape hatch** on the DANTE_LINE flank extension: any value > 0 caps **both** sides at that many bp. It is a **complete manual override** — it disables the per-side bounds, the core→3' end span bound, *and* the unconverged-inference gate, so a value you set is never quietly tightened by a vocabulary number. At the default `0` the bounds are read from `classification_vocabulary.yaml` and are **measured, not guessed** — 3400 bp 5', a 2500 bp 3' backstop, a 4500 bp cap on (domain core + 3' extension), and a tighter 2000 bp 5' / 800 bp 3' fallback for an element whose flank inference never converged; see **LINE flank bounds are not config keys** below the table. Why a bound at all: the uncapped inference can reach `--flank` (10,000) per side, producing 16–22 kb "LINE" consensi; no plant LINE is that long. The bounds are deliberately set to fail toward truncation: DANTE_LINE returns elements whose boundaries are inferred, not observed, so a **truncated** consensus is the safe failure — it still masks its own family — whereas an over-extended one mislabels whatever its tail matches across the entire genome. Extensions are trimmed, not dropped; the domain core is always kept. This key reaches **DANTE_LINE only**; the DANTE_TIR fallback has no equivalent config key and always reads its per-superfamily bounds from `max_extension_per_side` (see [DANTE_TIR](#dante_tir)). |
 | `dante_line_max_element_length` | `8000` | Cap in bp on the whole LINE element (core + both extensions). The equivalent bound for the DANTE_TIR fallback is not a config key: it is read per TIR superfamily from `max_consensus_length` in `classification_vocabulary.yaml`, because CACTA genuinely reaches ~20 kb where `Tc1_Mariner` cannot. Applied last, after the per-side bounds (`dante_line_max_extension` / `max_extension_per_side`) and the `max_core_to_3prime_end` span bound; when the two sides together exceed the remaining budget it is split evenly, except that a side asking for less than its half keeps what it asked for and yields the rest. A core already at or over this length gets no extension and is **never itself trimmed**. Full-length plant LINEs run 4–7 kb around an ENDO+RT core of ~2.1 kb. `0` disables. |
 
 **LINE flank bounds are not config keys.** At the default `dante_line_max_extension:
-0`, how far `dante_line` may extend an ENDO/RT domain core is read from two
+0`, how far `dante_line` may extend an ENDO/RT domain core is read from three
 `Class_I/LINE` tables in `classification_vocabulary.yaml`:
 
-- `max_extension_per_side` — **3400 bp 5'**, **2500 bp 3'**, bounding each flank
-  separately.
+- `max_extension_per_side` — **3400 bp 5'**, **2500 bp 3'**, the allowance for an
+  extension the flank alignment converged on, bounding each flank separately.
 - `max_core_to_3prime_end` — **4500 bp**, bounding (domain core length + 3'
   extension), i.e. the distance from the **start** of the domain core to the
   element's 3' end. Applied *after* the per-side caps. **LINE only** — TIR is
   deliberately not covered by this table and stays on per-side bounds.
+- `unconverged_max_extension_per_side` — **2000 bp 5'**, **800 bp 3'**, used
+  *instead* of the allowance above for a side whose flank inference never found a
+  boundary. See **Converged vs unconverged extensions** below. **LINE only** —
+  TIR is deliberately not covered by this table either.
+
+Setting `dante_line_max_extension` above `0` disables all three; it is a complete
+manual override.
 
 The 3' per-side number is a **backstop only**: the observed maximum 3' extension is
 2338 bp (p99 2180), so it never binds in practice; it exists so a pathological
 inference is still bounded. The span bound is what actually constrains the 3' side.
+
+**Converged vs unconverged extensions.** `dante_line` infers how far an element
+extends by aligning the flanking sequence of many copies. Sometimes that alignment
+stops on its own, well inside the search window — the evidence chose a length.
+Sometimes it runs until it hits the window edge, and the "length" is just wherever
+we stopped looking. These are treated as two confidence classes:
+
+- Raw inferred extension **within** its allowance (`max_extension_per_side`, and
+  for the 3' side also `max_core_to_3prime_end`) → **converged**: the alignment
+  stopped on evidence, so the full inferred length is kept.
+- Raw inferred extension **exceeding** that allowance → **not converged**: no
+  boundary was found, so the element falls back to
+  `unconverged_max_extension_per_side` (2000 bp 5' / 800 bp 3') rather than being
+  handed the generous bound. Those are deliberately the values shipped in
+  1.7.0rc1.
+
+The fallback can never **loosen** a bound: the clamp takes the tighter of the
+fallback and the allowance, because the span rule can squeeze the 3' allowance
+below 800 bp (a core already at or past the 4500 bp span has an allowance of `0`).
+
+**Why the gate exists.** An end-to-end check on GCA_973357735.1 (550 LINE
+elements) found its raw 5' inference has a median of **7,613 bp against a
+10,000 bp search window** — for **63 %** of elements the alignment never converged
+at all, so the number was the window edge, not a boundary. Granting those the
+converged allowance raised total extension by **74.7 %**, moved the median element
+from 4,960 bp to 7,429 bp, and put **322 of 550** elements above 7 kb — over the
+documented 4–7 kb range for plant LINEs. With the gate the median element is
+6,033 bp and only 22 elements exceed 7 kb. On a genome whose inference does
+converge the gate changes nothing at all (byte-identical result), so it costs
+nothing where it is not needed. Like every other bound here it fails toward
+truncation.
 
 **Why the 3' side is bounded as a span, not as a per-side distance.** The 3'
 extension is not a biological distance — it is whatever is left over after DANTE
