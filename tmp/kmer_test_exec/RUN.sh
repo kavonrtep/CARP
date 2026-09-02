@@ -98,6 +98,29 @@ resolve_env() {
   return 0
 }
 
+
+selftest_scripts() {
+  # The environment can be perfect and the run still die instantly because a
+  # module the scripts import is missing. Prove dante_line.py LOADS, in the
+  # environment that will run it, before committing hours to the jobs.
+  local out
+  if [ "$KIND" = container ]; then
+    out=$("$RUNTIME" exec -B /nfsroot:/nfsroot -B "$HERE:$HERE" \
+          --env "PATH=$BIN:/usr/bin:/bin" \
+          --env "CARP_VOCABULARY=$HERE/classification_vocabulary.yaml" \
+          "$SIF" "$BIN/python3" "$HERE/scripts/dante_line.py" --help 2>&1)
+  else
+    out=$(PATH="$BIN:$PATH" CARP_VOCABULARY="$HERE/classification_vocabulary.yaml" \
+          "$BIN/python3" "$HERE/scripts/dante_line.py" --help 2>&1)
+  fi
+  if [ $? -ne 0 ]; then
+    echo "  SCRIPTS FAILED TO LOAD:"; echo "$out" | tail -6 | sed 's/^/    /'; return 1
+  fi
+  case "$out" in *--prefilter-kmer*) echo "  scripts load, and carry --prefilter-kmer";;
+                 *) echo "  SCRIPTS LOAD BUT LACK --prefilter-kmer (stale copy?)"; return 1;; esac
+  return 0
+}
+
 # ---------------------------------------------------------------- the runner
 run_dante_line() {   # $1=outdir $2=carp_output $3=k
   local out="$1" D="$2" k="$3"
@@ -196,6 +219,7 @@ case "$MODE" in
     if resolve_env; then echo "  OK  $KIND  $BIN"
     else echo "  NOT FOUND — run:  ./RUN.sh --setup"; fi
     echo "  scoring python3: ${SCORE_PY:-MISSING}"
+    [ -n "${BIN:-}" ] && selftest_scripts
     echo "  container: $SIF $([ -f "$SIF" ] && echo '(present)' || echo '(ABSENT)')"
     echo "== inputs =="
     ok=0
@@ -214,11 +238,13 @@ case "$MODE" in
   --validate)
     resolve_env || { setup_env && resolve_env; } || exit 1
     echo "environment: $KIND ($BIN); threads=$THREADS"
+    selftest_scripts || exit 1
     do_jobs "$JOBS_VAL"; score "$JOBS_VAL" "VALIDATION (held out)" ;;
   *)
     resolve_env || { echo "no usable environment; building one..."; setup_env && resolve_env; } || exit 1
     echo "environment: $KIND ($BIN); threads=$THREADS"
     check_inputs "$JOBS_CAL" || { echo "FATAL: inputs missing (see above)"; exit 1; }
+    selftest_scripts || { echo "FATAL: the scripts do not load in this environment"; exit 1; }
     echo "running CALIBRATION (3 genomes x 2 settings)"
     do_jobs "$JOBS_CAL"; score "$JOBS_CAL" "CALIBRATION" ;;
 esac

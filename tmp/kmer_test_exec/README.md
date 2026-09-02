@@ -9,8 +9,11 @@ cd /nfsroot/projects/darwin/runs/tmp3/kmer_test
 ./RUN.sh              # run the calibration arm and score it
 ```
 
-`--check` costs a second and tells you whether the environment and every input
-file are readable before you commit hours to the run.
+`--check` costs a second and verifies three things before you commit hours to
+the run: an environment with the right tools, every input file readable, and
+that the scripts actually **load** in that environment and carry the
+`--prefilter-kmer` flag. That last one matters — an earlier version passed all
+its environment checks and then every job died instantly on a missing module.
 
 If no environment is found, `--setup` builds one with conda/mamba into
 `./conda_env` from the pinned `dante_line_env.yaml` (seqkit, parasail-python,
@@ -105,8 +108,9 @@ the ones baked into the image.
 |------|------|
 | `RUN.sh` | the runner |
 | `PREREGISTERED.md` | the rule, fixed in advance |
-| `scripts/` | patched dante_line.py, global_local_aln.py, classification.py |
+| `scripts/` | the full patched CARP scripts directory (dante_line.py pulls in several modules via importlib, so shipping a hand-picked subset does not work) |
 | `classification_vocabulary.yaml` | needed by the patched scripts |
+| `dante_line_env.yaml` | pinned env spec used by `--setup` |
 | `gt/gt_<genome>.tsv` | confirmed-boundary ground truth |
 | `score_extensions.py` | purity/coverage scorer |
 | `results/` | per-run output, logs and scores |
