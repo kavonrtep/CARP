@@ -104,9 +104,21 @@ jobs:
         run: |
           # The push event has github.event.before pointing at the previous
           # commit on main. Fetch that commit's version.py.
+          set +e   # this step decides its own exit status; see below
           prev_sha="${{ github.event.before }}"
           if [ -z "$prev_sha" ] || [ "$prev_sha" = "0000000000000000000000000000000000000000" ]; then
             echo "No previous commit on main (initial push?); skipping monotonic check."
+            exit 0
+          fi
+          # After a force-push (history rewrite) github.event.before names a
+          # commit that no longer exists in the repository, so nothing can be
+          # read from it. That is not a version regression -- it is a missing
+          # baseline -- so it must skip, not fail. Check reachability first and
+          # say plainly which case we are in, rather than inferring it from a
+          # failed read.
+          if ! git cat-file -e "${prev_sha}^{commit}" 2>/dev/null; then
+            echo "previous main commit ${prev_sha} is not in this repository"
+            echo "(history rewrite / force-push); no baseline to compare against, skipping."
             exit 0
           fi
           # version.py may not exist on the previous commit (e.g. the
@@ -126,9 +138,14 @@ jobs:
           print(m.__version__)
           ")
           echo "previous: $prev   new: $PY_VERSION"
+          if [ -z "$prev" ]; then
+            echo "could not read a version from the previous commit; skipping."
+            exit 0
+          fi
           python -c "
           from packaging.version import Version
           prev, curr = Version('$prev'), Version('$PY_VERSION')
           assert curr >= prev, f'version went backwards: {prev} -> {curr}'
           print(f'OK: {prev} <= {curr}')
           "
+          exit $?
