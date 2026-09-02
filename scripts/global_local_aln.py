@@ -578,7 +578,8 @@ def extract_end_region(fasta_file, end, region_length=30, output_file=None):
     return output_file
 
 
-def run_mmseqs_prefilter(fasta_file, end, min_identity=0.8, threads=1, verbose=True):
+def run_mmseqs_prefilter(fasta_file, end, min_identity=0.8, threads=1, verbose=True,
+                         kmer=0):
     """
     Run MMseqs2 easy-search to identify candidate pairs for alignment.
 
@@ -592,6 +593,17 @@ def run_mmseqs_prefilter(fasta_file, end, min_identity=0.8, threads=1, verbose=T
         Which end is fixed ("5" or "3")
     min_identity : float, optional
         Minimum sequence identity (0-1), default 0.8 (80%)
+    kmer : int, optional
+        Explicit mmseqs nucleotide k-mer length; 0 leaves mmseqs' default.
+        This matters more than ``min_identity``: mmseqs requires a shared exact
+        k-mer BEFORE it evaluates identity, and on the 30 nt window compared
+        here its default k is long enough that most genuinely related pairs are
+        discarded unseen. Measured on 264 Boechera end regions, 0.8 -> 0.6
+        identity moves 342 -> 344 hits while adding ``kmer=7`` moves it to
+        2,014 -- and the extra pairs are ENRICHED for same-family membership
+        (38.1% -> 44.3%), so the small k raises sensitivity without costing
+        specificity, which stays gated by ``--min-seq-id``. Same reasoning as
+        ``scripts/reduce_dimer_library.py``, which passes ``-k 7`` explicitly.
     threads : int, optional
         Number of threads, default 1
     verbose : bool, optional
@@ -633,6 +645,8 @@ def run_mmseqs_prefilter(fasta_file, end, min_identity=0.8, threads=1, verbose=T
             '--format-output', 'query,target',
             '--search-type', '3'   #Nucleotide search
         ]
+        if kmer:
+            cmd += ['-k', str(kmer)]
 
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
 
@@ -866,7 +880,7 @@ def _compare_sequences(sequences, fasta_file, args, verbose,
                 print("\nRunning MMseqs2 prefiltering...")
             candidate_pairs = run_mmseqs_prefilter(
                 fasta_file, args.end, min_identity=prefilter_identity,
-                threads=threads, verbose=verbose,
+                threads=threads, verbose=verbose, kmer=prefilter_kmer,
             )
             if candidate_pairs is None:
                 local_use_prefilter = False
@@ -946,6 +960,7 @@ def run_all_vs_all_alignment(
     verbose=True,
     use_prefilter=True,
     prefilter_identity=0.8,
+    prefilter_kmer=0,
     max_group_size=None
 ):
     """

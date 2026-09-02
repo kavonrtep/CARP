@@ -1421,7 +1421,8 @@ def run_mmseqs_clustering(input_fasta: str, output_dir: Path, threads: int = 1) 
 def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments: int = 3,
                          verbose: bool = False, max_group_size: Optional[int] = None,
                          support_fraction: float = 0.0, min_group_alignments: int = 0,
-                         prefilter_identity: float = 0.8) -> None:
+                         prefilter_identity: float = 0.8,
+                         prefilter_kmer: int = 0) -> None:
     """Run all-vs-all alignment analysis on prime sequences.
 
     For 5' sequences: use --end 3 (3' end fixed, analyze 5' similarity)
@@ -1484,7 +1485,8 @@ def run_prime_alignments(output_dir: Path, threads: int = 1, min_num_alignments:
                 threads=threads,
                 verbose=verbose,
                 max_group_size=max_group_size,
-                prefilter_identity=prefilter_identity
+                prefilter_identity=prefilter_identity,
+                prefilter_kmer=prefilter_kmer
             )
             print(f"    → {output_name}")
         except Exception as e:
@@ -1574,6 +1576,16 @@ Examples:
                             'AND LONGER EXTENSIONS -- the same lever that produced chimeric '
                             'consensi -- so change it only against measured boundary purity '
                             '(default: 0.8)')
+    parser.add_argument('--prefilter-kmer', type=int, default=0,
+                       help='Explicit mmseqs nucleotide k-mer length for the flank prefilter; '
+                            '0 keeps mmseqs default. This gates the extension layer harder than '
+                            '--prefilter-identity does, because mmseqs requires a shared exact '
+                            'k-mer BEFORE it evaluates identity, and the window compared here is '
+                            'only 30 nt. Measured on Boechera: identity 0.8->0.6 moves 342->344 '
+                            'admitted pairs, while -k 7 moves it to 2014, and the extra pairs are '
+                            'ENRICHED for same-family membership (38.1%%->44.3%%). More admitted '
+                            'pairs means more and longer extensions, so validate boundary purity '
+                            'before changing it (default: 0)')
     parser.add_argument('--max-extension', type=int, default=0,
                        help='SYMMETRIC ESCAPE HATCH: a value > 0 caps BOTH sides at that many '
                             'bp, overriding the per-side bounds. At the default 0 the bounds '
@@ -1612,6 +1624,8 @@ Examples:
     args = parser.parse_args()
     if args.max_group_size is not None and args.max_group_size < 2:
         parser.error("--max-group-size must be >= 2")
+    if args.prefilter_kmer < 0:
+        parser.error("--prefilter-kmer must be >= 0")
     if not 0.0 <= args.prefilter_identity <= 1.0:
         parser.error("--prefilter-identity must be between 0 and 1")
     if not 0.0 <= args.support_fraction <= 1.0:
@@ -1735,7 +1749,8 @@ Examples:
                              verbose=args.verbose, max_group_size=args.max_group_size,
                              support_fraction=args.support_fraction,
                              min_group_alignments=args.min_group_alignments,
-                             prefilter_identity=args.prefilter_identity)
+                             prefilter_identity=args.prefilter_identity,
+                             prefilter_kmer=args.prefilter_kmer)
 
         # Load alignment lengths and create LINE elements
         print("\nCreating LINE_element features from alignment data...")
