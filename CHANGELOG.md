@@ -10,7 +10,10 @@
   extent is measured instead. Those elements are marked `Status=complete` in
   `DANTE_LINE.gff3`, **their inferred span is replaced with the measured one**,
   and the evidence is recorded as `TSD=` and `PolyA_length=` attributes. Every
-  other element carries `Status=inferred`. Sequences are also written to
+  element ends up with one of three values: `complete`, `inferred` (the flank
+  comparison extended it) or `core` (it could not, so the span is the domain
+  core alone). On *Boechera stricta* that splits 17 / 89 / 237 of 343 — `core`
+  is the majority case. Sequences are also written to
   `DANTE_LINE/LINE_complete_elements.fasta` in RepeatMasker header convention, so
   the file is usable as a library directly. New config key
   `line_complete_elements` (default `true`); ~4 s on a 5.4 Gb genome. See

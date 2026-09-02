@@ -146,27 +146,79 @@ class TestOutputContract(unittest.TestCase):
             self.assertTrue(head.startswith(">"))
             self.assertIn("#Class_I/LINE", head)
 
-    def test_every_element_gets_a_status(self):
-        """Both confidence classes must be distinguishable downstream, so an
-        element is either measured or explicitly marked as inferred."""
-        import re
+    def test_every_element_gets_one_of_three_statuses(self):
+        """An element the alignment EXTENDED is an estimate; one it could not
+        extend is an absence, and its span is the bare domain core. Conflating
+        them would hide that ~71% of elements fall in the second group."""
         src = (REPO / "scripts" / "line_complete_elements.py").read_text()
-        self.assertIn('attrs["Status"] = "inferred"', src)
         self.assertIn('attrs["Status"] = "complete"', src)
+        self.assertIn('"inferred" if ext > 0 else "core"', src)
 
-    def test_only_confirmed_elements_move(self):
-        """A coordinate rewrite must be tied to having found the evidence.
-
-        Guards the property the two-genome measurement rests on: 17 of 343
-        Boechera elements were marked complete and exactly those 17 moved.
-        """
+    def test_core_status_is_decided_by_the_extension_attributes(self):
         src = (REPO / "scripts" / "line_complete_elements.py").read_text()
-        i = src.index("r = by_id.get(")
-        seg = src[i:i + 600]
-        self.assertIn("if r is None:", seg)
-        # the span is only rewritten in the else branch
-        self.assertLess(seg.index('attrs["Status"] = "inferred"'),
-                        seg.index('f[3], f[4] = str(r["start"]), str(r["end"])'))
+        i = src.index('ext = int(attrs.get("Extension_5prime"')
+        seg = src[i:i + 260]
+        self.assertIn("Extension_5prime", seg)
+        self.assertIn("Extension_3prime", seg)
+
+    def test_annotate_gff3_end_to_end(self):
+        """Behavioural, not source-text: build a GFF3, rewrite it, check it.
+
+        An earlier version of this test asserted on the order of two strings in
+        the source and broke on a valid refactor, which is exactly the failure
+        mode a behavioural test avoids.
+        """
+        import tempfile
+        rows = [dict(id="L1", seq="chr1", strand="+", pattern="ENDO-RT",
+                     start=1000, end=6000, tsd_seq="ACGTACGTACGT", polya_len=17)]
+        gff = ("##gff-version 3\n"
+               # confirmed: must move to the measured span and gain the evidence
+               "chr1\tDANTE\tLINE_element\t2000\t4000\t.\t+\t.\tID=L1;Extension_5prime=50;Extension_3prime=60\n"
+               # extended but not confirmed -> inferred, span untouched
+               "chr1\tDANTE\tLINE_element\t8000\t9000\t.\t+\t.\tID=L2;Extension_5prime=10;Extension_3prime=0\n"
+               # never extended -> core
+               "chr1\tDANTE\tLINE_element\t9500\t9900\t.\t+\t.\tID=L3\n"
+               # a non-element line must pass through untouched
+               "chr1\tdante\tprotein_domain\t2100\t2200\t.\t+\t.\tName=RT\n")
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "x.gff3"
+            f.write_text(gff)
+            lce.annotate_gff3(str(f), rows)
+            out = {}
+            for line in f.read_text().splitlines():
+                if line.startswith("#"):
+                    continue
+                c = line.split("\t")
+                a = dict(kv.split("=", 1) for kv in c[8].split(";") if "=" in kv)
+                out[a.get("ID", a.get("Name"))] = (c[2], int(c[3]), int(c[4]), a)
+
+            self.assertEqual(out["L1"][:3], ("LINE_element", 1000, 6000))
+            self.assertEqual(out["L1"][3]["Status"], "complete")
+            self.assertEqual(out["L1"][3]["TSD"], "ACGTACGTACGT")
+            self.assertEqual(out["L1"][3]["PolyA_length"], "17")
+
+            self.assertEqual(out["L2"][:3], ("LINE_element", 8000, 9000))
+            self.assertEqual(out["L2"][3]["Status"], "inferred")
+
+            self.assertEqual(out["L3"][:3], ("LINE_element", 9500, 9900))
+            self.assertEqual(out["L3"][3]["Status"], "core")
+            self.assertNotIn("TSD", out["L3"][3])
+
+            self.assertEqual(out["RT"][0], "protein_domain")
+
+    def test_rerun_does_not_stack_attributes(self):
+        import tempfile
+        rows = [dict(id="L1", seq="chr1", strand="+", pattern="ENDO-RT",
+                     start=1000, end=6000, tsd_seq="ACGTACGTACGT", polya_len=17)]
+        gff = ("chr1\tDANTE\tLINE_element\t2000\t4000\t.\t+\t.\tID=L1\n")
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "x.gff3"
+            f.write_text(gff)
+            lce.annotate_gff3(str(f), rows)
+            once = f.read_text()
+            lce.annotate_gff3(str(f), rows)
+            self.assertEqual(once, f.read_text(), "re-running must be idempotent")
+            self.assertEqual(once.count("Status="), 1)
 
     def test_rewrite_is_atomic(self):
         """A killed run must not leave a truncated GFF3 that a later step trusts."""

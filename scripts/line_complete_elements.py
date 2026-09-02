@@ -19,9 +19,9 @@ Boechera, agreeing within 50 bp for essentially no element. Where the true exten
 is known there is no reason to keep an estimate, so the element is extended to it.
 
 THIS THEREFORE CHANGES THE ANNOTATION, for the small minority of elements that
-qualify (0.7-5% of loci). Every other element keeps its inferred boundary and is
-marked `Status=inferred`, so the two confidence classes are distinguishable
-downstream.
+qualify (0.7-5% of loci). Every other element keeps its existing boundary and is
+marked `Status=inferred` (the flank alignment extended it) or `Status=core` (it
+could not, so the span is the domain core alone -- about 71% of elements).
 
 WHY A CONFIRMED CALL IS TRUSTWORTHY. The two tests are statistically independent,
 so their error rates multiply rather than overlap. Measured by running the
@@ -375,9 +375,17 @@ def main():
 def annotate_gff3(gff: str, rows) -> None:
     """Rewrite DANTE_LINE.gff3: extend confirmed elements to their measured span.
 
-    Every LINE_element gains a `Status` attribute so the two confidence classes
-    are distinguishable; confirmed ones additionally carry the evidence and take
-    the measured coordinates. Rewritten atomically (.tmp + os.replace) so a
+    Every LINE_element gains a `Status` attribute so the confidence classes are
+    distinguishable downstream:
+
+      complete  both ends observed (poly-A + TSD); span is measured, and the
+                evidence is recorded in TSD= and PolyA_length=
+      inferred  the flank alignment extended the core; the span is an estimate
+                and Extension_5prime/3prime say by how much
+      core      the alignment could not extend it -- too few comparable copies --
+                so the span is the domain core and nothing more
+
+    Confirmed elements additionally take the measured coordinates. Rewritten atomically (.tmp + os.replace) so a
     killed run cannot leave a truncated GFF3 that a later step then trusts.
     """
     by_id = {r["id"]: r for r in rows}
@@ -397,7 +405,15 @@ def annotate_gff3(gff: str, rows) -> None:
                 attrs.pop(k, None)
             r = by_id.get(attrs.get("ID"))
             if r is None:
-                attrs["Status"] = "inferred"
+                # Three confidence classes, not two. An element the flank
+                # alignment extended is an ESTIMATE; one it could not extend at
+                # all -- too few comparable copies -- is not an estimate but an
+                # absence, and its span is just the domain core. Conflating them
+                # would hide that most elements (about 71%) fall in the second
+                # group.
+                ext = int(attrs.get("Extension_5prime", 0) or 0) + \
+                      int(attrs.get("Extension_3prime", 0) or 0)
+                attrs["Status"] = "inferred" if ext > 0 else "core"
             else:
                 f[3], f[4] = str(r["start"]), str(r["end"])
                 attrs["Status"] = "complete"

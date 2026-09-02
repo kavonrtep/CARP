@@ -235,7 +235,9 @@ the library mislabels every sequence it matches, genome-wide.
 A small minority of LINEs need no inference: where a recent insertion still
 carries both a poly-A tail and a target-site duplication, the element's extent is
 **measured**, and it is annotated as `Status=complete` with its true boundaries.
-Every other element carries `Status=inferred`.
+Every other element carries `Status=inferred` (the flank comparison
+extended it) or `Status=core` (it could not, so the span is the domain core
+alone — the majority case).
 
 How the limits were measured, and which alternative approaches were tested and
 rejected, is in [docs/line_boundaries.md](docs/line_boundaries.md).

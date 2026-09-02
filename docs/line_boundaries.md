@@ -124,8 +124,9 @@ The search itself does run at run time, and where it succeeds the element is
 **corrected** rather than merely recorded: `line_complete_elements` (default
 `true`) marks it `Status=complete` in `DANTE_LINE.gff3`, replaces its inferred span
 with the measured one, records the TSD and poly-A length as attributes, and writes
-the sequence to `DANTE_LINE/LINE_complete_elements.fasta`. Every other element is
-marked `Status=inferred`. It costs ~4 s on a 5.4 Gb genome and affects the
+the sequence to `DANTE_LINE/LINE_complete_elements.fasta`. Every other element is marked
+`Status=inferred` (extended by the flank comparison) or `Status=core` (not
+extended at all — the majority). It costs ~4 s on a 5.4 Gb genome and affects the
 0.7-5 % of elements that qualify — measured on two genomes, `Class_I/LINE`
 +55,889 bp on one and unchanged on the other.
 

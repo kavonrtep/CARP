@@ -214,9 +214,18 @@ no inference: where a recent insertion still carries both a **poly-A tail** and 
 **target-site duplication (TSD)**, the extent was measured directly.
 
 Those elements are marked `Status=complete`, **their span is replaced with the
-measured one**, and the evidence is recorded as attributes. Every other element
-carries `Status=inferred`, so the two confidence classes are distinguishable
-downstream.
+measured one**, and the evidence is recorded as attributes. Every LINE element
+ends up with one of three values, so the confidence classes are distinguishable
+downstream:
+
+| `Status` | meaning | span |
+|---|---|---|
+| `complete` | both ends observed — poly-A tail and TSD, given in `TSD=` and `PolyA_length=` | measured |
+| `inferred` | the flank comparison extended the core; `Extension_5prime`/`Extension_3prime` say by how much | estimated |
+| `core` | the comparison could not extend it — too few comparable copies | the domain core alone |
+
+On *Boechera stricta* the split is 17 / 89 / 237 of 343 elements, so `core` is
+the majority case: most LINEs never get an extension at all.
 
 Because the span changes, this **does affect the annotation** — for the 0.7–5 % of
 elements that qualify. Measured on two genomes: `Class_I/LINE` +55,889 bp on one
