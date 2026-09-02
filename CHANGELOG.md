@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0rc3
 
 - **LINE elements with both ends directly observed are now annotated as
   `Status=complete`, with their measured boundaries.** `dante_line` normally
