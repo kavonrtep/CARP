@@ -56,6 +56,8 @@ class Vocabulary:
     max_extension_per_side: dict[str, object]
     # ENFORCED bound on (core length + 3' extension) -- see the YAML comment.
     max_core_to_3prime_end: dict[str, int]
+    # Bound used when the flank inference did NOT converge -- see the YAML.
+    unconverged_max_extension_per_side: dict[str, object]
     # Ordered longest-first so longest match wins.
     tir_prefixes: tuple[tuple[str, str], ...]
     sources: frozenset[str] = field(default_factory=frozenset)
@@ -122,6 +124,8 @@ def load_vocabulary(path: str | Path | None = None) -> Vocabulary:
         max_consensus_length=dict(raw.get("max_consensus_length", {}) or {}),
         max_extension_per_side=dict(raw.get("max_extension_per_side", {}) or {}),
         max_core_to_3prime_end=dict(raw.get("max_core_to_3prime_end", {}) or {}),
+        unconverged_max_extension_per_side=dict(
+            raw.get("unconverged_max_extension_per_side", {}) or {}),
         tir_prefixes=tir_prefixes,
         sources=frozenset(tool_dialects.keys()),
     )
@@ -533,4 +537,36 @@ def max_core_to_3prime_end_for_class(classification: str, vocab=None) -> int:
                     best, best_depth = int(value), depth
                 except (TypeError, ValueError):
                     continue
+    return max(0, best)
+
+
+def unconverged_max_extension_for_class(classification: str, side: str = "5prime",
+                                        vocab=None) -> int:
+    """Per-side bound in bp for an element whose flank inference did NOT
+    converge; 0 = unbounded. Longest-prefix match, same shape as
+    ``max_extension_for_class``.
+
+    "Did not converge" means the raw inferred extension exceeded the normal
+    allowance -- the alignment ran to the edge of the search window rather than
+    stopping on evidence, so the length is an artifact of where we stopped
+    looking. Such an element falls back to this (deliberately conservative)
+    value instead of being granted the generous one.
+    """
+    if side not in ("5prime", "3prime"):
+        raise ValueError("side must be '5prime' or '3prime'")
+    try:
+        table = (vocab or load_vocabulary()).unconverged_max_extension_per_side or {}
+    except Exception:
+        return 0
+    best, best_depth = 0, -1
+    for prefix, value in table.items():
+        if classification == prefix or classification.startswith(prefix + "/"):
+            depth = len(prefix.split("/"))
+            if depth <= best_depth:
+                continue
+            v = value.get(side, 0) if isinstance(value, dict) else value
+            try:
+                best, best_depth = int(v), depth
+            except (TypeError, ValueError):
+                continue
     return max(0, best)

@@ -940,10 +940,26 @@ def line_core_to_3prime_end(explicit: int = 0) -> int:
         return 0
 
 
+def line_unconverged_extension(side: str, explicit: int = 0) -> int:
+    """Fallback bound for a LINE side whose flank inference did not converge.
+
+    A non-zero ``explicit`` (the CLI --max-extension) disables this, keeping that
+    flag a complete manual override.
+    """
+    if explicit:
+        return 0
+    try:
+        return classification.unconverged_max_extension_for_class("Class_I/LINE", side)
+    except Exception:
+        return 0
+
+
 def cap_extensions(core_len: int, ext_5prime: int, ext_3prime: int,
                    max_extension: int = 0, max_element_length: int = 0,
                    max_ext_5prime: int = 0, max_ext_3prime: int = 0,
-                   max_core_to_3prime_end: int = 0) -> Tuple[int, int]:
+                   max_core_to_3prime_end: int = 0,
+                   unconverged_5prime: int = 0,
+                   unconverged_3prime: int = 0) -> Tuple[int, int]:
     """Clamp a pair of inferred extensions to the biological length bounds.
 
     The flank alignment can propose an extension all the way to ``--flank``
@@ -969,6 +985,17 @@ def cap_extensions(core_len: int, ext_5prime: int, ext_3prime: int,
     only the remainder after the domain annotation stops (r = -0.936 between core
     length and 3' extension). It is applied after the per-side caps.
 
+    ``unconverged_5prime`` / ``unconverged_3prime`` are the fallback bounds for a
+    side whose raw inference EXCEEDED its normal allowance. That is the signal
+    that the flank alignment never found a boundary -- it ran to the edge of the
+    search window -- so the number is an artifact of where we stopped looking,
+    not evidence of length. Measured on GCA_973357735.1, the raw 5' inference has
+    median 7,613 bp against a 10,000 bp window for 63% of elements; granting them
+    the generous bound put 322 of 550 elements over 7 kb, above the documented
+    4-7 kb plant LINE range. Such a side is clamped here instead. A side that
+    stopped on its own keeps its full inferred length. 0 disables the fallback,
+    restoring the previous behaviour of simply clamping to the allowance.
+
     ``max_extension`` bounds each side independently. ``max_element_length``
     then bounds the whole element; when the two sides together exceed the
     remaining budget it is split evenly, except that a side asking for less than
@@ -979,15 +1006,31 @@ def cap_extensions(core_len: int, ext_5prime: int, ext_3prime: int,
 
     Either bound is disabled by passing 0.
     """
-    cap5 = max_ext_5prime if max_ext_5prime > 0 else max_extension
-    cap3 = max_ext_3prime if max_ext_3prime > 0 else max_extension
-    if cap5 > 0:
-        ext_5prime = min(ext_5prime, cap5)
-    if cap3 > 0:
-        ext_3prime = min(ext_3prime, cap3)
-
+    # None means "no bound configured"; 0 means "bound of zero", which must
+    # still clamp. Conflating them let a core longer than the span escape
+    # unclamped entirely.
+    cap5 = (max_ext_5prime if max_ext_5prime > 0
+            else (max_extension if max_extension > 0 else None))
+    cap3 = (max_ext_3prime if max_ext_3prime > 0
+            else (max_extension if max_extension > 0 else None))
     if max_core_to_3prime_end > 0:
-        ext_3prime = min(ext_3prime, max(0, max_core_to_3prime_end - core_len))
+        span_allow = max(0, max_core_to_3prime_end - core_len)
+        cap3 = span_allow if cap3 is None else min(cap3, span_allow)
+
+    # A side whose raw inference is within its allowance CONVERGED: the
+    # alignment stopped on evidence, so keep it. A side that exceeded the
+    # allowance did not, so fall back to the conservative bound rather than
+    # being handed the generous one.
+    # The fallback is normally tighter than the allowance (2000 < 3400,
+    # 800 < 2500), but the span rule can squeeze the 3' allowance below it --
+    # a core already at or past the span gets an allowance of 0. Take the
+    # tighter of the two so the fallback can never LOOSEN a bound.
+    if cap5 is not None and ext_5prime > cap5:
+        limit = min(unconverged_5prime, cap5) if unconverged_5prime > 0 else cap5
+        ext_5prime = min(ext_5prime, limit)
+    if cap3 is not None and ext_3prime > cap3:
+        limit = min(unconverged_3prime, cap3) if unconverged_3prime > 0 else cap3
+        ext_3prime = min(ext_3prime, limit)
 
     if max_element_length > 0:
         budget = max(0, max_element_length - core_len)
@@ -1042,7 +1085,9 @@ def create_line_elements(patterns: List[FeatureGroup], alignment_lengths: Dict[s
             max_extension=max_extension, max_element_length=max_element_length,
             max_ext_5prime=line_max_extension("5prime", max_extension),
             max_ext_3prime=line_max_extension("3prime", max_extension),
-            max_core_to_3prime_end=line_core_to_3prime_end(max_extension))
+            max_core_to_3prime_end=line_core_to_3prime_end(max_extension),
+            unconverged_5prime=line_unconverged_extension("5prime", max_extension),
+            unconverged_3prime=line_unconverged_extension("3prime", max_extension))
 
         # Calculate extended boundaries based on strand
         if pattern.strand == '+':

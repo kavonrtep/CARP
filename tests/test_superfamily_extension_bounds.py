@@ -17,7 +17,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import classification
-from dante_line import cap_extensions, line_max_extension, line_core_to_3prime_end
+from dante_line import (cap_extensions, line_max_extension, line_core_to_3prime_end,
+                        line_unconverged_extension)
 from dante_tir_fallback import max_extension_for_subtype
 
 # medians measured from DANTE_TIR successes (wheat, Lycopus, Boechera)
@@ -185,6 +186,63 @@ class TestCoreToThreePrimeSpan(unittest.TestCase):
         self.assertEqual(
             classification.max_core_to_3prime_end_for_class(
                 "Class_II/Subclass_1/TIR/EnSpm_CACTA"), 0)
+
+
+class TestConvergenceGate(unittest.TestCase):
+    """The generous bound is only for an inference that actually converged.
+
+    dante_line infers extension by aligning many copies' flanks. Sometimes the
+    alignment stops on its own; sometimes it runs to the edge of the search
+    window, and the "length" is then just where we stopped looking. Measured on
+    GCA_973357735.1: the raw 5' inference has median 7,613 bp against a 10,000 bp
+    window, and 63% of its 550 elements never converged. Granting those the
+    generous bound put 322 of 550 over 7 kb, above the documented 4-7 kb plant
+    LINE range, and raised total extension 74.7%. Gating it brings the median
+    element from 7,429 to 6,033 bp and the over-7 kb count from 322 to 22, while
+    leaving a genome whose inference DOES converge byte-identical.
+    """
+
+    GATE = dict(max_ext_5prime=3400, max_ext_3prime=2500,
+                max_core_to_3prime_end=4500,
+                unconverged_5prime=2000, unconverged_3prime=800)
+
+    def test_converged_sides_keep_their_full_length(self):
+        self.assertEqual(cap_extensions(2160, 1800, 1500, **self.GATE), (1800, 1500))
+
+    def test_runaway_side_falls_back_to_the_conservative_bound(self):
+        # raw 5' of 7613 exceeds 3400 -> not a boundary, clamp to 2000.
+        # raw 3' of 1869 is within its span allowance -> kept.
+        self.assertEqual(cap_extensions(2160, 7613, 1869, **self.GATE), (2000, 1869))
+
+    def test_both_sides_can_be_gated_independently(self):
+        self.assertEqual(cap_extensions(2160, 9999, 9999, **self.GATE), (2000, 800))
+
+    def test_fallback_can_never_loosen_a_bound(self):
+        """A core past the span has an allowance of 0, below the 800 fallback.
+
+        Taking the fallback blindly would GRANT extension where the span rule
+        forbids it -- the fallback must be the tighter of the two.
+        """
+        self.assertEqual(cap_extensions(4600, 300, 500, **self.GATE), (300, 0))
+
+    def test_zero_fallback_restores_plain_clamping(self):
+        no_gate = dict(self.GATE, unconverged_5prime=0, unconverged_3prime=0)
+        self.assertEqual(cap_extensions(2160, 7613, 9999, **no_gate), (3400, 2340))
+
+    def test_explicit_max_extension_disables_the_gate(self):
+        self.assertEqual(line_unconverged_extension("5prime", 1500), 0)
+        self.assertEqual(line_unconverged_extension("5prime"), 2000)
+        self.assertEqual(line_unconverged_extension("3prime"), 800)
+
+    def test_fallback_is_tighter_than_the_allowance_for_line(self):
+        for side in ("5prime", "3prime"):
+            self.assertLess(line_unconverged_extension(side),
+                            line_max_extension(side),
+                            f"{side}: the unconverged fallback must be the stricter bound")
+
+    def test_gate_is_line_only(self):
+        self.assertEqual(classification.unconverged_max_extension_for_class(
+            "Class_II/Subclass_1/TIR/hAT", "5prime"), 0)
 
 
 if __name__ == "__main__":
