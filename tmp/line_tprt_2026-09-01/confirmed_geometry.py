@@ -52,7 +52,10 @@ for seqname, strand, cs, ce in loci:
     if sc <= a.floor or not (nulls and all(sc > x for x in nulls)): continue
     ext3 = tail_end - (C3 + 1)          # core 3' end -> end of poly-A tail
     ext5 = C5 - (w0 + p)                # TSD (element start) -> core 5' start
-    rows.append((seqname, strand, sc, k, run, at, ext5, ext3, ext5 + ext3 + (C3 - C5 + 1)))
+    # core coords in GENOME space, so a locus can be matched to a DANTE_LINE.gff3
+    # produced under different parameters (the core does not move, only extensions do)
+    rows.append((seqname, strand, sc, k, run, at, ext5, ext3,
+                 ext5 + ext3 + (C3 - C5 + 1), cs, ce))
 
 print(f"### {a.label}   confirmed loci = {len(rows)}")
 if not rows: sys.exit(0)
@@ -73,5 +76,5 @@ print(f"  confirmed loci whose TRUE 5' extension EXCEEDS the 2000 bp cap: "
       f"{over5}/{len(e5)} ({100*over5/len(e5):.0f}%)")
 if a.tsv:
     with open(a.tsv, "w") as fh:
-        fh.write("seq\tstrand\tscore\ttsd_len\tpolya_len\tpolya_offset\text5\text3\telem_len\n")
+        fh.write("seq\tstrand\tscore\ttsd_len\tpolya_len\tpolya_offset\text5\text3\telem_len\tcore_start\tcore_end\n")
         for r in sorted(rows): fh.write("\t".join(map(str, r)) + "\n")
