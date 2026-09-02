@@ -10,6 +10,12 @@ with classification_vocabulary.yaml in April 2026.
 This hook runs on every `git commit`. It fails the commit if any newly-added
 file looks like a runtime artifact but is not covered by %files.
 
+It also refuses oversized blobs. In September 2026 a single `git add -f` on a
+scratch directory swept ~1.4 GB of intermediate FASTAs and alignment tables into
+the repo (176 MB over the wire, ten GitHub large-file warnings), and undoing it
+needed a history rewrite and a force-push. Blobs are forever; a commit is cheap
+to redo.
+
   * Install once per checkout:   git config core.hooksPath .githooks
   * Bypass when you're sure:     git commit --no-verify   (not recommended)
   * Exempt a dev-only path:      add a pattern to EXCLUDE_PATTERNS below.
@@ -181,8 +187,78 @@ def check_runner_deps() -> int:
     return 0
 
 
+# --- size guard ---------------------------------------------------------
+# Largest legitimately tracked file is ~1 MB (tests/fixtures/genome_small.fasta),
+# so 5 MB leaves generous headroom while still catching the 55-100 MB analysis
+# outputs that caused the September 2026 incident. GitHub warns at 50 MB and
+# rejects at 100 MB, so this is deliberately far stricter than the point of
+# no return -- the aim is to stop it at commit time, not at push time.
+MAX_FILE_BYTES = 5 * 1024 * 1024
+# A per-file cap alone does not stop death by a thousand 4 MB files, so the
+# whole staged set is bounded too.
+MAX_TOTAL_BYTES = 20 * 1024 * 1024
+# Paths allowed to exceed the per-file cap. Keep this list short and justified;
+# an entry here is a permanent addition to every clone.
+SIZE_ALLOWLIST = (
+    "tests/fixtures/*",
+)
+
+
+def _human(n: int) -> str:
+    return f"{n / 1048576:.1f} MB" if n >= 1048576 else f"{n / 1024:.0f} KB"
+
+
+def check_sizes() -> int:
+    """Refuse oversized staged blobs, per file and in total.
+
+    Sizes come from the staged INDEX (git cat-file on the blob), not the working
+    tree, so what is measured is exactly what would enter history.
+    """
+    out = git("diff", "--cached", "--name-only", "--diff-filter=ACM")
+    staged = [p for p in out.splitlines() if p]
+    if not staged:
+        return 0
+
+    oversized: list[tuple[str, int]] = []
+    total = 0
+    for path in staged:
+        raw = subprocess.run(["git", "cat-file", "-s", f":{path}"], cwd=REPO,
+                             capture_output=True, text=True)
+        if raw.returncode != 0:
+            continue                      # deleted / unreadable: nothing to weigh
+        size = int(raw.stdout.strip() or 0)
+        total += size
+        if size > MAX_FILE_BYTES and not any(
+                fnmatch.fnmatch(path, pat) for pat in SIZE_ALLOWLIST):
+            oversized.append((path, size))
+
+    if not oversized and total <= MAX_TOTAL_BYTES:
+        return 0
+
+    print("", file=sys.stderr)
+    print("pre-commit: refusing to commit oversized files", file=sys.stderr)
+    print("-" * 65, file=sys.stderr)
+    if oversized:
+        print(f"{len(oversized)} file(s) over {_human(MAX_FILE_BYTES)}:", file=sys.stderr)
+        for path, size in sorted(oversized, key=lambda x: -x[1])[:10]:
+            print(f"  {_human(size):>10}  {path}", file=sys.stderr)
+        if len(oversized) > 10:
+            print(f"  ... and {len(oversized) - 10} more", file=sys.stderr)
+    if total > MAX_TOTAL_BYTES:
+        print(f"staged total {_human(total)} exceeds the "
+              f"{_human(MAX_TOTAL_BYTES)} limit ({len(staged)} files)", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("Git blobs are permanent: removing them later needs a history rewrite", file=sys.stderr)
+    print("and a force-push. Options:", file=sys.stderr)
+    print("  * unstage the data      git restore --staged <paths>", file=sys.stderr)
+    print("  * ignore it             add a pattern to .gitignore", file=sys.stderr)
+    print("  * it genuinely belongs  add it to SIZE_ALLOWLIST in this hook", file=sys.stderr)
+    print("  * override just once    git commit --no-verify", file=sys.stderr)
+    return 1
+
+
 def main() -> int:
-    return max(check_files_coverage(), check_runner_deps())
+    return max(check_sizes(), check_files_coverage(), check_runner_deps())
 
 
 if __name__ == "__main__":

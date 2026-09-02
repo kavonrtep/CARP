@@ -123,6 +123,54 @@ jobs:
           git reset --quiet HEAD .ci_hook_sentinel.yaml
           rm -f .ci_hook_sentinel.yaml
 
+          # Size guard: an oversized blob must be rejected. A 1.4 GB scratch
+          # directory once reached the repo this way and needed a history
+          # rewrite to remove.
+          mkdir -p tmp
+          head -c 8000000 /dev/urandom > tmp/.ci_big_sentinel.bin
+          git add -f tmp/.ci_big_sentinel.bin
+          if .githooks/pre-commit; then
+            echo "FAIL: pre-commit hook should have rejected an 8 MB file" >&2
+            exit 1
+          fi
+          echo "OK: pre-commit hook correctly rejected an oversized file"
+          git reset --quiet HEAD tmp/.ci_big_sentinel.bin
+          rm -f tmp/.ci_big_sentinel.bin
+
+          # ...and must NOT reject an ordinary small change (no false positive).
+          echo "# ci probe" >> README.md
+          git add README.md
+          if .githooks/pre-commit; then
+            echo "OK: pre-commit hook allows an ordinary change"
+          else
+            echo "FAIL: pre-commit hook rejected an ordinary small change" >&2
+            exit 1
+          fi
+          git reset --quiet HEAD README.md
+          git checkout -- README.md
+
+      # Backstop for the size guard: the hook only runs for people who set
+      # core.hooksPath, and --no-verify bypasses it. This catches an oversized
+      # blob that reached the branch anyway.
+      - name: No oversized files in the tree
+        run: |
+          limit=$((5 * 1024 * 1024))
+          bad=0
+          while IFS= read -r f; do
+            case "$f" in tests/fixtures/*) continue;; esac
+            sz=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+            if [ "$sz" -gt "$limit" ]; then
+              printf '  %8.1f MB  %s\n' "$(echo "$sz" | awk '{print $1/1048576}')" "$f"
+              bad=1
+            fi
+          done <<< "$(git ls-files)"
+          if [ "$bad" -ne 0 ]; then
+            echo "FAIL: files above 5 MB are tracked (see above)." >&2
+            echo "Git blobs are permanent; removing them needs a history rewrite." >&2
+            exit 1
+          fi
+          echo "OK: no tracked file exceeds 5 MB (outside tests/fixtures)"
+
   # R unit tests that need the bioconductor stack (GenomicRanges) — too heavy for
   # the lightweight `carp-unit` env above, but they are true unit tests (they copy
   # the target functions verbatim and assert on them), so they run here in a
