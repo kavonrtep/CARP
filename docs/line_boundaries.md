@@ -171,8 +171,10 @@ flank pairs. Two levers were tested under a decision rule fixed in advance:
   One genome alone would have given either an obvious yes or an obvious no.
 
 Rejected for variance, not for harm — purity stayed 98.4–100 %, so the extra
-extension was real element. Full record in
-`tmp/prefilter_eval_2026-09-02/` (`PREREGISTERED.md`, `VERDICT.md`).
+extension was real element. The section above is the surviving record: the
+pre-registration and verdict write-ups that lived in
+`tmp/prefilter_eval_2026-09-02/` were lost in a `git filter-repo` cleanup, and
+only the run directories and logs remain there.
 
 ---
 
@@ -184,7 +186,7 @@ The harnesses are kept because each answers a question that will recur:
 |---|---|
 | `tmp/diagonal_eval_2026-09-01/` | scores any boundary estimator against exact boundaries (DANTE_LTR / DANTE_TIR elements whose ends are known), ~1 min per genome, no pipeline run |
 | `tmp/line_tprt_2026-09-01/` | poly-A and TSD detection, the chance floor, the joint false-positive rate |
-| `tmp/prefilter_eval_2026-09-02/` | the pre-registered prefilter experiment |
+| `tmp/prefilter_eval_2026-09-02/` | the pre-registered prefilter experiment (run dirs and logs only — the write-ups were lost, see above) |
 | `tmp/bounds_ab_2026-09-02/` | bounds A/B at the `dante_line` step |
 | `tmp/unified_ab_2026-09-02/` | the same, at the unified-annotation level |
 

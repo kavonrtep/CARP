@@ -1,5 +1,77 @@
 # Changelog
 
+## 1.7.0
+
+This release fixes how `dante_line` (and the DANTE_TIR fallback) decide where a
+repeat element **ends**. Both tools find a reliable protein-domain **core**, then
+estimate the flanks by aligning many copies. The estimate could run past the real
+boundary into a neighbouring repeat, and because those over-extended sequences
+were used to build the RepeatMasker library, one contaminated consensus then
+mislabelled every genomic copy of whatever it had absorbed.
+
+Rolls up 1.7.0rc1 through 1.7.0rc4 (sections below).
+
+- **Inferred flanks no longer seed the RepeatMasker library.** The library is now
+  built from the domain core alone (`--library-source core`). Flanks stay in
+  `DANTE_LINE.gff3` and the unified annotation, where a wrong boundary costs one
+  feature; in the library it cost every copy of the contaminant. This is the
+  single change that fixes the misannotation.
+
+- **Extension is bounded per superfamily and per side, and gated on
+  convergence.** Bounds live in `classification_vocabulary.yaml`
+  (`max_extension_per_side`, `max_core_to_3prime_end`,
+  `unconverged_max_extension_per_side`). The 3′ bound is on the **core-to-3′-end
+  span**, not the extension length, because the two are strongly anticorrelated
+  (r = −0.936) — a flat cap is the wrong shape. Where the flank inference stayed
+  inside its allowance it is trusted; where it ran to the edge of the search
+  window it falls back to the conservative bound. `dante_line_max_extension`
+  default `1500` → `0` (bounds now come from the vocabulary); a non-zero value is
+  a complete manual override.
+
+- **Every LINE element now carries `Status=` in the GFF3.** `complete` — both ends
+  directly observed via a poly-A tail and a target-site duplication, with the
+  inferred span **replaced by the measured one** and the evidence recorded as
+  `TSD=` and `PolyA_length=`; `inferred` — the flank comparison extended it;
+  `core` — it could not, so the span is the domain core alone. A `complete` call
+  is right about 97 % of the time (the poly-A and TSD tests are independent, so
+  their error rates multiply: 2.8 % × 2.6 % predicts 0.073 %, and 0.073 % was
+  observed over 2,743 loci in four genomes). Yield is 0–15.5 % of elements across
+  11 genomes, depending on how recently LINEs were active. Sequences also go to
+  `DANTE_LINE/LINE_complete_elements.fasta` in RepeatMasker header convention.
+  New config key `line_complete_elements` (default `true`); ~4 s on a 5.4 Gb genome.
+
+- **Tier-1 overlap resolution orders by observed extent, not raw span**, so an
+  over-extended element can no longer outrank a well-supported one purely by
+  being longer.
+
+- **The DANTE_TIR fallback gets the same guards**, since it shares the alignment
+  engine. Its length bound is per TIR superfamily and is not a config key —
+  EnSpm_CACTA and MuDR_Mutator legitimately reach ~5.8 kb where hAT does not.
+
+- **Measured on a genome where the failure was severe.** *Lathraea squamaria*
+  (GCA_973357735.1, 547 Mb) re-run under this release against the same genome
+  under 1.6.2, identical settings: the same 550 LINE cores are found, but median
+  element length drops 11,631 → 6,033 bp (a >11 kb median LINE is not biologically
+  credible; ~6 kb is full-length), the LINE library shrinks from 103 sequences /
+  770 kb to 18 / 39 kb, and `Class_I/LINE` annotation falls 12.81 → 3.43 Mb
+  (2.34 % → 0.63 % of the genome). Tracing those bases individually: **4.67 Mb
+  (36.5 % of the old LINE annotation) was ribosomal DNA** — the old consensi had
+  overrun into rDNA arrays, and since rDNA is tandem and high-copy, that single
+  contamination masked the arrays genome-wide as LINE. `rDNA/45S_rDNA/25S` and
+  `/18S` were reported at 0.01 Mb each before and are now 2.44 and 1.32 Mb, the
+  gains matching the traced bases exactly. Total annotated fraction moves only
+  54.20 % → 54.51 %, so essentially nothing is lost — 9.38 Mb is **relabelled**.
+  The cost is 3.10 Mb (24.2 % of the old LINE annotation) now unannotated, the
+  inferred flank the bounded extension no longer claims.
+
+- **Tooling and CI.** New `scripts/audit_line_boundaries.py`; `numpy` declared
+  explicitly in `envs/dante_line.yaml` (it had been arriving transitively via
+  parasail-python); the CI runner-dependency guard now follows repo-local imports,
+  so a module-level import in a helper is checked against the job's environment.
+  Rejected after measurement and recorded in
+  [docs/line_boundaries.md](docs/line_boundaries.md): diagonal/drift scoring,
+  `--prefilter-identity`, and mmseqs `-k 7`.
+
 ## 1.7.0rc4
 
 - **LINE elements with both ends directly observed are now annotated as
