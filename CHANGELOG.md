@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.1
 
 - **TideCluster 1.21.1 → 1.21.2: rDNA identification now understands CARP's
   classification vocabulary, and says so when it cannot read a library.**
