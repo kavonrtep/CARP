@@ -1,5 +1,22 @@
 # TideCluster rDNA library: hard-coded class names make `--rdna_library` silently fail
 
+> **RESOLVED in TideCluster 1.21.2 (2026-09-04).** All three requests below were
+> implemented. `rdna_top_type()` matches the subunit family anywhere in the class
+> path, so `rDNA_45S/18S`, `rDNA/45S_rDNA/18S` and `45S_rDNA/18S` are all accepted
+> — and it handles a subtlety this report did not raise: `"45S"` contains `"5S"`,
+> so 45S is tested first and both patterns exclude a preceding digit, otherwise
+> every 45S reference (and `25S`) would be labelled 5S.
+> `validate_rdna_library()` raises before any BLAST when no entry names a subunit
+> family, listing the classes actually found, and warns when only some are
+> unusable. The bundled `data/rdna_library.fasta` is relabelled to CARP's
+> canonical form — the same 117 sequences and per-class counts — so the two
+> libraries no longer disagree, and the `--rdna_library` help text now states the
+> rule. The `<prefix>_rdna.tsv` contract is unchanged (`TRC`/`rDNA_type`/
+> `coverage`, bare `45S`/`5S`), so `load_rdna_map()` needed no change.
+> CARP pins `tidecluster=1.21.2` (`envs/tidecluster_run.yaml`). Setting
+> `tidecluster_rdna_library` to CARP's own `data/rdna_library.fasta` is now safe.
+> This document is kept as the record of the finding.
+
 TideCluster 1.16.0 added array-level rDNA identification, which CARP consumes
 (`load_rdna_map()` in `scripts/make_unified_annotation.R` reads
 `<prefix>_rdna.tsv`). It works well on the bundled library. While tracing an

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **TideCluster 1.21.1 → 1.21.2: rDNA identification now understands CARP's
+  classification vocabulary, and says so when it cannot read a library.**
+  TideCluster matched the rRNA subunit family as `class.split("/")[0]` against
+  two literals (`rDNA_45S`, `rDNA_5S`), so only its own spelling worked. CARP's
+  `data/rdna_library.fasta` holds the *same 117 sequences* as TideCluster's
+  bundled copy — 109 unique, every one md5-identical, same per-class counts —
+  relabelled to our canonical form (`rDNA/45S_rDNA/18S`). Pointing
+  `tidecluster_rdna_library` at our own copy therefore matched nothing and wrote
+  a header-only `<prefix>_rdna.tsv`: **indistinguishable from a genome with no
+  rDNA arrays, at exit 0**. 1.21.2 matches the family anywhere in the class path
+  (45S tested before 5S, both excluding a preceding digit — `"45S"` contains
+  `"5S"`, so a naive test would label every 45S reference 5S and match `25S`
+  too), raises before any BLAST when no library entry is usable, warns when only
+  some are, and relabels its bundled library to the canonical form so the two no
+  longer disagree. Reported from this project;
+  `docs/archive/tidecluster_rdna_library_naming_request.md`.
+
+  No CARP code change: the `_rdna.tsv` contract is unchanged
+  (`TRC`/`rDNA_type`/`coverage`, bare `45S`/`5S`), which is what
+  `make_unified_annotation.R::load_rdna_map()` reads. Setting
+  `tidecluster_rdna_library` to CARP's own `data/rdna_library.fasta` is now safe;
+  before 1.21.2 it silently disabled rDNA detection.
+
 - **User-supplied repeat libraries are now checked against the classification
   vocabulary, and a bad class stops the run.** `custom_library` and
   `tandem_repeat_library` are the only classification-bearing files CARP does

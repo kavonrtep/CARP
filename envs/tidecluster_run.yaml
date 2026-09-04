@@ -123,13 +123,39 @@
 #     contact. Every CARP run is now comparative-ready, existing ones included
 #     (the analysis rebuilds the pool from TRC_*_dimers.fasta when it is absent).
 #     The file is concatenated in TRC order, so it does not vary between machines.
+# 1.21.2 makes rDNA identification accept CARP's classification vocabulary and
+# stop failing silently on a library it cannot read (upstream request from this
+# project, docs/archive/tidecluster_rdna_library_naming_request.md). The subunit
+# family used to be matched as `class.split("/")[0]` against the two literals
+# ("rDNA_45S", "rDNA_5S"), so only TideCluster's own spelling worked: a library
+# using an equivalent hierarchical vocabulary -- e.g. CARP's
+# `rDNA/45S_rDNA/18S`, the SAME 117 sequences relabelled -- matched nothing and
+# produced a header-only <prefix>_rdna.tsv, indistinguishable from a genome with
+# no rDNA, at exit 0. Three changes:
+#   * `rdna_top_type()` matches the subunit family ANYWHERE in the class path,
+#     so rDNA_45S/18S, rDNA/45S_rDNA/18S and 45S_rDNA/18S are all accepted.
+#     45S is tested before 5S and both exclude a preceding digit, because the
+#     string "45S" contains "5S" (a naive 5S test would label every 45S
+#     reference 5S, and "25S" would match too).
+#   * `validate_rdna_library()` raises up front (before any BLAST) when NO entry
+#     names a subunit family, listing the classes it did find, and warns when
+#     only some are unusable. A library contributing zero references is a
+#     configuration error, not a genome without rDNA.
+#   * the bundled data/rdna_library.fasta is relabelled to CARP's canonical form
+#     (rDNA/45S_rDNA/{18S,25S,5.8S}, rDNA/5S_rDNA/5S) -- same 117 sequences,
+#     same per-class counts, so the two libraries no longer disagree.
+# Output contract is UNCHANGED: <prefix>_rdna.tsv still has columns
+# TRC/rDNA_type/coverage with bare "45S"/"5S" labels, which is what
+# make_unified_annotation.R::load_rdna_map() reads -- no CARP change needed.
+# Setting `tidecluster_rdna_library` to CARP's own data/rdna_library.fasta is
+# now safe; before 1.21.2 it silently disabled rDNA detection.
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.21.1
+  - tidecluster=1.21.2
   # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
   # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
   # resolves (TideCluster needs r-base >= 4.2).
