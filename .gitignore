@@ -28,3 +28,7 @@ tmp/**/*.log
 tmp/**/*.txt
 tmp/**/results/
 tmp/**/conda_env/
+
+# Local-only repeat databases (curated Pisum libraries; NOT pipeline data,
+# never shipped in the container, deliberately untracked).
+/local_databases/
