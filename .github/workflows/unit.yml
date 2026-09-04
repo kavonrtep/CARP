@@ -34,6 +34,9 @@ jobs:
       - name: Python classification vector
         run: python tests/test_classification.py
 
+      - name: User-supplied library class validation (custom / tandem library)
+        run: python tests/test_validate_library_classes.py
+
       - name: Output manifest contract
         run: python tests/test_manifest.py
 

@@ -957,6 +957,16 @@ rule validate_classifications:
     classification_vocabulary.yaml. Runs after every producer of a
     classification-bearing file; consumers (library construction,
     RepeatMasker, unified annotation) depend on this rule's marker.
+
+    Also validates the OPTIONAL user-supplied libraries (`custom_library`,
+    `tandem_repeat_library`). Those are inputs, not pipeline products, so
+    nothing else canonicalises them — `concatenate_libraries` cats the custom
+    library into the RepeatMasker library verbatim. A non-vocabulary class
+    there flows straight through RepeatMasker into
+    Repeat_Annotation_Unified.gff3 and summary_statistics.csv, splitting one
+    class into parallel rows that do not sum (observed: a curated library
+    carrying `rDNA_45S/18S` put 9 such records beside the canonical
+    `rDNA/45S_rDNA/*` ones). Caught here, before the library is built.
     """
     input:
         dante_filtered=F"{config['output_dir']}/DANTE/DANTE_filtered.gff3",
@@ -964,6 +974,9 @@ rule validate_classifications:
         dante_tir_final=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_final.gff3",
         dante_tir_combined=F"{config['output_dir']}/DANTE_TIR/DANTE_TIR_combined.gff3",
         dante_line=F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3"
+    params:
+        custom_library=config.get("custom_library", ""),
+        tandem_repeat_library=config.get("tandem_repeat_library", "")
     output:
         marker=F"{config['output_dir']}/.classifications_validated"
     log:
@@ -986,6 +999,17 @@ rule validate_classifications:
         $CLS --source DANTE_TIR   --attribute Classification       {input.dante_tir_final}
         $CLS --source DANTE_TIR   --attribute Classification       {input.dante_tir_combined}
         $CLS --source DANTE_LINE  --attribute Final_Classification {input.dante_line}
+
+        # User-supplied libraries: RepeatMasker `name#class` headers. Optional,
+        # so guard on set-and-non-empty (same pattern as the other rules that
+        # take these). --mode fasta reads the class from each header.
+        CLSF="classification.py validate --mode fasta --source RepeatMasker"
+        if [ -n "{params.custom_library}" ] && [ -s "{params.custom_library}" ]; then
+            $CLSF "{params.custom_library}"
+        fi
+        if [ -n "{params.tandem_repeat_library}" ] && [ -s "{params.tandem_repeat_library}" ]; then
+            $CLSF "{params.tandem_repeat_library}"
+        fi
         touch {output.marker}
         """
 

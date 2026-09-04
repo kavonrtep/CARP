@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+- **User-supplied repeat libraries are now checked against the classification
+  vocabulary, and a bad class stops the run.** `custom_library` and
+  `tandem_repeat_library` are the only classification-bearing files CARP does
+  not produce itself, so nothing canonicalised them — `concatenate_libraries`
+  cats the custom library into the RepeatMasker library verbatim. A class that
+  is not in `classification_vocabulary.yaml` therefore travelled straight
+  through RepeatMasker into `Repeat_Annotation_Unified.gff3` and
+  `summary_statistics.csv`. The `validate_classifications` rule now validates
+  both libraries (`classification.py validate --mode fasta`), so this fails
+  before the library is built rather than surfacing as a quietly wrong
+  annotation.
+
+  Found on a *Pisum* run whose curated library carried the legacy flat rDNA
+  classes `rDNA_45S/{18S,25S,5.8S,IGS,ITS1,ITS2}`: 9 records reached the unified
+  annotation under those names, beside the canonical `rDNA/45S_rDNA/*` records
+  from the pipeline's own `data/rdna_library.fasta`. The effect is that one
+  logical class is reported as several rows that do not sum, so an rDNA total
+  read off `summary_statistics.csv` is short by whatever the non-canonical rows
+  hold.
+
+  **This can fail runs that previously completed.** If your library uses a
+  non-canonical class the run now stops at `validate_classifications` with the
+  offending class named. The fix is to relabel the library headers to the
+  canonical form (`classification.py list-canonical` prints the accepted set);
+  the sequences do not change. Libraries that were already canonical are
+  unaffected.
+
 ## 1.7.0
 
 This release fixes how `dante_line` (and the DANTE_TIR fallback) decide where a
