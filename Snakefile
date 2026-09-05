@@ -1911,17 +1911,24 @@ rule library_health:
     Two defects shipped for several releases and were invisible in every output
     the pipeline produced: the DANTE_TIR library was empty on every run (so the
     RepeatMasker library held no Class_II sequences at all), and DANTE_LINE built
-    16-22 kb "LINE" consensi whose flanks were a different, far more abundant
-    repeat. Neither was hard to see once someone looked at the library; nothing
-    in the run invited anyone to look.
+    16-22 kb "LINE" library sequences whose flanks were a different, far more
+    abundant repeat. Neither was hard to see once someone looked at the
+    library; nothing in the run invited anyone to look.
 
     This writes the numbers that would have made both obvious -- per-class
-    consensus counts and length distributions against the class bounds in
+    sequence counts and length distributions against the class bounds in
     classification_vocabulary.yaml, the share of each element builder's output
     that is inferred flank rather than anchoring domain, and how many elements
     had a flank alignment reach the --flank ceiling (a count that tracked the
     scale of the problem across 87 assemblies). Warnings go to the rule's log;
     nothing here can fail a run.
+
+    The library holds REPRESENTATIVE sequences, not consensus sequences, and for
+    Class_I/LTR they are element fragments rather than whole elements -- so the
+    per-class length rows are only meaningful where an entry is expected to span
+    a whole element. This is an advisory TSV read on demand
+    (Libraries/library_health.tsv); it is deliberately NOT a panel in the main
+    HTML report.
     """
     input:
         library=F"{config['output_dir']}/Libraries/combined_library_reduced_containment.fasta",

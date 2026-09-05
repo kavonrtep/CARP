@@ -9,7 +9,8 @@ output the pipeline produced:
 
   * the DANTE_TIR library was **empty** on every run (a GFF3<->FASTA join bug),
     so the RepeatMasker library held no Class_II sequences at all;
-  * DANTE_LINE built 16-22 kb "LINE" consensi whose flanks were a different,
+  * DANTE_LINE built 16-22 kb "LINE" library sequences whose flanks were a
+    different,
     far more abundant repeat, and RepeatMasker then masked those flanks
     genome-wide under the wrong label.
 
@@ -20,14 +21,23 @@ obvious, as a TSV that ships with the run and a set of warnings on stderr.
 It never fails a run. Everything here is advisory: a warning is a prompt to look
 at `Libraries/cross_class_screen.tsv` or at the element GFF3, not a verdict.
 
+What the library sequences are
+------------------------------
+They are **representative sequences**, not consensus sequences: each is one
+real sequence chosen to stand for a cluster, not a model averaged over its
+members. For `Class_I/LTR` they are not even whole elements — the LTR library
+is built from element *fragments* — so the per-class length rows below say
+little about that class, and a length bound is only meaningful where a library
+entry is expected to span a whole element (`Class_I/LINE`, the TIR classes).
+
 Output
 ------
 `Libraries/library_health.tsv`, long format, four columns::
 
     section   item              metric               value
 
-    library   all               n_consensi           11209
-    class     Class_I/LINE      n_consensi           2141
+    library   all               n_sequences          11209
+    class     Class_I/LINE      n_sequences          2141
     class     Class_I/LINE      max_len              7998
     boundary  DANTE_LINE        n_at_flank_ceiling   37
     boundary  DANTE_LINE        extension_fraction   0.2984
@@ -59,11 +69,11 @@ CEILING_MARGIN = 100
 # domain core it is anchored on.
 EXTENSION_FRACTION_WARN = 0.50
 
-# Below this many consensi the library is a test fixture, not a genome: "no
+# Below this many sequences the library is a test fixture, not a genome: "no
 # Class_II sequences" is then an unremarkable consequence of the multiplicity
 # floor having nothing to keep, and warning about it only trains people to
 # ignore the warning.
-MIN_CONSENSI_FOR_CLASS_WARN = 50
+MIN_SEQUENCES_FOR_CLASS_WARN = 50
 
 
 def read_fasta_classes(path: Path):
@@ -150,7 +160,7 @@ def collect(args):
     bounds = load_class_bounds(args.vocabulary)
     if args.library and Path(args.library).is_file():
         records = read_fasta_classes(Path(args.library))
-        add("library", "all", "n_consensi", len(records))
+        add("library", "all", "n_sequences", len(records))
         add("library", "all", "total_bp", sum(l for _, l in records))
 
         per_class = {}
@@ -160,7 +170,7 @@ def collect(args):
             lengths = per_class[cls]
             limit = bound_for(cls, bounds)
             over = sum(1 for l in lengths if limit and l > limit)
-            add("class", cls, "n_consensi", len(lengths))
+            add("class", cls, "n_sequences", len(lengths))
             add("class", cls, "total_bp", sum(lengths))
             add("class", cls, "median_len", median(lengths))
             add("class", cls, "max_len", max(lengths))
@@ -168,11 +178,12 @@ def collect(args):
             add("class", cls, "n_over_bound", over)
             if over:
                 warnings.append(
-                    f"{cls}: {over} consensus/consensi longer than the "
-                    f"{limit} bp bound for this class (longest {max(lengths)} bp)")
+                    f"{cls}: {over} representative sequence(s) longer than "
+                    f"the {limit} bp bound for this class "
+                    f"(longest {max(lengths)} bp)")
 
         # An empty class is the shape of the pre-1.4.0 DANTE_TIR join bug.
-        if (len(records) >= MIN_CONSENSI_FOR_CLASS_WARN
+        if (len(records) >= MIN_SEQUENCES_FOR_CLASS_WARN
                 and not any(c.startswith("Class_II") for c in per_class)):
             warnings.append(
                 "the library contains NO Class_II sequences — DNA transposons "
@@ -180,7 +191,7 @@ def collect(args):
                 "Check DANTE_TIR/all_representative_elements_combined.fasta is "
                 "non-empty.")
     else:
-        add("library", "all", "n_consensi", 0)
+        add("library", "all", "n_sequences", 0)
 
     # ── inferred element boundaries, per builder ─────────────────────
     for label, path, types in (

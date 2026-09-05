@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **The library-health panel is no longer in the main HTML report.** The data
+  still ships, as `Libraries/library_health.tsv` — this only removes the panel
+  from `repeat_annotation_report.html`. It was added to make two specific
+  regressions visible, but as a standing panel it did not tell a reader what to
+  look for, and one of its columns invited the wrong reading (see below).
+
+- **Corrected what the library sequences are called.** They are *representative
+  sequences* — one real sequence chosen to stand for a cluster — not consensus
+  sequences averaged over their members. For `Class_I/LTR` they are not whole
+  elements either: the LTR library is built from element **fragments**, so a
+  per-class length distribution says very little about that class, and the
+  `max_consensus_length` bound is only meaningful where a library entry is
+  expected to span a whole element (`Class_I/LINE`, the TIR classes). The TSV
+  metric `n_consensi` is renamed **`n_sequences`**, and the wording in
+  `scripts/library_health.py` and the rule now says representative sequence
+  throughout.
+
 ## 1.7.1
 
 - **TideCluster 1.21.1 → 1.21.2: rDNA identification now understands CARP's

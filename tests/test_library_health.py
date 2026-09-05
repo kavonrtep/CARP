@@ -63,9 +63,9 @@ class TestClassComposition(unittest.TestCase):
                                 ("c", "Class_I/LTR/Ty1_copia/Ale", 5000)])
             rows, _ = H.collect(opts(library=str(lib)))
             d = as_dict(rows)
-            self.assertEqual(d[("library", "all", "n_consensi")], 3)
+            self.assertEqual(d[("library", "all", "n_sequences")], 3)
             self.assertEqual(d[("library", "all", "total_bp")], 9000)
-            self.assertEqual(d[("class", "Class_I/LINE", "n_consensi")], 2)
+            self.assertEqual(d[("class", "Class_I/LINE", "n_sequences")], 2)
             self.assertEqual(d[("class", "Class_I/LINE", "max_len")], 3000)
             self.assertEqual(d[("class", "Class_I/LTR/Ty1_copia/Ale", "total_bp")], 5000)
 
@@ -102,12 +102,12 @@ class TestEmptyClassIIDetection(unittest.TestCase):
 
     def test_warns_on_a_real_sized_library(self):
         self.assertTrue(any("no class_ii" in w.lower()
-                            for w in self._warnings(H.MIN_CONSENSI_FOR_CLASS_WARN)))
+                            for w in self._warnings(H.MIN_SEQUENCES_FOR_CLASS_WARN)))
 
     def test_silent_on_a_fixture_sized_library(self):
         """A tiny library has no Class_II for an unremarkable reason."""
         self.assertFalse(any("Class_II" in w
-                             for w in self._warnings(H.MIN_CONSENSI_FOR_CLASS_WARN - 1)))
+                             for w in self._warnings(H.MIN_SEQUENCES_FOR_CLASS_WARN - 1)))
 
     def test_silent_when_class_ii_is_present(self):
         with tempfile.TemporaryDirectory() as tmp:
