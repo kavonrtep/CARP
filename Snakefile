@@ -197,7 +197,7 @@ for _key in ("dante_tir_fallback_max_group_size", "dante_line_max_group_size"):
 # flanks rather than the TPase anchor, 3,681 elements hit the 10 kb flank ceiling,
 # and 13-35% of anchor groups have fewer than 5 alignments (so a fixed "3rd
 # largest" filters nothing). It gets the same support rule. The length bound is
-# per TIR superfamily, from max_consensus_length in classification_vocabulary.yaml,
+# per TIR superfamily, from max_sequence_length in classification_vocabulary.yaml,
 # because CACTA genuinely reaches ~20 kb where Tc1_Mariner cannot.
 if "dante_tir_fallback_support_fraction" not in config:
     config["dante_tir_fallback_support_fraction"] = 0.5

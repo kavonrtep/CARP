@@ -63,13 +63,13 @@ class TestVocabularyLookup(unittest.TestCase):
         for cls, val in vocab.max_extension_per_side.items():
             sides = val.values() if isinstance(val, dict) else [val]
             whole = 0
-            for prefix, w in vocab.max_consensus_length.items():
+            for prefix, w in vocab.max_sequence_length.items():
                 if cls == prefix or cls.startswith(prefix + "/"):
                     whole = max(whole, w)
             if whole:
                 self.assertLessEqual(
                     2 * max(int(x) for x in sides), whole,
-                    f"{cls}: two flanks alone exceed max_consensus_length")
+                    f"{cls}: two flanks alone exceed max_sequence_length")
 
 
 class TestCapExtensions(unittest.TestCase):

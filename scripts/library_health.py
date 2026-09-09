@@ -126,7 +126,7 @@ def load_class_bounds(vocabulary=None):
     try:
         from classification import load_vocabulary
         vocab = load_vocabulary(vocabulary)
-        return dict(getattr(vocab, "max_consensus_length", {}) or {})
+        return dict(getattr(vocab, "max_sequence_length", {}) or {})
     except Exception as exc:
         sys.stderr.write(f"NOTE: class length bounds unavailable ({exc}).\n")
         return {}

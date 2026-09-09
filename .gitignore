@@ -32,3 +32,7 @@ tmp/**/conda_env/
 # Local-only repeat databases (curated Pisum libraries; NOT pipeline data,
 # never shipped in the container, deliberately untracked).
 /local_databases/
+
+# Python bytecode caches — never part of the pipeline.
+__pycache__/
+*.pyc

@@ -254,7 +254,7 @@ class TestMaxConsensusLength(unittest.TestCase):
         self.assertEqual(S.max_length_for("Class_II/Subclass_1", table), 0)
 
     def test_vocabulary_ships_a_line_bound(self):
-        table = S.load_max_consensus_length(str(REPO / "classification_vocabulary.yaml"))
+        table = S.load_max_sequence_length(str(REPO / "classification_vocabulary.yaml"))
         self.assertEqual(S.max_length_for("Class_I/LINE", table), 8000)
 
     def test_over_long_is_reported_never_trimmed(self):
@@ -262,7 +262,7 @@ class TestMaxConsensusLength(unittest.TestCase):
             records = [("big", "Class_I/LINE", "A" * 20000)]
             kept, audit = S.screen(records, None, opts())
             self.assertEqual(len(dict((n, s) for n, _, s in kept)["big"]), 20000)
-            self.assertIn("exceeds max_consensus_length", audit[0][7])
+            self.assertIn("exceeds max_sequence_length", audit[0][7])
             self.assertEqual(audit[0][4], "kept")
 
 

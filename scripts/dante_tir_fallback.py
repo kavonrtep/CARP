@@ -471,7 +471,7 @@ def max_element_length_for_subtype(subtype: str, explicit: int = 0) -> int:
     """Length bound in bp for a TIR subtype; 0 means unbounded.
 
     ``explicit`` (the CLI value) wins when set. Otherwise the bound comes from
-    ``max_consensus_length`` in classification_vocabulary.yaml, longest-prefix
+    ``max_sequence_length`` in classification_vocabulary.yaml, longest-prefix
     matched on the subtype's canonical classification -- so EnSpm_CACTA, which
     genuinely reaches ~20 kb, is not held to the same bound as Tc1_Mariner.
     """
@@ -479,7 +479,7 @@ def max_element_length_for_subtype(subtype: str, explicit: int = 0) -> int:
         return explicit
     try:
         vocab = classification.load_vocabulary()
-        table = dict(getattr(vocab, "max_consensus_length", {}) or {})
+        table = dict(getattr(vocab, "max_sequence_length", {}) or {})
     except Exception:
         return 0
     canonical = f"Class_II/Subclass_1/TIR/{sanitize_label(subtype)}"
@@ -1114,7 +1114,7 @@ Final_Classification=Class_II|Subclass_1|TIR|* and Name=TPase are used.
                              "'element' restores the previous behaviour.")
     parser.add_argument("--max-element-length", type=int, default=0,
                         help="Cap on the total element length in bp. 0 = take the bound "
-                             "for this TIR superfamily from max_consensus_length in "
+                             "for this TIR superfamily from max_sequence_length in "
                              "classification_vocabulary.yaml, which differs by more than "
                              "an order of magnitude across superfamilies (default: 0)")
     parser.add_argument(

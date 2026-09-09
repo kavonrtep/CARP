@@ -205,19 +205,31 @@ special_classes:
 # leaf class).
 # ---------------------------------------------------------------------------
 # ─────────────────────────────────────────────────────────────────────────
-# max_consensus_length — the longest a de-novo consensus of a class can
+# max_sequence_length — the longest a de-novo library sequence of a class can
 # plausibly be, in bp. Longest-prefix match: Class_I/LINE beats Class_I.
 #
-# Advisory, not enforced. `screen_library_cross_class.py` REPORTS a consensus
-# that exceeds its class bound in the audit TSV; nothing truncates on this
-# number, because where to cut an over-long consensus is not defined by its
-# length alone. The LINE bound is enforced at build time instead, by
-# dante_line's --max-element-length.
+# NOTE on the name: library entries are REPRESENTATIVE sequences (one real
+# sequence standing for a cluster), not consensus sequences averaged over
+# members — and for Class_I/LTR they are element FRAGMENTS rather than whole
+# elements, so this bound says little about that class. It is meaningful where
+# an entry is expected to span a whole element: Class_I/LINE and the TIR
+# classes. (Renamed from `max_consensus_length`; the old key is still read,
+# with a note on stderr.)
+#
+# Advisory in two places, ENFORCED in a third:
+#   * `screen_library_cross_class.py` REPORTS an over-long entry in its audit
+#     TSV — nothing truncates on this number, because where to cut an over-long
+#     sequence is not defined by its length alone;
+#   * `library_health.py` counts entries over the bound (n_over_bound);
+#   * `dante_tir_fallback.py` ENFORCES it as the default --max-element-length
+#     per TIR superfamily, since EnSpm_CACTA genuinely reaches ~20 kb where
+#     Tc1_Mariner cannot. The LINE equivalent is enforced separately by
+#     dante_line's --max-element-length.
 #
 # Its purpose is to make a boundary regression visible: CARP shipped 16-22 kb
-# `Class_I/LINE` consensi for several releases and nothing anywhere said that
-# was impossible.
-max_consensus_length:
+# `Class_I/LINE` library sequences for several releases and nothing anywhere
+# said that was impossible.
+max_sequence_length:
   # Full-length plant LINEs run 4-7 kb around an ENDO+RT core of ~2.1 kb.
   Class_I/LINE: 8000
   # LTR-RTs span a wide range; Ogre/Tat elements reach ~25 kb.
@@ -237,9 +249,9 @@ max_consensus_length:
 
 # ─────────────────────────────────────────────────────────────────────────
 # max_extension_per_side — how far a domain-anchored core may be extended on
-# ONE side, in bp. Longest-prefix match, same as max_consensus_length.
+# ONE side, in bp. Longest-prefix match, same as max_sequence_length.
 #
-# ENFORCED (unlike max_consensus_length): dante_line and dante_tir_fallback cap
+# ENFORCED (unlike max_sequence_length): dante_line and dante_tir_fallback cap
 # each flank at this value. A scalar applies to both sides; a mapping gives
 # 5prime/3prime separately.
 #

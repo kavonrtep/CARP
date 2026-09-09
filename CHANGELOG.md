@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **`max_consensus_length` renamed to `max_sequence_length`** in
+  `classification_vocabulary.yaml`. Library entries are representative
+  sequences, not consensus sequences, and for `Class_I/LTR` they are element
+  fragments — the old name described none of that. **An old vocabulary file
+  still works**: the loader reads the previous key and prints a note, because
+  silently returning no bound would have *disabled* the enforced
+  `dante_tir_fallback` element-length cap rather than just losing a report line.
+
+  Renamed across 10 files / 24 occurrences, including the accessor
+  `screen_library_cross_class.load_max_consensus_length` →
+  `load_max_sequence_length`. The vocabulary comment was also wrong and is
+  corrected: this bound is advisory in `screen_library_cross_class.py` and
+  `library_health.py`, but **enforced** in `dante_tir_fallback.py`, where it is
+  the default `--max-element-length` per TIR superfamily.
+
 ## 1.8.0
 
 - **The library-health panel is no longer in the main HTML report.** The data

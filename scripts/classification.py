@@ -50,7 +50,7 @@ class Vocabulary:
     tool_dialects: dict[str, dict]
     # Advisory per-class consensus length bounds (longest-prefix match).
     # Reported on, never enforced -- see the YAML comment.
-    max_consensus_length: dict[str, int]
+    max_sequence_length: dict[str, int]
     # ENFORCED per-side flank bounds (longest-prefix match). Scalar = both
     # sides; mapping = {"5prime": n, "3prime": n}. See the YAML comment.
     max_extension_per_side: dict[str, object]
@@ -91,6 +91,21 @@ def _find_default_vocabulary() -> Path:
     )
 
 
+
+def _deprecated_key(raw, old_name, new_name):
+    """Value of a renamed vocabulary key, warning once if the old name is used.
+
+    Returns ``{}`` when neither key is present, so callers keep their existing
+    "absent means no bound" behaviour.
+    """
+    if old_name not in raw:
+        return {}
+    sys.stderr.write(
+        f"NOTE: classification_vocabulary.yaml uses the old key "
+        f"'{old_name}'; it was renamed to '{new_name}'. Honouring the old name "
+        f"for now -- rename it to silence this.\n")
+    return raw.get(old_name) or {}
+
 def load_vocabulary(path: str | Path | None = None) -> Vocabulary:
     p = Path(path) if path else _find_default_vocabulary()
     p = p.resolve()
@@ -121,7 +136,15 @@ def load_vocabulary(path: str | Path | None = None) -> Vocabulary:
         special_classes=dict(raw.get("special_classes", {}) or {}),
         aggregation_buckets=frozenset((raw.get("aggregation_buckets", {}) or {}).keys()),
         tool_dialects=tool_dialects,
-        max_consensus_length=dict(raw.get("max_consensus_length", {}) or {}),
+        # Accept the pre-1.9.0 key name. Renamed because library entries are
+        # representative sequences, not consensus sequences (and for
+        # Class_I/LTR only fragments). Silently returning {} for an older
+        # vocabulary would DISABLE the enforced dante_tir_fallback bound, so
+        # the old key is honoured and the substitution is announced.
+        max_sequence_length=dict(
+            raw.get("max_sequence_length",
+                    _deprecated_key(raw, "max_consensus_length",
+                                    "max_sequence_length")) or {}),
         max_extension_per_side=dict(raw.get("max_extension_per_side", {}) or {}),
         max_core_to_3prime_end=dict(raw.get("max_core_to_3prime_end", {}) or {}),
         unconverged_max_extension_per_side=dict(

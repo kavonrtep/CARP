@@ -61,7 +61,7 @@ dante_tir_fallback_max_group_size: 1000
 #   failure: on a wheat run 85% of fallback bp comes from inferred flanks rather
 #   than the TPase anchor, and 13-35% of anchor groups have fewer than 5
 #   alignments (so a fixed "3rd largest" filters nothing). Same support rule.
-#   Its length bound is per TIR superfamily, from max_consensus_length in
+#   Its length bound is per TIR superfamily, from max_sequence_length in
 #   classification_vocabulary.yaml - CACTA reaches ~20 kb, Tc1_Mariner cannot.
 dante_tir_fallback_support_fraction: 0.5
 dante_tir_fallback_min_group_alignments: 5

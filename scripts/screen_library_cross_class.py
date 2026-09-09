@@ -74,7 +74,7 @@ a chimeric one mislabels whatever the foreign part matches, genome-wide. On the
 same library nothing fell below the drop thresholds (shortest survivor 829 bp).
 
 Also reports (never trims on) consensi longer than their class plausibly allows,
-per ``max_consensus_length`` in ``classification_vocabulary.yaml``.
+per ``max_sequence_length`` in ``classification_vocabulary.yaml``.
 
 Lossless fallback: if blastn is unavailable or fails, the library is copied
 through unchanged with a warning. The screen is a correctness improvement, but a
@@ -204,14 +204,14 @@ def longest_clean_span(length: int, conflicts):
     return best_start, best_end, max(0, best_start - 1), max(0, length - best_end)
 
 
-def load_max_consensus_length(vocabulary_path=None):
+def load_max_sequence_length(vocabulary_path=None):
     """{classification prefix: max bp} from the vocabulary, or {} if absent."""
     try:
         from classification import load_vocabulary
         vocab = load_vocabulary(vocabulary_path)
-        return dict(getattr(vocab, "max_consensus_length", {}) or {})
+        return dict(getattr(vocab, "max_sequence_length", {}) or {})
     except Exception as exc:  # vocabulary is advisory here, never fatal
-        sys.stderr.write(f"NOTE: max_consensus_length unavailable ({exc}); "
+        sys.stderr.write(f"NOTE: max_sequence_length unavailable ({exc}); "
                          f"length reporting disabled.\n")
         return {}
 
@@ -265,7 +265,7 @@ def screen(records, hits_path, opts):
                 conflicts.setdefault(qid, []).append((a, b))
                 conflict_classes.setdefault(qid, set()).add(scls)
 
-    max_len_table = load_max_consensus_length(opts.vocabulary)
+    max_len_table = load_max_sequence_length(opts.vocabulary)
 
     kept = []
     audit = []
@@ -277,7 +277,7 @@ def screen(records, hits_path, opts):
         over_long = max_length_for(cls, max_len_table)
         notes = []
         if over_long and length > over_long:
-            notes.append(f"exceeds max_consensus_length for {cls} ({length} > {over_long})")
+            notes.append(f"exceeds max_sequence_length for {cls} ({length} > {over_long})")
 
         if not blocks:
             kept.append((name, cls, seq))
