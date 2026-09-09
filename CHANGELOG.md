@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.0
 
 - **The library-health panel is no longer in the main HTML report.** The data
   still ships, as `Libraries/library_health.tsv` — this only removes the panel
