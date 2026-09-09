@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.8.1
+
+Naming only — **no behaviour change**. The bound values are identical, the
+annotation is unchanged, and an old vocabulary file keeps working. The only
+externally visible differences are diagnostic strings: a new deprecation NOTE
+on stderr when the old key is used, and the wording of the `notes` entry in
+`Libraries/cross_class_screen.tsv` (`exceeds max_sequence_length for …`).
 
 - **`max_consensus_length` renamed to `max_sequence_length`** in
   `classification_vocabulary.yaml`. Library entries are representative
