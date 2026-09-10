@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.2
 
 - **Fixed a crash in `make_unified_annotation` when a TideCluster TRC has no
   tandem period.** A run died at 70 % — after four hours of upstream work — with
