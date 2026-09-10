@@ -781,7 +781,13 @@ identify_te_derived_trcs <- function(t3, t1, t2 = GRanges(), period_map = intege
     lca <- lca_classification(keep_cls)
     if (.cls_depth(lca) < TE_ORIGIN_MIN_LCA_DEPTH) next
     # Domain-rhythm gate (skipped only when no period is available for this TRC).
-    P <- if (length(period_map) > 0) period_map[[name]] else NULL
+    # Test MEMBERSHIP, not just map size: `period_map` is a named integer
+    # vector and `[[` on an absent name ABORTS with "subscript out of
+    # bounds" rather than returning NULL. read_trc_periods() drops any TRC
+    # whose monomer could not be parsed, so a TRC missing from the map is
+    # routine, not rare -- this killed a 1.7.1 run at make_unified_annotation
+    # after 4 h (68 periods in trc_table, a candidate TRC not among them).
+    P <- if (name %in% names(period_map)) period_map[[name]] else NULL
     if (!is.null(P) && !is.na(P) && P > 0) {
       rhy <- te_domain_rhythm(arrays, t2p, P)
       if (!is.na(rhy$occ) &&
@@ -936,7 +942,9 @@ write_te_derived_trc_table <- function(level1, t1, t1_members, t2, period_defaul
 
     # Authoritative tandem period (trc_table monomer_tarean->monomer_kite).
     per_map  <- if (run == "short") period_short else period_default
-    mono_n   <- if (length(per_map) > 0 && !is.null(per_map[[trc]])) per_map[[trc]] else NA_integer_
+    # Membership test, for the same reason as the gate above: `!is.null(x[[n]])`
+    # cannot guard this -- `[[` aborts before is.null() ever sees a value.
+    mono_n   <- if (trc %in% names(per_map)) per_map[[trc]] else NA_integer_
     mono_n   <- suppressWarnings(as.integer(mono_n))
     n_exp    <- if (!is.na(mono_n) && mono_n > 0) as.integer(round(array_bp / mono_n)) else NA_integer_
 

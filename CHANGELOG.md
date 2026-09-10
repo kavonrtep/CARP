@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed a crash in `make_unified_annotation` when a TideCluster TRC has no
+  tandem period.** A run died at 70 % — after four hours of upstream work — with
+  `Error in period_map[[name]] : subscript out of bounds` inside
+  `identify_te_derived_trcs`. In R, a named vector subscripted with `[[` on a
+  name it does not hold **aborts**; it does not return `NULL`. The guard tested
+  the map's *size* rather than *membership*:
+
+      P <- if (length(period_map) > 0) period_map[[name]] else NULL   # wrong
+
+  The comment on the line above already described the intended behaviour
+  ("skipped only when no period is available for this TRC"), and this is not an
+  edge case: `read_trc_periods()` drops every TRC whose monomer cannot be parsed
+  from `trc_table.tsv`, so a clustering TRC absent from the map is routine. The
+  failing run had 68 periods in `trc_table.tsv` and a TE_origin candidate that
+  was not among them.
+
+  **A second instance of the same defect** was found and fixed in the
+  `te_derived_trc.csv` summary (`mono_n`), where the guard was
+  `!is.null(per_map[[trc]])` — which cannot work, because `[[` throws before
+  `is.null()` ever sees a value. It had not been reached only because the first
+  bug aborted the run earlier.
+
+  Both now use the membership idiom already present in the same file for
+  `rdna_map`. New guard `tests/test_unified_map_lookups.py` scans the script for
+  `[[name]]` lookups without a membership test; it reads the real source as text
+  rather than copying functions, so it cannot drift out of sync. Verified to fail
+  on the pre-fix source naming both lines, and the crash was reproduced against
+  the real function definition and confirmed fixed. The fixtures could not catch
+  this: their `trc_table.tsv` lists every TRC they contain.
+
 ## 1.8.1
 
 Naming only — **no behaviour change**. The bound values are identical, the
