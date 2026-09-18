@@ -1233,6 +1233,31 @@ rule make_library_of_ltrs:
     output:
         dir=directory(F"{config['output_dir']}/DANTE_LTR/library"),
         fasta=F"{config['output_dir']}/DANTE_LTR/LTR_RTs_library.fasta"
+    params:
+        # How dante_ltr_to_library treats a cluster whose members carry
+        # different classifications. 'strict' (dante_ltr's default) keeps a
+        # cluster only when the label it computes equals the cluster's majority
+        # label, so a cluster whose members are an ANCESTOR and its DESCENDANT
+        # -- Ty3/gypsy and Ty3/gypsy|chromovirus -- is discarded even though the
+        # two labels do not contradict each other. `--mode core` assigns each
+        # element the LCA of its own domains and so produces such clusters
+        # constantly; lineage mode almost never does, which is why this went
+        # unnoticed. Measured on a Draparnaldia core-mode run: 67 of 464
+        # clusters dropped, 62 of them a single ancestor chain with no conflict.
+        #
+        # 'nested' recovers those and, where at least 2 distinct elements carry
+        # the deepest label and they are >= 25% of the cluster, relabels the
+        # cluster with it -- so a family whose members individually could not be
+        # resolved still gets its lineage call from the cluster as a whole
+        # (same run: 397 -> 459 sequences, 69 clusters given a lineage-level
+        # call). Requested by this project; see
+        # docs/dante_ltr_core_library_policy_request.md.
+        #
+        # Tied to dante_ltr_mode rather than switched on outright: `nested` is
+        # NOT a superset of `strict` upstream -- a cluster mixing two sibling
+        # lineages with their shared parent is kept by `strict` and dropped by
+        # `nested` -- so it must not change a lineage-mode run.
+        conflict_policy = "nested" if config["dante_ltr_mode"] == "core" else "strict"
     log:
         stdout=F"{config['output_dir']}/DANTE_LTR/make_library_of_ltrs.log",
         stderr=F"{config['output_dir']}/DANTE_LTR/make_library_of_ltrs.err"
@@ -1256,7 +1281,7 @@ rule make_library_of_ltrs:
             # object of length 0" when a cluster has 1 member). In that case
             # we still want the pipeline to continue — create an empty library
             # and carry on; RepeatMasker will simply see no LTR consensi.
-            if dante_ltr_to_library --gff {input.gff3} --output_dir {output.dir} -s {input.genome_fasta} -c {threads}; then
+            if dante_ltr_to_library --gff {input.gff3} --output_dir {output.dir} -s {input.genome_fasta} -c {threads} --annotation_conflict {params.conflict_policy}; then
                 ln -sf library/mmseqs2/mmseqs_representative_seq_clean.fasta {output.fasta}
             else
                 echo "dante_ltr_to_library failed (too few LTRs to cluster); creating empty library"

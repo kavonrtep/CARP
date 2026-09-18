@@ -16,6 +16,18 @@
   superset: `core` needs all three core domains and recovers 96 % of `lineage` on
   a REXdb-covered genome, where it demotes nothing.
 
+  `core` also switches the LTR library's annotation policy to
+  `dante_ltr_to_library --annotation_conflict nested`. The default rule discards
+  a cluster whose members are an ancestor and its descendant (`Ty3/gypsy` and
+  `Ty3/gypsy|chromovirus`) although the labels do not contradict each other, and
+  core mode produces such clusters constantly. Measured on the *Draparnaldia*
+  run under 0.6.2.0: 413 → 478 library sequences (+65, +15.9 % bp), 4 genuine
+  conflicts still dropped, and **20 clusters gained a `Chlamyvir` lineage call**
+  in place of the bare `chromovirus` bucket — a family whose members individually
+  could not be resolved still gets its lineage from the cluster as a whole. A
+  `lineage` run passes `strict`, the tool's own default, so it is unaffected; the
+  policy is tied to the mode because `nested` is **not** a superset of `strict`.
+
 - **DANTE_LTR 0.5.4.0 → 0.6.2.0** (`envs/tidecluster.yaml`). Detection is
   byte-identical across the bump, but 0.6.2.0 passes `--spaced-kmer-mode 0` to
   `mmseqs easy-cluster` — linclust otherwise invents a random spaced-k-mer

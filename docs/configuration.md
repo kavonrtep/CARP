@@ -98,6 +98,25 @@ today from DANTE domain calls and RepeatMasker, just at 0.001–0.13 % of the
 genome instead of 3 %. On a REXdb-covered genome `core` demotes **nothing**:
 every classification stays at lineage level.
 
+**It also switches the library conflict policy.** `dante_ltr_to_library` keeps a
+cluster only when the label it computes equals the cluster's majority label, so a
+cluster whose members are an **ancestor and its descendant** — `Ty3/gypsy` and
+`Ty3/gypsy|chromovirus` — is discarded although the two labels do not contradict
+each other. Core mode assigns each element the LCA of its own domains and so
+produces such clusters constantly (measured on the *Draparnaldia* run: 67 of 464
+clusters dropped, 62 of them a single ancestor chain with no conflict at all).
+Under `dante_ltr_mode: core` the pipeline therefore passes
+`--annotation_conflict nested`, which recovers those clusters and, where at least
+2 distinct elements carry the deepest label and they are ≥ 25 % of the cluster,
+relabels the cluster with it — so a family whose members individually could not be
+resolved still gets a lineage call from the cluster as a whole. Mixes of two
+different lineages, and of two superfamilies, are still dropped. Under `lineage`
+the pipeline passes `--annotation_conflict strict`, the tool's own default, so a
+default run is unaffected. The policy is tied to the mode rather than exposed
+separately because `nested` is **not** a superset of `strict` upstream: a cluster
+mixing two sibling lineages with their shared parent is kept by `strict` and
+dropped by `nested`.
+
 **Not affected by this knob.** `dante_ltr`'s output for `lineage` is unchanged,
 so switching back reproduces the previous behaviour exactly. Note separately
 that the DANTE_LTR **0.6.2.0** bump itself moves the LTR library in *both* modes

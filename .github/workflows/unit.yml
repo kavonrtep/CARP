@@ -121,6 +121,9 @@ jobs:
       - name: R composition-table element counts on internal nodes
         run: Rscript tests/test_comp_tree_counts.R
 
+      - name: dante_ltr_mode wiring (default lineage -> strict library policy)
+        run: python tests/test_dante_ltr_mode_wiring.py
+
       - name: Pre-commit hook self-test
         run: |
           git config user.email ci@example.com
