@@ -136,6 +136,20 @@ changes *before* running the helper (it refuses a dirty tree). When you add or
 change a config parameter, add it to `docs/configuration.md` in the same change.
 
 Then push from the **host** (the sandbox has no ssh): `git push origin main && git push origin <VERSION>`.
+
+**Never state push status from memory — run `.githooks/push-status`.** The agent
+cannot push or fetch (no ssh in the container), so any "N unpushed commits" is a
+snapshot that goes stale the moment you push, and restating it later is a guess.
+The helper reports three independent sources and says when they disagree: the
+`origin/*` tracking ref (correct *only* while every push comes from this working
+copy — a push here updates it, a push from another clone does not),
+`.git/push-log.tsv` (written by the `pre-push` hook, carrying the timestamp the
+ref lacks), and the GitHub API (ground truth, no auth needed for a public repo).
+It exits non-zero when the branch or a *new* tag is missing from the remote;
+tags older than the newest pushed tag are reported as historical rather than
+pending, so the verdict stays meaningful. Both the hook and the helper need
+`git config core.hooksPath .githooks` — the same setting the `%files` pre-commit
+guard already requires.
 The tag push drives `.github/workflows/release.yml` (SIF build → in-container
 fixture → GHCR → GitHub Release → Zenodo). See `.claude/skills/release/SKILL.md`.
 

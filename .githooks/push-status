@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Authoritative answer to "what is actually on the remote?".
+
+Exists because the agent cannot push or fetch from the sandbox (no ssh), and so
+has repeatedly asserted push state from a stale snapshot. Never state push
+status from memory -- run this. It reports three independent sources and says
+plainly when they disagree:
+
+  1. refs/remotes/origin/*  -- correct ONLY while every push comes from this
+     working copy (a push here updates it); silently wrong otherwise.
+  2. .git/push-log.tsv      -- written by .githooks/pre-push, carries the
+     timestamp the tracking ref lacks. Absent for a push made elsewhere.
+  3. the GitHub API         -- ground truth, needs network, no auth for a
+     public repo.
+
+Exit status: 0 when nothing is unpushed, 1 when something is, 2 on usage error.
+"""
+import json
+import re
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+TIMEOUT = 20
+
+
+def git(*a, default=""):
+    try:
+        return subprocess.run(["git", *a], capture_output=True, text=True,
+                              check=True).stdout.strip()
+    except Exception:
+        return default
+
+
+def api(path):
+    url = f"https://api.github.com/repos/{path}"
+    req = urllib.request.Request(url, headers={"User-Agent": "carp-push-status"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        return json.load(r)
+
+
+def main():
+    url = git("remote", "get-url", "origin")
+    m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?$", url)
+    slug = f"{m.group(1)}/{m.group(2)}" if m else None
+    branch = git("rev-parse", "--abbrev-ref", "HEAD") or "main"
+
+    local = git("rev-parse", branch)
+    tracking = git("rev-parse", f"origin/{branch}", default="")
+    ahead = git("rev-list", "--count", f"origin/{branch}..{branch}", default="?")
+
+    print(f"remote            {url}  ({slug})")
+    print(f"local  {branch:<10} {local[:12]}  {git('log','-1','--format=%s',branch)[:58]}")
+    if tracking:
+        print(f"origin/{branch:<10}{tracking[:12]}  "
+              f"({ahead} commit(s) here not in the tracking ref)")
+    else:
+        print(f"origin/{branch:<10}(no tracking ref)")
+
+    log = Path(git("rev-parse", "--git-dir", default=".git")) / "push-log.tsv"
+    if log.exists():
+        rows = [l.rstrip("\n").split("\t") for l in log.read_text().splitlines()[1:]]
+        for r in rows[-3:]:
+            print(f"pushed {r[0]}  {r[3]}  ->  {r[4][:12]}")
+        if not rows:
+            print("push log          (empty)")
+    else:
+        print("push log          absent — no push recorded from this working copy")
+
+    unpushed = None
+    if slug:
+        try:
+            remote_sha = api(f"{slug}/commits/{branch}")["sha"]
+            same = remote_sha.startswith(local[:12]) or local.startswith(remote_sha[:12])
+            print(f"GitHub {branch:<10}{remote_sha[:12]}  "
+                  f"{'== local' if same else '!= local  <-- UNPUSHED WORK'}")
+            unpushed = not same
+            rtags = {r["ref"].split("/")[-1] for r in api(f"{slug}/git/refs/tags")}
+            ltags = set(git("tag").split()) if git("tag") else set()
+            missing = sorted(ltags - rtags)
+            # A tag older than the newest PUSHED tag is historical debris, not
+            # pending work; failing on it would make the verdict permanently
+            # negative and train the reader to ignore it.
+            def when(t):
+                v = git("log", "-1", "--format=%ct", t, default="0")
+                return int(v) if v.isdigit() else 0
+            newest_pushed = max((when(t) for t in rtags), default=0)
+            pending = [t for t in missing if when(t) > newest_pushed]
+            stale   = [t for t in missing if when(t) <= newest_pushed]
+            print(f"tags              {len(ltags)} local, {len(rtags)} on remote"
+                  + (f"  —  NOT pushed: {', '.join(pending)}" if pending else ""))
+            if stale:
+                print(f"                  ({len(stale)} older unpushed tag(s), predating the "
+                      f"newest pushed tag — historical, not pending: {', '.join(stale)})")
+            if pending:
+                unpushed = True
+        except Exception as exc:                       # noqa: BLE001
+            print(f"GitHub            unreachable ({type(exc).__name__}) — "
+                  "falling back to the tracking ref, which assumes every push "
+                  "came from this working copy")
+            unpushed = ahead not in ("0", "?")
+
+    print()
+    if unpushed:
+        print(f"VERDICT: work on {branch} (or a new tag) is NOT on the remote.")
+        return 1
+    print(f"VERDICT: {branch} and every current tag are on the remote.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
