@@ -29,6 +29,24 @@ assembly, then merges everything into a single, non-overlapping annotation.
 | [**RepeatMasker**](https://www.repeatmasker.org/) | Similarity masking of the genome with the CARP-built repeat library |
 | [**REXdb**](https://github.com/repeatexplorer/rexdb) | Viridiplantae protein-domain reference database backing the DANTE family |
 
+## How it works
+
+<img src="figs/carp_workflow.png" alt="CARP workflow: annotation layers added to a genome, then reconciled" width="900"/>
+
+CARP annotates a genome by **stacking layers of evidence and then reconciling
+them**. The structural tools find elements that are still intact enough to
+recognise by their own structure — a minority of the repeat content. A repeat
+library is built from exactly those elements, and RepeatMasker searches it back
+against the whole genome, which is what reaches the degraded copies that make up
+most of the repeats. Where layers disagree, tier priority resolves every base to
+a single call, so the final annotation is non-overlapping: structural evidence
+wins where it exists, and similarity fills in the rest.
+
+Regenerate the figure with `scripts/make_workflow_figure.R` (it also writes an
+SVG). For the mechanical view — which Snakemake rules run in what order, derived
+live from the `Snakefile` — see [`figs/workflow_overview.svg`](figs/workflow_overview.svg),
+produced by `scripts/make_workflow_diagram.py`.
+
 ## Example output
 
 Explore a live example of CARP's output — the
