@@ -80,6 +80,31 @@ These three flags are **independent** of each other.
 for a more conservative reduction. The two `reduce_library_max_*` knobs only
 affect scheduling/memory, never the reduced library's contents.
 
+## DANTE_LTR
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dante_ltr_mode` | `lineage` | Which detection strategy `dante_ltr` uses (`--mode`, DANTE_LTR 0.6.0.0+). **`lineage`** is DANTE_LTR's own default: an element is called only when its protein domains agree on a REXdb lineage. Where REXdb covers the genome poorly the domains disagree — RT matching Tekay while RH/INT/CHD match Chlamyvir and PROT matches Reina — and the element is discarded outright. On a *Draparnaldia* assembly (397 Mb) that yields **zero** complete LTR-RTs, so the library handed to RepeatMasker is 13 fragments (13 kb) and the LTR fraction of the genome goes essentially unannotated. **`core`** seeds instead on the ordered RT/RH/INT triplet, whose **order** gives the superfamily without consulting REXdb at all (`RT RH INT` = Ty3/gypsy, `INT RT RH` = Ty1/copia), and assigns the classification afterwards as the lowest common ancestor of the contained domains' calls, clipped at that superfamily. Same genome: **1,408 complete elements over 13.2 Mb (3.3 % of the assembly)** and a 397-sequence / 436 kb library. **Not a default, and not a superset:** `core` requires all three core domains, which 2–25 % of validated elements fail depending on the genome, and on a REXdb-covered genome it recovers 96 % of what `lineage` finds. Use it for genomes far from REXdb. |
+
+**What changes downstream in `core` mode.** Elements whose lineage cannot be
+resolved keep a call at an **internal node** of the classification tree —
+`Class_I/LTR/Ty3_gypsy` or `Class_I/LTR/Ty3_gypsy/chromovirus` rather than
+`.../chromovirus/Chlamyvir`. On the genome above that is 86 % of complete
+elements (1,320 of 1,530 records). Those labels are already valid entries in
+`classification_vocabulary.yaml`, so `validate_classifications` passes, and the
+per-class GFF3 split, the density tracks and the `All_Ty1_Copia` /
+`All_Ty3_Gypsy` roll-ups all handle them — internal-node rows already occur
+today from DANTE domain calls and RepeatMasker, just at 0.001–0.13 % of the
+genome instead of 3 %. On a REXdb-covered genome `core` demotes **nothing**:
+every classification stays at lineage level.
+
+**Not affected by this knob.** `dante_ltr`'s output for `lineage` is unchanged,
+so switching back reproduces the previous behaviour exactly. Note separately
+that the DANTE_LTR **0.6.2.0** bump itself moves the LTR library in *both* modes
+— it passes `--spaced-kmer-mode 0` to `mmseqs easy-cluster`, because linclust
+otherwise invents a random spaced-k-mer pattern per process; upstream measured
+~1.5 % more representatives, and −0.4 % on a CARP library.
+
 ## DANTE_TIR
 
 | Parameter | Default | Description |

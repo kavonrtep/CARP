@@ -42,6 +42,17 @@ reduce_library_containment: True
 # validated lossless default; raise for a more conservative reduction.
 containment_min_identity: 80
 containment_min_coverage: 0.90
+# DANTE_LTR element-detection mode: lineage (default) or core.
+# lineage calls an element only when its protein domains agree on a REXdb
+# lineage; on a genome REXdb covers poorly they disagree and the element is
+# dropped (a Draparnaldia assembly yields ZERO complete LTR-RTs). core seeds on
+# the ordered RT/RH/INT triplet, whose order gives the superfamily without
+# consulting REXdb, and labels the element afterwards - on that genome 1,408
+# complete elements (3.3% of the assembly), most labelled at superfamily or
+# chromovirus level rather than a lineage. NOT a general default: core needs all
+# three core domains and recovers ~96% of lineage mode on a well-covered genome.
+dante_ltr_mode: lineage
+
 # DANTE_TIR_FALLBACK tuning (both default to 3 if omitted).
 # dante_tir_fallback_min_alignments: how many other anchors must support an
 #   extension length before it is applied (larger = more conservative extensions).

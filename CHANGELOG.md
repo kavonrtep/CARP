@@ -2,13 +2,39 @@
 
 ## Unreleased
 
+- **New `dante_ltr_mode` config option (`lineage` | `core`, default `lineage`).**
+  Exposes DANTE_LTR 0.6.0.0's core-domain detection mode. `lineage` (unchanged
+  default) calls an LTR-RT only when its protein domains agree on a REXdb
+  lineage; where REXdb covers a genome poorly they disagree and the element is
+  discarded — on a *Draparnaldia* assembly (397 Mb) that yields **zero** complete
+  elements, a 13-fragment LTR library, and essentially no LTR annotation. `core`
+  seeds on the ordered RT/RH/INT triplet, whose order gives the superfamily
+  without consulting REXdb, and labels the element afterwards: 1,408 complete
+  elements over 13.2 Mb (3.3 % of the assembly). Elements whose lineage cannot be
+  resolved carry an internal-node classification (`Class_I/LTR/Ty3_gypsy`,
+  `.../chromovirus`) — already valid vocabulary entries. Not a default and not a
+  superset: `core` needs all three core domains and recovers 96 % of `lineage` on
+  a REXdb-covered genome, where it demotes nothing.
+
+- **DANTE_LTR 0.5.4.0 → 0.6.2.0** (`envs/tidecluster.yaml`). Detection is
+  byte-identical across the bump, but 0.6.2.0 passes `--spaced-kmer-mode 0` to
+  `mmseqs easy-cluster` — linclust otherwise invents a random spaced-k-mer
+  pattern per process — which **changes the LTR library content in both modes**
+  (~+1.5 % representatives upstream, −0.4 % measured on a CARP library). Expect
+  the LTR library and the RepeatMasker annotation downstream of it to move on
+  this upgrade even at the default `dante_ltr_mode: lineage`. 0.6.1.0 also adds
+  `dante_ltr_to_library --annotation_conflict {strict,nested}`, requested by this
+  project (`docs/dante_ltr_core_library_policy_request.md`); CARP does not pass
+  it yet.
+
 - **Report: the "Complete TEs" column now has values on internal-node rows.**
   `build_comp_tree` attached the element count only to leaf rows, so a
   classification carrying its own base pairs *and* having annotated children
   showed its bp but no count anywhere — and it was data-dependent, since the same
   node rendered as a leaf (with a count) when no child happened to be annotated.
   "Total" rows now carry the subtree sum, on the same basis as their bp column,
-  and "Unclassified" rows carry the node's own count.
+  and "Unclassified" rows carry the node's own count. Most visible under
+  `dante_ltr_mode: core`, where internal-node calls are the norm.
 
 ## 1.8.2
 

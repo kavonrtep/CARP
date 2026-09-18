@@ -103,6 +103,11 @@ cross_class_ownership_margin: 0.10
 #   behaviour. See docs/configuration.md.
 dante_line_library_source: core
 dante_tir_fallback_library_source: core
+
+# DANTE_LTR element-detection mode: lineage (default) | core. See
+# docs/configuration.md - core is for genomes REXdb covers poorly, where lineage
+# mode can find no complete elements at all; it is not a superset of lineage.
+dante_ltr_mode: lineage
 dante_line_support_fraction: 0.5
 dante_line_min_group_alignments: 5
 # dante_line_max_extension (default 0): symmetric ESCAPE HATCH — a value > 0 caps

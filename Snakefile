@@ -236,6 +236,33 @@ for _key in ("dante_line_library_source", "dante_tir_fallback_library_source"):
     if config[_key] not in ("core", "element"):
         raise ValueError(f"Invalid value for {_key}: must be 'core' or 'element'.")
 
+# DANTE_LTR element-detection mode (dante_ltr --mode, 0.6.0.0+). 'lineage' is
+# DANTE_LTR's own default and the pipeline default: an element is called only
+# when its protein domains agree on a REXdb lineage. Where REXdb covers a genome
+# poorly the domains disagree and the element is discarded entirely -- on a
+# Draparnaldia assembly (397 Mb) lineage mode finds ZERO complete LTR-RTs, so the
+# LTR library handed to RepeatMasker is 13 fragments and the LTR fraction of the
+# genome goes essentially unannotated.
+#
+# 'core' seeds instead on the ordered RT/RH/INT triplet, whose ORDER gives the
+# superfamily without consulting REXdb at all (RT RH INT = Ty3/gypsy, INT RT RH =
+# Ty1/copia), and assigns the classification afterwards as the LCA of the
+# contained domains' calls, clipped at that superfamily. Same genome: 1,408
+# complete elements over 13.2 Mb (3.3% of the assembly). 86% of them are labelled
+# at an INTERNAL node (Class_I/LTR/Ty3_gypsy, or .../chromovirus) rather than a
+# lineage -- every such label is already in classification_vocabulary.yaml, so
+# validate_classifications passes and the downstream splits/rollups handle them.
+#
+# Deliberately NOT the default: core mode requires all three core domains, which
+# 2-25% of validated elements fail depending on the genome, and on a
+# REXdb-covered genome it recovers 96% of what lineage mode finds -- it is not a
+# superset. On such a covered genome it also demotes nothing: every
+# classification stays at lineage level. Use it for genomes far from REXdb.
+if "dante_ltr_mode" not in config:
+    config["dante_ltr_mode"] = "lineage"
+if config["dante_ltr_mode"] not in ("lineage", "core"):
+    raise ValueError("Invalid value for dante_ltr_mode: must be 'lineage' or 'core'.")
+
 # Cross-class library screen. Every other reduction CARP runs is WITHIN a class
 # (reduce_library_size.py clusters per classification; containment_reduce_library.py
 # only drops a fragment into a SAME-class container), so a consensus that is part
@@ -1117,7 +1144,8 @@ rule dante_ltr:
         gff = F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
         html = F"{config['output_dir']}/DANTE_LTR/DANTE_LTR_summary.html"
     params:
-        prefix = lambda wildcards, output: output.gff.replace(".gff3", "")
+        prefix = lambda wildcards, output: output.gff.replace(".gff3", ""),
+        mode = config["dante_ltr_mode"]
     log:
         stdout=F"{config['output_dir']}/DANTE_LTR/dante_ltr.log",
         stderr=F"{config['output_dir']}/DANTE_LTR/dante_ltr.err"
@@ -1150,7 +1178,9 @@ rule dante_ltr:
         if [ {resources.mem_mb} -ge 1024 ]; then
             max_mem_arg="--max_memory $(( {resources.mem_mb} / 1024 ))"
         fi
-        dante_ltr -o {params.prefix} -s {input.fasta} -g {input.gff} -c {threads} -M 1 -S 50000000 $max_mem_arg
+        # --mode is passed unconditionally: 'lineage' is dante_ltr's own default,
+        # so this is output-neutral and records the mode in the rule's log.
+        dante_ltr -o {params.prefix} -s {input.fasta} -g {input.gff} -c {threads} -M 1 -S 50000000 --mode {params.mode} $max_mem_arg
         # if exit status is 0 and gff3 file was created but html is missing, create an empty file
         echo "DANTE LTR-RTs finished"
         if [ -f {output.gff} ]; then

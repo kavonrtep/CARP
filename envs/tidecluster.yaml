@@ -57,7 +57,26 @@ dependencies:
   # unchanged — per-chunk results stay index-keyed, so pool size cannot reach it;
   # verified on tiny_pea, 0.5.3.0 vs 0.5.4.0 byte-identical on DANTE_LTR.gff3
   # (26,150 features) and DANTE_LTR_statistics.csv but for the version header.
-  - dante_ltr=0.5.4.0
+  #
+  # 0.6.x adds the core-domain detection mode and the library annotation policy
+  # CARP's `dante_ltr_mode` exposes (docs/dante_ltr_core_mode_plan.md).
+  #   0.6.0.0  `--mode core`: seed on the ordered RT/RH/INT triplet, whose ORDER
+  #            gives the superfamily without consulting REXdb, instead of
+  #            requiring the domains to agree on a REXdb lineage. `lineage`
+  #            stays the default and its output is unchanged.
+  #   0.6.1.0  `dante_ltr_to_library --annotation_conflict {strict,nested}`
+  #            (default strict, byte-identical). Requested by this project —
+  #            docs/dante_ltr_core_library_policy_request.md.
+  #   0.6.2.0  passes `--spaced-kmer-mode 0` to `mmseqs easy-cluster`, because
+  #            linclust otherwise invents a RANDOM spaced-kmer pattern per
+  #            process. NOTE: this CHANGES the library content in BOTH modes
+  #            (~+1.5% representatives upstream; -0.4% measured on a CARP
+  #            library here), so the LTR library and the RepeatMasker annotation
+  #            downstream of it move on this bump even at the default
+  #            `dante_ltr_mode: lineage`. Expect that diff.
+  # Detection itself is untouched: the `dante_ltr` executable is byte-identical
+  # 0.6.0.0 -> 0.6.2.0 and `utils/` differs only by the new library_policy.R.
+  - dante_ltr=0.6.2.0
   - repeatmasker=4.1.2.p1
   - seqkit=2.8.2
   - cap3=10.2011
