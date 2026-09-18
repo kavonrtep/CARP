@@ -39,6 +39,21 @@
   project (`docs/dante_ltr_core_library_policy_request.md`); CARP does not pass
   it yet.
 
+- **Report: under `dante_ltr_mode: core`, the LTR density panel shows
+  internal-node tracks and the header names the mode.** The panel filtered
+  discovered BigWigs against a fixed list of REXdb lineage names, so a track
+  whose classification stops at an internal node — `Class_I.LTR.Ty3_gypsy`,
+  `….chromovirus` — was silently dropped. Under core mode those carry the bulk
+  of the annotation (86 % of complete elements on the *Draparnaldia* run), which
+  would have rendered a panel showing two lineages beside a composition table
+  reporting 3.3 % LTR content. The panel now accepts any node under
+  `Class_I/LTR` in `classification_vocabulary.yaml`, in vocabulary order,
+  labelled `chromovirus (unspecified)` so a bucket cannot read as a lineage, and
+  the header carries a `DANTE_LTR mode: core` badge. Both are gated on the mode,
+  read from `run_provenance.json` (absent → `lineage`), so a default report is
+  byte-identical — verified against the pre-change render of a tiny_pea run.
+  `dante_ltr_mode` is now recorded in `run_provenance.json`.
+
 - **Report: the "Complete TEs" column now has values on internal-node rows.**
   `build_comp_tree` attached the element count only to leaf rows, so a
   classification carrying its own base pairs *and* having annotated children

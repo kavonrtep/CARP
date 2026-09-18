@@ -124,6 +124,9 @@ jobs:
       - name: dante_ltr_mode wiring (default lineage -> strict library policy)
         run: python tests/test_dante_ltr_mode_wiring.py
 
+      - name: R LTR density-panel track discovery (lineage vs core)
+        run: Rscript tests/test_lineage_bw_panel.R
+
       - name: Pre-commit hook self-test
         run: |
           git config user.email ci@example.com

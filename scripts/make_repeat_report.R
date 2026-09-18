@@ -100,6 +100,19 @@ load_provenance <- function(outdir) {
            error = function(e) NULL)
 }
 
+# Which dante_ltr detection mode produced this run. record_provenance.py
+# projects the USER's config, not the Snakefile-resolved one, so the key is
+# present only when the user set it explicitly -- a default run records nothing.
+# Absent therefore means "lineage", which is also the right answer for a bare
+# `snakemake` run that writes no provenance at all.
+dante_ltr_mode_of_run <- function(outdir) {
+  prov <- load_provenance(outdir)
+  m <- tryCatch(prov$config$dante_ltr_mode, error = function(e) NULL)
+  if (is.null(m) || length(m) != 1L || is.na(m) || !nzchar(as.character(m)))
+    return("lineage")
+  as.character(m)
+}
+
 # ── B3. DANTE_LTR stats from GFF3 ─────────────────────────────────────────
 # Count only *complete* LTR-RTs for the "Complete TEs" column of the
 # classification table. DANTE_LTR labels the element's completeness via
@@ -599,8 +612,21 @@ rdp_simplify <- function(x, y, epsilon) {
   sort(which(keep))
 }
 
-# Find lineage-level BigWig files in a repeat-annotation directory
-discover_lineage_bw_files <- function(rm_dir, bin_width) {
+# Find lineage-level BigWig files in a repeat-annotation directory.
+#
+# `mode` is the run's dante_ltr detection mode. Under "lineage" (the default)
+# the accepted set is the fixed REXdb lineage list below and the behaviour is
+# unchanged. Under "core" an element's classification routinely stops at an
+# INTERNAL node -- Class_I/LTR/Ty3_gypsy, or .../chromovirus -- because the
+# superfamily comes from domain order while the lineage stays unresolved. Those
+# produce per-class tracks whose last path component is not a lineage name, so
+# the fixed list silently discarded them: on a Draparnaldia run that is 86% of
+# complete elements, leaving a panel showing two lineages beside a composition
+# table reporting 3.3% LTR content. Internal-node rows do occur in lineage mode
+# too (from DANTE domain calls and RepeatMasker) but at 0.001-0.13% of the
+# genome, which is why this went unnoticed; widening the set only for core mode
+# keeps the canonical report untouched.
+discover_lineage_bw_files <- function(rm_dir, bin_width, mode = "lineage") {
   suffix <- if (bin_width == 100000L) "_100k.bw" else "_10k.bw"
   known  <- c("Ale","Alesia","Angela","Bianca","Bryco","Gymco-I","Gymco-II","Gymco-III",
               "Gymco-IV","Ikeros","Ivana","Lyco","Osser","SIRE","TAR","Tork","Chlamyvir",
@@ -610,6 +636,29 @@ discover_lineage_bw_files <- function(rm_dir, bin_width) {
   pat    <- paste0("LTR\\.Ty.*", gsub("\\.", "\\\\.", suffix), "$")
   fnames <- list.files(rm_dir, pattern = pat, full.names = FALSE)
   if (length(fnames) == 0) return(list())
+
+  if (identical(mode, "core")) {
+    # Accept any node under Class_I/LTR/Ty* in the vocabulary, in vocabulary
+    # order, and mark the internal ones so a bucket does not read as a lineage.
+    vocab <- tryCatch(get_canonical(), error = function(e) character(0))
+    ltr   <- vocab[startsWith(vocab, "Class_I/LTR/Ty")]
+    if (length(ltr) > 0) {
+      paths <- gsub("\\.", "/", sub("_100k\\.bw$|_10k\\.bw$", "", fnames))
+      keep  <- paths %in% ltr
+      fnames <- fnames[keep]; paths <- paths[keep]
+      if (length(fnames) == 0) return(list())
+      idx   <- match(paths, ltr)
+      internal <- vapply(ltr, function(p) any(startsWith(ltr, paste0(p, "/"))),
+                         logical(1))
+      leaf  <- vapply(strsplit(paths, "/", fixed = TRUE),
+                      function(x) x[length(x)], character(1))
+      lnames <- ifelse(internal[idx], paste0(leaf, " (unspecified)"), leaf)
+      ord   <- order(idx)
+      return(setNames(as.list(file.path(rm_dir, fnames[ord])), lnames[ord]))
+    }
+    # No usable vocabulary -> fall through to the fixed list rather than nothing.
+  }
+
   lnames <- gsub("_100k\\.bw$|_10k\\.bw$", "", fnames)
   lnames <- gsub(".*\\.", "", lnames)
   keep   <- lnames %in% known
@@ -1635,6 +1684,13 @@ main <- function() {
   message("Loading repeat composition...")
   comp         <- load_composition(outdir)
 
+  # Which dante_ltr mode produced this run. Drives two things: whether the LTR
+  # density panel accepts internal-node tracks (they are the norm under core
+  # mode, a rounding error under lineage), and the header badge below.
+  ltr_mode     <- dante_ltr_mode_of_run(outdir)
+  if (!identical(ltr_mode, "lineage"))
+    message("DANTE_LTR detection mode: ", ltr_mode)
+
   message("Loading DANTE_LTR stats...")
   ltr_stats    <- load_dante_ltr_stats(outdir)
 
@@ -1754,7 +1810,7 @@ main <- function() {
   ))
 
   # Panel 2 — LTR lineages (matches page 2)
-  lineage_bw_map <- discover_lineage_bw_files(rm_100k, d_bin)
+  lineage_bw_map <- discover_lineage_bw_files(rm_100k, d_bin, mode = ltr_mode)
 
   # Panel 3 — TRC satellite clusters (matches page 3)
   trc_bw_map <- discover_trc_bw_files(outdir, d_bin)
@@ -1836,6 +1892,19 @@ main <- function() {
     outdir, d_bin, genome_avg_frac * 100,
     provenance_footer_html = prov_footer_html
   )
+
+  # C6 -- name the detection mode in the header when it is not the default.
+  # Without this the internal-node rows core mode produces (Ty3_gypsy,
+  # chromovirus) read as a defect rather than as the mode working as intended.
+  # Injected here rather than through the page template: that template is one
+  # long positional sprintf, and adding a placeholder mid-string would shift
+  # every argument after it.
+  if (!identical(ltr_mode, "lineage")) {
+    badge <- sprintf(
+      '</h1><span style="background:#e67e22;color:#fff;font-size:0.72em;padding:3px 8px;border-radius:3px;margin-left:10px;letter-spacing:.03em" title="dante_ltr --mode %s: elements are seeded on the ordered RT/RH/INT core, so a classification may stop at superfamily or an intermediate node">DANTE_LTR mode: %s</span>',
+      ltr_mode, ltr_mode)
+    html_out <- sub("</h1>", badge, html_out, fixed = TRUE)
+  }
 
   out_file <- file.path(outdir, "repeat_annotation_report.html")
   writeLines(html_out, out_file)

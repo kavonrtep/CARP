@@ -117,6 +117,19 @@ separately because `nested` is **not** a superset of `strict` upstream: a cluste
 mixing two sibling lineages with their shared parent is kept by `strict` and
 dropped by `nested`.
 
+**The report adapts to it.** The LTR density panel filters tracks against a fixed
+list of REXdb lineage names, so an internal-node track — `Class_I.LTR.Ty3_gypsy`,
+`….chromovirus` — was silently dropped from it. Under `core` those are the norm
+rather than a rounding error (86 % of complete elements on the *Draparnaldia*
+run), so the panel instead accepts any node under `Class_I/LTR` from
+`classification_vocabulary.yaml`, in vocabulary order, labelling the buckets
+`chromovirus (unspecified)` so they cannot be misread as lineages. The report
+header also carries a **`DANTE_LTR mode: core`** badge, so the coarse rows read as
+the mode working rather than as a defect. Both are gated on the mode — a
+`lineage` report is byte-identical to before. The mode is read from
+`run_provenance.json`; when it is absent (a default run records nothing, since
+provenance projects the *user's* config) the report assumes `lineage`.
+
 **Not affected by this knob.** `dante_ltr`'s output for `lineage` is unchanged,
 so switching back reproduces the previous behaviour exactly. Note separately
 that the DANTE_LTR **0.6.2.0** bump itself moves the LTR library in *both* modes

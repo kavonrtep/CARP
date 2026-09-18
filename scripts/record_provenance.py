@@ -111,6 +111,12 @@ def _filter_config(config: dict) -> dict:
         "tidecluster_reannotate_superfamily_merge",
         "rm_tc_tandem_gate",
         "reduce_library",
+        # Which dante_ltr detection mode ran. Present only when the user sets it
+        # (this projects the user's config, not the Snakefile-resolved one), so
+        # a default run records nothing -- consumers must read "absent" as
+        # "lineage". make_repeat_report.R depends on this key to decide whether
+        # internal-node LTR density tracks belong in the lineage panel.
+        "dante_ltr_mode",
         "dante_tir_min_multiplicity",
         "dante_tir_fallback_min_alignments",
         "dante_tir_fallback_min_cluster_size",
