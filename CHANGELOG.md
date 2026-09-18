@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.0
 
 - **New `dante_ltr_mode` config option (`lineage` | `core`, default `lineage`).**
   Exposes DANTE_LTR 0.6.0.0's core-domain detection mode. `lineage` (unchanged
