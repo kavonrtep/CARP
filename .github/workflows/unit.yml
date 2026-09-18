@@ -118,6 +118,9 @@ jobs:
       - name: R memory-budget resolver (mirrors the Python chain case-for-case)
         run: Rscript tests/test_mem_utils.R
 
+      - name: R composition-table element counts on internal nodes
+        run: Rscript tests/test_comp_tree_counts.R
+
       - name: Pre-commit hook self-test
         run: |
           git config user.email ci@example.com

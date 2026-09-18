@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Report: the "Complete TEs" column now has values on internal-node rows.**
+  `build_comp_tree` attached the element count only to leaf rows, so a
+  classification carrying its own base pairs *and* having annotated children
+  showed its bp but no count anywhere — and it was data-dependent, since the same
+  node rendered as a leaf (with a count) when no child happened to be annotated.
+  "Total" rows now carry the subtree sum, on the same basis as their bp column,
+  and "Unclassified" rows carry the node's own count.
+
 ## 1.8.2
 
 - **Fixed a crash in `make_unified_annotation` when a TideCluster TRC has no

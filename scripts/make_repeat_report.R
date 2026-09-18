@@ -408,6 +408,25 @@ build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL,
     }
   }
 
+  # Subtree sums for the count columns, on the same basis as `subtree_bp`: a
+  # "Total" row aggregates its whole subtree, so the element counts must
+  # aggregate too. They used to render blank on every internal node, which reads
+  # as "no elements" on a node whose children carry them all. Returns NA when
+  # nothing in the subtree has a count, so the cell stays empty rather than
+  # printing 0.
+  subtree_count <- function(id, tbl) {
+    own  <- as.numeric(unname(tbl[id]))
+    kids <- children_of[[id]]
+    vals <- c(own, if (length(kids) > 0)
+                     vapply(kids, subtree_count, numeric(1), tbl = tbl)
+                   else numeric(0))
+    if (all(is.na(vals))) return(NA_real_)
+    sum(vals, na.rm = TRUE)
+  }
+  as_count <- function(x) if (is.na(x)) NA_integer_ else as.integer(x)
+  subtree_dc_cache  <- sapply(all_ids, subtree_count, tbl = dante_counts)
+  subtree_trc_cache <- sapply(all_ids, subtree_count, tbl = ltr_tr_counts)
+
   # DFS pre-order traversal
   rows <- list()
   dfs <- function(id, depth) {
@@ -421,6 +440,8 @@ build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL,
     dc       <- if (length(dc_raw) > 0 && !is.na(dc_raw)) unname(dc_raw) else NA_integer_
     trc_raw  <- ltr_tr_counts[id]
     trc      <- if (length(trc_raw) > 0 && !is.na(trc_raw)) unname(trc_raw) else NA_integer_
+    tot_dc   <- as_count(unname(subtree_dc_cache[id]))
+    tot_trc  <- as_count(unname(subtree_trc_cache[id]))
 
     if (has_kids) {
       # Total row
@@ -431,8 +452,8 @@ build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL,
         depth        = depth,
         bp           = tot_bp,
         pct          = tot_bp / genome_size * 100,
-        dante_count  = NA_integer_,
-        ltr_tr_count = NA_integer_
+        dante_count  = tot_dc,
+        ltr_tr_count = tot_trc
       )
       # Unspecified row (own CSV value) only if non-zero
       if (own_bp > 0) {
@@ -443,8 +464,8 @@ build_comp_tree <- function(comp, ltr_stats, tir_stats, line_stats = NULL,
           depth        = depth + 1L,
           bp           = own_bp,
           pct          = unname(csv_pct[id] %||% 0),
-          dante_count  = NA_integer_,
-          ltr_tr_count = NA_integer_
+          dante_count  = dc,
+          ltr_tr_count = trc
         )
       }
       # Recurse into children sorted by subtree bp descending
