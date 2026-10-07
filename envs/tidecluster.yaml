@@ -76,7 +76,22 @@ dependencies:
   #            `dante_ltr_mode: lineage`. Expect that diff.
   # Detection itself is untouched: the `dante_ltr` executable is byte-identical
   # 0.6.0.0 -> 0.6.2.0 and `utils/` differs only by the new library_policy.R.
-  - dante_ltr=0.6.2.0
+  #   0.6.3.0  crash fixes only: core mode no longer aborts a chunk when a seed's
+  #            RT/RH/INT all sit between --min_relative_length_core and the
+  #            standard threshold (#14), or when exactly one domain passes the
+  #            block filter; dante_ltr_summary no longer fails on single-lineage
+  #            or PBS-less output.
+  #   0.6.4.0  lineage mode no longer aborts the whole run ("each range must
+  #            have an end that is greater or equal to its start minus one",
+  #            get_ranges_right()) when an opposite-strand domain overlaps an
+  #            element's first/last domain (#15). More likely with `-M 1`,
+  #            which the `dante_ltr` rule passes. Only windows that were
+  #            invalid change.
+  #   Measured 0.6.2.0 vs 0.6.4.0 on tiny_pea: lineage mode byte-identical
+  #   (GFF3, statistics, FASTAs, LTR library). Core mode: same 4,444 elements
+  #   and coordinates, but 137 gain the seed's core domains (#14) and 1 loses
+  #   its lineage label as a result.
+  - dante_ltr=0.6.4.0
   - repeatmasker=4.1.2.p1
   - seqkit=2.8.2
   - cap3=10.2011

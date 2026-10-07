@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.1
+
+- **DANTE_LTR 0.6.2.0 → 0.6.4.0** (`envs/tidecluster.yaml`). Bug fixes only.
+  In the default `dante_ltr_mode: lineage` a run that finished under 0.6.2.0
+  gives the same output: measured byte-identical on tiny_pea (81 Mbp) for
+  `DANTE_LTR.gff3`, the statistics, the element FASTAs and the LTR library
+  (1,376 sequences). In `core` mode the elements are the same (4,444 elements,
+  identical coordinates, identical 26.7 Mb total) but 137 of them now list more
+  protein domains, because the #14 fix keeps the seed's core domains; with the
+  full domain set 1 element lost its lineage label (`Ty1_copia/Ivana` →
+  `Ty1_copia`).
+  - 0.6.4.0 fixes a crash that stopped the whole `dante_ltr` step in the default
+    `lineage` mode: `each range must have an end that is greater or equal to its
+    start minus one` (upstream issue #15). It happened when a protein domain on
+    the opposite strand overlapped the first or last domain of an element. CARP
+    runs `dante_ltr -M 1`, which makes this more likely. Such an element is now
+    reported without an LTR pair instead of aborting the run.
+  - 0.6.3.0 fixes two crashes in `dante_ltr_mode: core` (upstream issue #14 — a
+    seed whose core domains sit between the core and standard length thresholds,
+    which also dropped such domains from elements that did not crash; and an
+    input where only one domain passes the block filter) and a crash in
+    `dante_ltr_summary` on output with a single lineage or no PBS.
+
 ## 1.9.0
 
 - **New `dante_ltr_mode` config option (`lineage` | `core`, default `lineage`).**
