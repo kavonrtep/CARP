@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.2
 
 - **Fixed wrong monomer lengths on the satellite density tracks** (HTML report
   panel "Density — satellite clusters" and page 3 of `summary_plots.pdf`). The
