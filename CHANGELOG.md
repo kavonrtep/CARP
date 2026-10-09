@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed wrong monomer lengths on the satellite density tracks** (HTML report
+  panel "Density — satellite clusters" and page 3 of `summary_plots.pdf`). The
+  `TRC_n (<bp>bp)` label came from the strongest k-mer peak in each array,
+  which often picks up a short repeat *inside* the monomer. In run-000076 five
+  45S rDNA clusters (repeat unit ~10.8 kb) were labelled `22bp`. Labels now
+  use TideCluster's `trc_table.tsv`: `prevalent_founder`, then
+  `monomer_tarean`, then `monomer_kite`. In run-000076 the rDNA clusters
+  now read 10,778–10,810 bp; TRC_11, TRC_18 and TRC_20 have no founder value
+  and fall back to the TAREAN estimate (~7.8 kb). A short note under the panel
+  explains that monomer estimates can differ between methods and links to the
+  TideCluster report.
+- **TE_origin domain-rhythm gate now prefers `prevalent_founder`** as the tandem
+  period (was `monomer_tarean` first). This is the same lookup the report
+  labels use, now shared in `scripts/trc_periods.R`. TAREAN can also lock onto a
+  sub-repeat (run-000076 TRC_1: TAREAN 20 bp, founder 170 bp). Expected effect
+  is small: across existing runs, 2 of 1,134 TRCs already tagged TE_origin
+  get a period more than 20% different. The `monomer_length_bp` column of
+  `Repeat_Annotation_Unified.te_derived_trc.csv` follows the same value.
+
 ## 1.9.1
 
 - **DANTE_LTR 0.6.2.0 → 0.6.4.0** (`envs/tidecluster.yaml`). Bug fixes only.

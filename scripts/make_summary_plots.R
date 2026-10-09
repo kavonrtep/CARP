@@ -180,16 +180,12 @@ names(lineages_bw) <- gsub(".+[.]", "",
 
 # plot major satellites
 
-read_csv_or_empty <- function(path){
-  if (file.exists(path)) {
-    tryCatch(read.table(path, header = TRUE, sep = "\t"),
-             error = function(e) data.frame())
-  } else {
-    data.frame()
-  }
-}
-monomer_estimates_kite <- read_csv_or_empty(
-  paste0(main_dir, "/TideCluster/default/TideCluster_kite/monomer_size_top3_estimats.csv"))
+# Per-TRC monomer: same trc_table.tsv source and fallback as the unified
+# annotation and the HTML report (read_trc_periods, scripts/trc_periods.R).
+source(file.path(dirname(sub("^--file=", "",
+  grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "trc_periods.R"))
+trc_monomer <- read_trc_periods(
+  paste0(main_dir, "/TideCluster/default/TideCluster_report/data/trc_table.tsv"))
 
 major_bigwig <- dir(
   paste0(main_dir,
@@ -207,20 +203,9 @@ trc_index <- trc_index[order(trc_index)]
 # read first max 20 satellites (seq_len handles the no-satellite case: N == 0)
 N <- min(20, length(major_bigwig))
 trc_bw <- list()
-# TideCluster kite estimate: per-array `monomer_size` (older releases used
-# `monomer_size_best_estimate_stat.csv` with a `position` column — the stale
-# schema that made labels drop their (bp) size). Take the per-TRC mode.
-have_monomer <- all(c("monomer_size", "TRC_ID") %in% names(monomer_estimates_kite))
 for (i in seq_len(N)){
   label <- trc_name[i]
-  monomer_size <- NA
-  if (have_monomer){
-    v <- as.character(monomer_estimates_kite$monomer_size[monomer_estimates_kite$TRC_ID == label])
-    v <- v[!is.na(v) & nzchar(v)]
-    if (length(v) > 0)
-      monomer_size <- names(sort(table(v), decreasing = TRUE)[1])
-  }
-  lab <- if (is.null(monomer_size) || is.na(monomer_size)) label else paste0(label, " (", monomer_size, "bp)")
+  lab <- if (label %in% names(trc_monomer)) paste0(label, " (", trc_monomer[[label]], "bp)") else label
   trc_bw[[lab]] <- import(paste0(main_dir, "/Tandem_repeats_TideCluster_split_by_family_bigwig/100k/",
                                      major_bigwig[[i]]))
 }

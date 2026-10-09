@@ -2,13 +2,13 @@
 # Unit test for the TE-derived TRC logic in make_unified_annotation.R:
 #   .order_domains          — canonical protein-domain ordering
 #   read_trc_periods        — per-TRC tandem period from trc_table.tsv
-#                             (monomer_tarean -> monomer_kite -> prevalent_founder)
+#                             (prevalent_founder -> monomer_tarean -> monomer_kite)
 #   te_domain_rhythm        — per-monomer domain occupancy (the gate criterion)
 #   write_te_derived_trc_table — the CSV summary (element counts + occupancy cols)
 #
 # Behaviours covered:
 #   1. Domain ordering: canonical, unknown domains alphabetical after.
-#   2. Period source: TAREAN consensus wins; KITE founder / prevalent_founder
+#   2. Period source: prevalent_founder wins; TAREAN consensus / KITE founder
 #      fall back; all-empty rows are dropped. (The kite `monomer_size` SSR
 #      sub-period trap is why the source is trc_table, not the kite CSV.)
 #   3. Domain rhythm: a TE-derived tandem has domains in ~every monomer window
@@ -33,28 +33,8 @@ log_msg <- function(...) invisible(NULL)   # stub
   d[order(ifelse(is.na(rnk), length(.DOMAIN_ORDER) + 1L, rnk), d)]
 }
 
-read_trc_periods <- function(trc_table_tsv) {
-  empty <- setNames(integer(0), character(0))
-  if (is.null(trc_table_tsv) || !nzchar(trc_table_tsv) || !file.exists(trc_table_tsv))
-    return(empty)
-  tab <- tryCatch(read.table(trc_table_tsv, header = TRUE, sep = "\t", check.names = FALSE,
-                             stringsAsFactors = FALSE, quote = "", comment.char = ""),
-                  error = function(e) NULL)
-  if (is.null(tab) || nrow(tab) == 0 || !("TRC_ID" %in% names(tab))) return(empty)
-  pick <- function(row_i) {
-    for (col in c("monomer_tarean", "monomer_kite", "prevalent_founder")) {
-      if (col %in% names(tab)) {
-        v <- suppressWarnings(as.integer(as.character(tab[[col]][row_i])))
-        if (!is.na(v) && v > 0) return(v)
-      }
-    }
-    NA_integer_
-  }
-  vals <- vapply(seq_len(nrow(tab)), pick, integer(1))
-  ids  <- as.character(tab$TRC_ID)
-  keep <- !is.na(vals) & nzchar(ids)
-  setNames(vals[keep], ids[keep])
-}
+# read_trc_periods lives in its own sourceable module (shared with the reports).
+source(file.path("scripts", "trc_periods.R"))
 
 te_domain_rhythm <- function(arr, doms, P) {
   if (is.na(P) || P <= 0 || length(arr) == 0)
@@ -168,17 +148,17 @@ gr <- function(sn, s, e) GRanges(sn, IRanges(s, e), strand = "*")
 eq(paste(.order_domains(c("RT","GAG","INT","RH")), collapse="|"), "GAG|INT|RT|RH", "domain order")
 eq(paste(.order_domains(c("RT","ZZZ","GAG","ABC")), collapse="|"), "GAG|RT|ABC|ZZZ", "domain order unknown")
 
-# ---- 2. read_trc_periods: tarean -> kite -> prevalent, drop empty -----------
+# ---- 2. read_trc_periods: prevalent -> tarean -> kite, drop empty -----------
 tf <- tempfile(fileext = ".tsv")
 writeLines(c("TRC_ID\tmonomer_tarean\tmonomer_kite\tprevalent_founder",
-             "TRC_1\t13134\t79\t18591",   # TAREAN wins over the SSR kite peak
-             "TRC_2\t\t2455\t",           # no tarean -> kite founder
-             "TRC_3\t\t\t900",            # only prevalent_founder
+             "TRC_1\t20\t170\t170",       # founder wins over a TAREAN sub-repeat
+             "TRC_2\t13134\t79\t",        # no founder -> TAREAN, not the SSR kite peak
+             "TRC_3\t\t2455\t",           # only kite founder
              "TRC_4\t\t\t"), tf)          # nothing -> dropped
 p <- read_trc_periods(tf)
-eq(p[["TRC_1"]], 13134, "period: TAREAN wins")
-eq(p[["TRC_2"]], 2455,  "period: kite founder fallback")
-eq(p[["TRC_3"]], 900,   "period: prevalent_founder fallback")
+eq(p[["TRC_1"]], 170,   "period: prevalent_founder wins")
+eq(p[["TRC_2"]], 13134, "period: TAREAN fallback")
+eq(p[["TRC_3"]], 2455,  "period: kite founder fallback")
 eq("TRC_4" %in% names(p), FALSE, "period: all-empty row dropped")
 eq(length(read_trc_periods("/no/such/file.tsv")), 0, "period: missing file -> empty")
 

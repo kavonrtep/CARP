@@ -17,6 +17,8 @@ source(file.path(.script_dir, "classification.R"))
 # mem_str, mem_budget_mb, ...). Shared with the density scripts, which size their
 # own worker pools the same way.
 source(file.path(.script_dir, "mem_utils.R"))
+# read_trc_periods(): per-TRC monomer period, shared with the report scripts.
+source(file.path(.script_dir, "trc_periods.R"))
 
 # ── Progress / timing helpers ─────────────────────────────────────────────────
 # Simple wall-clock timers. All messages go to stderr so they interleave
@@ -78,7 +80,7 @@ option_list <- list(
   make_option("--tc_rdna_short",    type="character", default=NULL,
               help="TideCluster short-monomer rDNA TSV (authoritative rDNA-TRC calls; optional)"),
   make_option("--tc_trc_table_default", type="character", default=NULL,
-              help="TideCluster default report trc_table.tsv (authoritative per-TRC period monomer_tarean->monomer_kite; monomer column + domain-rhythm gate; optional)"),
+              help="TideCluster default report trc_table.tsv (authoritative per-TRC period prevalent_founder->monomer_tarean->monomer_kite; monomer column + domain-rhythm gate; optional)"),
   make_option("--tc_trc_table_short",   type="character", default=NULL,
               help="TideCluster short-monomer report trc_table.tsv (authoritative per-TRC period; optional)"),
   make_option("--rm",               type="character", help="RepeatMasker+DANTE merged GFF3"),
@@ -733,7 +735,7 @@ TE_ORIGIN_LCA_MIN_SHARE <- 0.10   # a covered family must be >= this share of th
 #   (b) domain rhythm — the TE's DANTE domains recur through the tandem (occupancy
 #       >= TE_RHYTHM_MIN_OCC of P-windows, in >= TE_RHYTHM_MIN_FRAC of the arrays),
 #       tiling at the authoritative period `period_map[[name]]` (trc_table
-#       monomer_tarean->monomer_kite). This is what separates a genuine TE-derived
+#       prevalent_founder->monomer_tarean->monomer_kite). This is what separates a genuine TE-derived
 #       tandem (TE in ~every monomer) from a plain satellite merely INTERRUPTED by
 #       a few TE insertions (TE clumped in a few blocks); the latter is NOT tagged
 #       and falls through to normal tier resolution, which splits the satellite
@@ -819,39 +821,9 @@ identify_te_derived_trcs <- function(t3, t1, t2 = GRanges(), period_map = intege
   d[order(ifelse(is.na(rnk), length(.DOMAIN_ORDER) + 1L, rnk), d)]
 }
 
-# Authoritative per-TRC tandem monomer period (bp) from TideCluster's report
-# table `trc_table.tsv`. Per TRC: `monomer_tarean` (TAREAN family consensus) when
-# present, else `monomer_kite` (most-frequent KITE *founder* period), else
-# `prevalent_founder`. Returns a named integer vector TRC_ID -> period; empty when
-# the file is absent/unusable (optional — `--no_rdna`/older TideCluster/purged).
-#
-# Why NOT the kite `monomer_size` CSV: that column is the top k-mer *peak*, which
-# can lock onto a short SSR sub-period (measured: 79 bp reported for a genuine
-# 13134 bp TIR-derived monomer). Tiling the domain-rhythm occupancy test at 79 bp
-# wrongly reads a real TIR tandem as sparse; the TAREAN/founder period is correct.
-# trc_table.tsv also survives `cleanup_intermediates: maximal` (the kite tree does not).
-read_trc_periods <- function(trc_table_tsv) {
-  empty <- setNames(integer(0), character(0))
-  if (is.null(trc_table_tsv) || !nzchar(trc_table_tsv) || !file.exists(trc_table_tsv))
-    return(empty)
-  tab <- tryCatch(read.table(trc_table_tsv, header = TRUE, sep = "\t", check.names = FALSE,
-                             stringsAsFactors = FALSE, quote = "", comment.char = ""),
-                  error = function(e) NULL)
-  if (is.null(tab) || nrow(tab) == 0 || !("TRC_ID" %in% names(tab))) return(empty)
-  pick <- function(row_i) {
-    for (col in c("monomer_tarean", "monomer_kite", "prevalent_founder")) {
-      if (col %in% names(tab)) {
-        v <- suppressWarnings(as.integer(as.character(tab[[col]][row_i])))
-        if (!is.na(v) && v > 0) return(v)
-      }
-    }
-    NA_integer_
-  }
-  vals <- vapply(seq_len(nrow(tab)), pick, integer(1))
-  ids  <- as.character(tab$TRC_ID)
-  keep <- !is.na(vals) & nzchar(ids)
-  setNames(vals[keep], ids[keep])
-}
+# read_trc_periods() — the per-TRC tandem period from trc_table.tsv
+# (prevalent_founder -> monomer_tarean -> monomer_kite) — lives in trc_periods.R,
+# sourced at the top, so the HTML report and summary PDF label TRCs identically.
 
 # Domain-rhythm of a TRC's arrays at tandem period P: is the TE signal spread
 # through the tandem (TE-derived) or clumped in a few blocks (satellite merely
@@ -940,7 +912,7 @@ write_te_derived_trc_table <- function(level1, t1, t1_members, t2, period_defaul
       if (length(dh) > 0) dom_str <- paste(.order_domains(t2_dom[dh]), collapse = "|")
     }
 
-    # Authoritative tandem period (trc_table monomer_tarean->monomer_kite).
+    # Authoritative tandem period (trc_table prevalent_founder->monomer_tarean->monomer_kite).
     per_map  <- if (run == "short") period_short else period_default
     # Membership test, for the same reason as the gate above: `!is.null(x[[n]])`
     # cannot guard this -- `[[` aborts before is.null() ever sees a value.
@@ -1772,7 +1744,7 @@ if (opt$threads <= 1 || length(seqlengths_vec) == 1) {
     min(batch_bp)/1e6, stats::median(batch_bp)/1e6, max(batch_bp)/1e6))
 }
 
-# Authoritative per-TRC tandem periods (trc_table monomer_tarean->monomer_kite),
+# Authoritative per-TRC tandem periods (trc_table prevalent_founder->monomer_tarean->monomer_kite),
 # for the domain-rhythm gate and the TE-derived TRC table's monomer column.
 # Default and short runs have independent TRC_<n> spaces.
 period_def   <- read_trc_periods(opt$tc_trc_table_default)

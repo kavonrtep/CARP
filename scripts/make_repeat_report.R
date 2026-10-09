@@ -11,8 +11,11 @@ suppressPackageStartupMessages({
   library(jsonlite)
 })
 
-source(file.path(dirname(sub("^--file=", "",
-  grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "classification.R"))
+.script_dir <- dirname(sub("^--file=", "",
+  grep("^--file=", commandArgs(FALSE), value = TRUE)[1]))
+source(file.path(.script_dir, "classification.R"))
+# read_trc_periods(): per-TRC monomer, same source/fallback as the unified annotation.
+source(file.path(.script_dir, "trc_periods.R"))
 
 # ═══════════════════════════════════════════════════════════════════════════
 # A. ARGUMENT PARSING
@@ -668,33 +671,6 @@ discover_lineage_bw_files <- function(rm_dir, bin_width, mode = "lineage") {
   setNames(as.list(file.path(rm_dir, fnames[ord])), lnames[ord])
 }
 
-# Read per-TRC monomer size (bp) from TideCluster's kite estimate CSV.
-# Current TideCluster (>=1.15) writes `monomer_size_top3_estimats.csv` with a
-# per-array `monomer_size` column; older releases wrote
-# `monomer_size_best_estimate_stat.csv` with a `position` column. Pointing at
-# the stale name/column is why the label used to render as `TRC_n (?bp)` — the
-# file never existed on a modern run so the `?` default stuck. Returns a named
-# character vector TRC_ID -> monomer size (the mode across that TRC's arrays);
-# empty when the file is absent/unparseable, so the caller drops the `(bp)`
-# suffix rather than printing `?`.
-read_trc_monomer_sizes <- function(kite_csv) {
-  empty <- setNames(character(0), character(0))
-  if (is.null(kite_csv) || !file.exists(kite_csv)) return(empty)
-  ms <- tryCatch(read.table(kite_csv, header = TRUE, sep = "\t", check.names = FALSE,
-                            stringsAsFactors = FALSE, quote = "", comment.char = ""),
-                 error = function(e) NULL)
-  if (is.null(ms) || nrow(ms) == 0 || !all(c("TRC_ID", "monomer_size") %in% names(ms)))
-    return(empty)
-  ids <- unique(as.character(ms$TRC_ID))
-  vals <- vapply(ids, function(id) {
-    v <- as.character(ms$monomer_size[as.character(ms$TRC_ID) == id])
-    v <- v[!is.na(v) & nzchar(v)]
-    if (length(v) == 0) return(NA_character_)
-    names(sort(table(v), decreasing = TRUE))[1]        # mode across the TRC's arrays
-  }, character(1))
-  setNames(vals, ids)
-}
-
 # Find TRC satellite BigWig files and label them with monomer sizes.
 # Only default-run TRCs (`TRC_<n>`) reach this panel — short-monomer clusters are
 # renamed `TRC_S_<n>` at merge and dropped by the numeric-index filter below.
@@ -712,12 +688,14 @@ discover_trc_bw_files <- function(outdir, bin_width) {
   ord    <- order(tidx)
   N      <- min(20L, length(bw_f))
   bw_f   <- bw_f[ord][seq_len(N)]; tnames <- tnames[ord][seq_len(N)]
-  size_map <- read_trc_monomer_sizes(
-    file.path(outdir, "TideCluster", "default", "TideCluster_kite",
-              "monomer_size_top3_estimats.csv"))
+  # Monomer from trc_table.tsv (prevalent founder -> tarean -> kite founder), NOT
+  # the kite `monomer_size` peak, which locks onto short sub-repeats (22 bp shown
+  # for the ~10.8 kb 45S rDNA unit). A TRC with no estimate gets a bare label.
+  size_map <- read_trc_periods(
+    file.path(outdir, "TideCluster", "default", "TideCluster_report", "data",
+              "trc_table.tsv"))
   labels <- vapply(tnames, function(tn) {
-    sz <- if (tn %in% names(size_map)) size_map[[tn]] else NA_character_
-    if (is.na(sz) || !nzchar(sz)) tn else paste0(tn, " (", sz, "bp)")
+    if (tn %in% names(size_map)) paste0(tn, " (", size_map[[tn]], "bp)") else tn
   }, character(1), USE.NAMES = FALSE)
   setNames(as.list(file.path(trc_dir, bw_f)), labels)
 }
@@ -1489,6 +1467,23 @@ assemble_html <- function(plotly_js, cards_html, sunburst_div, comp_table_html,
     }
   }
 
+  # Legend for the "TRC_n (<bp>bp)" labels on the satellite density panel: the
+  # bracketed value is one summary estimate (read_trc_periods), and estimation
+  # methods disagree when the monomer carries internal sub-repeats (run-000076:
+  # 45S rDNA ~10.8 kb unit read as 22 bp by the kite peak). Point to TideCluster.
+  tc_index <- file.path("TideCluster", "default", "TideCluster_index.html")
+  tc_ref <- if (file.exists(file.path(outdir, tc_index)))
+    sprintf('The <a href="%s">TideCluster report</a>', tc_index)
+  else "The TideCluster report"
+  trc_monomer_note_html <- paste0(
+    '<p class="caption">Each track is one tandem repeat cluster (TRC). The value in ',
+    'brackets is its estimated monomer length, the size of one repeating unit. This ',
+    'is a summary estimate. TideCluster estimates the monomer in several ways, and the ',
+    'results can differ. This happens most often when the monomer contains shorter ',
+    'repeats inside it: for example, an rDNA unit of about 10&nbsp;kb includes short ',
+    'internal repeats of 20&ndash;40&nbsp;bp. ', tc_ref,
+    ' lists all estimates and shows each cluster in detail.</p>')
+
   sort_js <- '
 function sortTable(id, col) {
   var tbl = document.getElementById(id).tBodies[0];
@@ -1620,6 +1615,7 @@ Contigs &lt; %.0f kb are aggregated into the single Other bar.</p>
 %s
 <h3 style="margin-top:24px">Density — satellite clusters (TideCluster)</h3>
 %s
+%s
 </section>
 
 <!-- SECTION 5: SATELLITES -->
@@ -1660,6 +1656,7 @@ Contigs &lt; %.0f kb are aggregated into the single Other bar.</p>
     bin_width / 1000,
     density_top_div     %||% not_generated_html("The top-level density panel"),
     density_lineage_div %||% not_generated_html("The LTR-lineage density panel"),
+    trc_monomer_note_html,
     density_trc_div     %||% not_generated_html("The TRC-cluster density panel"),
     sat_table_html,
     sat_bar_div %||% not_generated_html("The satellite density panel"),
