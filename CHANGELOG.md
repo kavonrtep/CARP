@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.3
 
 - **New `validate_repeat_library.py` tool to check and convert user libraries**
   (`tandem_repeat_library`, `custom_library`) before a run. Today a library
