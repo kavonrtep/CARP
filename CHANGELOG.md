@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- **New `validate_repeat_library.py` tool to check and convert user libraries**
+  (`tandem_repeat_library`, `custom_library`) before a run. Today a library
+  with non-CARP headers only fails at `validate_classifications`, hours into a
+  run, with a bare "invalid" message. The tool rewrites what it can safely fix
+  and explains the rest. Tandem libraries: bare names become
+  `Satellite/<name>`, rDNA names become `rDNA/...` classes, and TE classes are
+  refused (they belong in `custom_library`). The tool trusts the user that the
+  sequences are tandem repeats and does not re-check this. Custom libraries:
+  the shared classification normaliser, bare CARP lineage names (`Athila`), and
+  a new dictionary (`library_class_aliases` in
+  `classification_vocabulary.yaml`) covering RepeatMasker/Dfam names and the
+  Wicker et al. (2007) three-letter codes (`RLC`, `DTC`, `RXX`, `DXX`, ...;
+  mapped to the superfamily, never deeper). Outputs a converted FASTA, a TSV and an
+  HTML report with the format guideline. If any sequence cannot be converted,
+  no library is written unless `--drop-invalid` is given (then those
+  sequences are left out). Explicit `--out-*` paths and exit codes 0/2/3 make
+  it usable as a Galaxy tool run from the CARP image. Run it by hand; the
+  pipeline does not call it.
+  Documentation: `docs/library_validation.md`. Tests:
+  `tests/test_validate_repeat_library.py` with golden fixtures in
+  `tests/fixtures/validate_repeat_library/`.
+
 ## 1.9.2
 
 - **Fixed wrong monomer lengths on the satellite density tracks** (HTML report

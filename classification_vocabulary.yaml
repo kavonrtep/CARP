@@ -487,3 +487,97 @@ tool_dialects:
     gff3_attributes: []
     fasta_header_format: ">name#class/subclass[/...]"
     notes: User-supplied FASTA; required to use canonical form on input.
+
+# ----------------------------------------------------------------------------
+# library_class_aliases — translation of FOREIGN library class names
+# ----------------------------------------------------------------------------
+# Used ONLY by scripts/validate_repeat_library.py to convert a user-supplied
+# custom_library / tandem_repeat_library into CARP's canonical vocabulary. The
+# pipeline itself never reads this section: every library it consumes must
+# already be canonical (enforced by the validate_classifications rule).
+#
+# Covers the RepeatMasker / Dfam / RepBase class names people most often bring
+# (`LTR/Gypsy`, `DNA/hAT-Ac`, `LINE/L1`, `rRNA`, ...). Each entry is a regular
+# expression matched case-insensitively against the WHOLE class string (after a
+# trailing RepeatMasker `?` uncertainty mark is removed); the FIRST matching
+# entry wins, so specific patterns come before general ones. The target must be
+# a canonical classification listed above.
+#
+# Where the foreign scheme is finer than CARP's (e.g. ERV, BEL/Pao, Crypton,
+# Maverick have no CARP leaf) the entry maps to the deepest CARP node that is
+# still correct, never to a guessed sibling. Classes with no CARP equivalent
+# (tRNA, snRNA, scRNA, ARTEFACT, ...) are deliberately ABSENT: the validator
+# reports them as unconvertible rather than inventing a class.
+library_class_aliases:
+  # --- LTR retrotransposons -------------------------------------------------
+  - {pattern: 'LTR/(Copia|Ty1|Ty1[-_/]Copia)(-.*)?',          canonical: Class_I/LTR/Ty1_copia}
+  - {pattern: 'LTR/(Gypsy|Ty3|Ty3[-_/]Gypsy)(-.*)?',          canonical: Class_I/LTR/Ty3_gypsy}
+  - {pattern: 'LTR/Caulimovirus(-.*)?',                       canonical: Class_I/pararetrovirus}
+  - {pattern: '(LTR/)?(Pararetrovirus|Caulimoviridae)',       canonical: Class_I/pararetrovirus}
+  - {pattern: 'LTR/DIRS(-.*)?',                               canonical: Class_I/DIRS}
+  - {pattern: 'LTR/(Pao|BEL|BEL-Pao|ERV.*|ERVK|ERVL.*|ERV1|Retrovirus|Ngaro|Unknown)(-.*)?', canonical: Class_I/LTR}
+  - {pattern: 'LTR',                                          canonical: Class_I/LTR}
+  - {pattern: 'DIRS(/.*)?',                                   canonical: Class_I/DIRS}
+  # --- non-LTR retrotransposons ---------------------------------------------
+  - {pattern: '(LINE/)?Penelope(-.*)?|PLE(/.*)?',             canonical: Class_I/Penelope}
+  - {pattern: 'LINE(/.*)?',                                   canonical: Class_I/LINE}
+  - {pattern: 'SINE(/.*)?',                                   canonical: Class_I/SINE}
+  - {pattern: 'Retroposon(/.*)?',                             canonical: Class_I}
+  # --- rolling-circle -------------------------------------------------------
+  - {pattern: '(RC|DNA)/Helitron(-.*)?|Helitron',             canonical: Class_II/Subclass_2/Helitron}
+  # --- TIR DNA transposons --------------------------------------------------
+  - {pattern: 'DNA/(CMC|EnSpm|CACTA|CMC-EnSpm|CMC-Chapaev.*|CMC-Transib|EnSpm[-_/]CACTA)(-.*)?', canonical: Class_II/Subclass_1/TIR/EnSpm_CACTA}
+  - {pattern: 'DNA/hAT(-.*)?',                                canonical: Class_II/Subclass_1/TIR/hAT}
+  - {pattern: 'DNA/(MULE|MuDR|Mutator|MULE-MuDR|MuDR[-_/]Mutator)(-.*)?', canonical: Class_II/Subclass_1/TIR/MuDR_Mutator}
+  - {pattern: 'DNA/(PIF|Harbinger|PIF-Harbinger|PIF[-_/]Harbinger)(-.*)?', canonical: Class_II/Subclass_1/TIR/PIF_Harbinger}
+  - {pattern: 'DNA/(TcMar|Tc1|Mariner|Tc1[-_/]Mariner|Pogo)(-.*)?', canonical: Class_II/Subclass_1/TIR/Tc1_Mariner}
+  - {pattern: 'DNA/PiggyBac(-.*)?',                           canonical: Class_II/Subclass_1/TIR/PiggyBac}
+  - {pattern: 'DNA/Kolobok(-.*)?',                            canonical: Class_II/Subclass_1/TIR/Kolobok}
+  - {pattern: 'DNA/Merlin(-.*)?',                             canonical: Class_II/Subclass_1/TIR/Merlin}
+  - {pattern: 'DNA/Novosib(-.*)?',                            canonical: Class_II/Subclass_1/TIR/Novosib}
+  - {pattern: 'DNA/P(-.*)?',                                  canonical: Class_II/Subclass_1/TIR/P}
+  - {pattern: 'DNA/Sola-?1',                                  canonical: Class_II/Subclass_1/TIR/Sola1}
+  - {pattern: 'DNA/Sola-?2',                                  canonical: Class_II/Subclass_1/TIR/Sola2}
+  - {pattern: 'DNA/Stowaway|MITE/Stowaway',                   canonical: Class_II/Subclass_1/TIR/MITE/Stowaway}
+  - {pattern: 'DNA/MITE|MITE(/.*)?',                          canonical: Class_II/Subclass_1/TIR/MITE}
+  - {pattern: 'DNA/(Maverick|Polinton)(-.*)?',               canonical: Class_II/Subclass_2}
+  - {pattern: 'DNA/Crypton.*',                               canonical: Class_II/Subclass_1}
+  - {pattern: 'DNA(/.*)?',                                    canonical: Class_II}
+  # --- Wicker et al. 2007 three-letter codes ---------------------------------
+  # Wicker T. et al. (2007) A unified classification system for eukaryotic
+  # transposable elements. Nat Rev Genet 8:973-982. Code = class (R/D), order,
+  # superfamily, e.g. RLC = Retrotransposon/LTR/Copia. Accepted alone or followed
+  # by a family name after '_', '-' or '/' (RLC_Angela, DTC-CACTA_1); the family
+  # part is NOT used, because Wicker family names are species-specific and do not
+  # map to REXdb lineages -- the class stops at the superfamily. 'X' = unknown
+  # at that level. Superfamilies CARP does not model (BEL-Pao, ERV, Transib, ...)
+  # map to the deepest correct CARP node.
+  - {pattern: 'RLC([_/\-].*)?',                              canonical: Class_I/LTR/Ty1_copia}
+  - {pattern: 'RLG([_/\-].*)?',                              canonical: Class_I/LTR/Ty3_gypsy}
+  - {pattern: 'RL[BREX]([_/\-].*)?',                         canonical: Class_I/LTR}
+  - {pattern: 'RY[DNVX]([_/\-].*)?',                         canonical: Class_I/DIRS}
+  - {pattern: 'RP[PX]([_/\-].*)?',                           canonical: Class_I/Penelope}
+  - {pattern: 'RI[RTJLIX]([_/\-].*)?',                       canonical: Class_I/LINE}
+  - {pattern: 'RS[TLSX]([_/\-].*)?',                         canonical: Class_I/SINE}
+  - {pattern: 'RXX([_/\-].*)?',                              canonical: Class_I}
+  - {pattern: 'DTT([_/\-].*)?',                              canonical: Class_II/Subclass_1/TIR/Tc1_Mariner}
+  - {pattern: 'DTA([_/\-].*)?',                              canonical: Class_II/Subclass_1/TIR/hAT}
+  - {pattern: 'DTM([_/\-].*)?',                              canonical: Class_II/Subclass_1/TIR/MuDR_Mutator}
+  - {pattern: 'DTE([_/\-].*)?',                              canonical: Class_II/Subclass_1/TIR/Merlin}
+  - {pattern: 'DTP([_/\-].*)?',                              canonical: Class_II/Subclass_1/TIR/P}
+  - {pattern: 'DTB([_/\-].*)?',                              canonical: Class_II/Subclass_1/TIR/PiggyBac}
+  - {pattern: 'DTH([_/\-].*)?',                              canonical: Class_II/Subclass_1/TIR/PIF_Harbinger}
+  - {pattern: 'DTC([_/\-].*)?',                              canonical: Class_II/Subclass_1/TIR/EnSpm_CACTA}
+  - {pattern: 'DT[RX]([_/\-].*)?',                           canonical: Class_II/Subclass_1/TIR}
+  - {pattern: 'DY[CX]([_/\-].*)?',                           canonical: Class_II/Subclass_1}
+  - {pattern: 'DH[HX]([_/\-].*)?',                           canonical: Class_II/Subclass_2/Helitron}
+  - {pattern: 'DM[MX]([_/\-].*)?',                           canonical: Class_II/Subclass_2}
+  - {pattern: 'DXX([_/\-].*)?',                              canonical: Class_II}
+  # --- rDNA -----------------------------------------------------------------
+  - {pattern: 'rRNA/(5S|5S_rRNA|5S_rDNA)',                    canonical: rDNA/5S_rDNA}
+  - {pattern: 'rRNA(/.*)?',                                   canonical: rDNA}
+  # --- tandem / simple ------------------------------------------------------
+  - {pattern: 'Satellite',                                    canonical: Satellite}
+  - {pattern: 'Simple_repeat|Simple',                         canonical: Simple_repeat}
+  - {pattern: 'Low_complexity',                               canonical: Low_complexity}
+  - {pattern: 'Unknown|Unspecified',                          canonical: Unknown}

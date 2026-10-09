@@ -1,0 +1,19 @@
+index	input_id	input_class	output_id	output_class	status	length_bp	rule	changes	errors
+1	rm_gypsy	LTR/Gypsy	rm_gypsy	Class_I/LTR/Ty3_gypsy	converted	20	RepeatMasker/Dfam name (rule 'LTR/(Gypsy|Ty3|Ty3[-_/]Gypsy)(-.*)?')	class LTR/Gypsy -> Class_I/LTR/Ty3_gypsy	
+2	rm_hat	DNA/hAT-Ac?	rm_hat	Class_II/Subclass_1/TIR/hAT	converted	20	RepeatMasker/Dfam name (rule 'DNA/hAT(-.*)?')	RepeatMasker uncertainty mark '?' removed; class DNA/hAT-Ac? -> Class_II/Subclass_1/TIR/hAT	
+3	rm_line	LINE/L1	rm_line	Class_I/LINE	converted	20	RepeatMasker/Dfam name (rule 'LINE(/.*)?')	class LINE/L1 -> Class_I/LINE	
+4	rexdb_ale	Ty1/copia/Ale	rexdb_ale	Class_I/LTR/Ty1_copia/Ale	converted	20	CARP class name matched	class Ty1/copia/Ale -> Class_I/LTR/Ty1_copia/Ale	
+5	bare_athila	Athila	bare_athila	Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Athila	converted	20	CARP class name matched	class Athila -> Class_I/LTR/Ty3_gypsy/non-chromovirus/OTA/Athila	
+6	rm_helitron	RC/Helitron	rm_helitron	Class_II/Subclass_2/Helitron	converted	20	RepeatMasker/Dfam name (rule '(RC|DNA)/Helitron(-.*)?|Helitron')	class RC/Helitron -> Class_II/Subclass_2/Helitron	
+7	dante_tekay	Class_I|LTR|Ty3/gypsy|chromovirus|Tekay	dante_tekay	Class_I/LTR/Ty3_gypsy/chromovirus/Tekay	converted	20	already canonical	class Class_I|LTR|Ty3/gypsy|chromovirus|Tekay -> Class_I/LTR/Ty3_gypsy/chromovirus/Tekay	
+8	dante_tir_hat	Class_II_Subclass_1_TIR_hAT	dante_tir_hat	Class_II/Subclass_1/TIR/hAT	converted	20	already canonical	class Class_II_Subclass_1_TIR_hAT -> Class_II/Subclass_1/TIR/hAT	
+9	wicker_copia	RLC_Angela	wicker_copia	Class_I/LTR/Ty1_copia	converted	20	RepeatMasker/Dfam name (rule 'RLC([_/\-].*)?')	class RLC_Angela -> Class_I/LTR/Ty1_copia	
+10	wicker_cacta	DTC	wicker_cacta	Class_II/Subclass_1/TIR/EnSpm_CACTA	converted	20	RepeatMasker/Dfam name (rule 'DTC([_/\-].*)?')	class DTC -> Class_II/Subclass_1/TIR/EnSpm_CACTA	
+11	wicker_unknown	DXX	wicker_unknown	Class_II	converted	20	RepeatMasker/Dfam name (rule 'DXX([_/\-].*)?')	class DXX -> Class_II	
+12	sat_lower	satellite/centromeric	sat_lower	Satellite/centromeric	converted	20	Satellite spelling normalised	class satellite/centromeric -> Satellite/centromeric	
+13	rm_rrna	rRNA	rm_rrna	rDNA	converted	20	RepeatMasker/Dfam name (rule 'rRNA(/.*)?')	class rRNA -> rDNA	
+14	canonical_sire	Class_I/LTR/Ty1_copia/SIRE	canonical_sire	Class_I/LTR/Ty1_copia/SIRE	unchanged	20	already canonical		
+15	rm_gypsy	DNA/CMC-EnSpm	rm_gypsy_dup2	Class_II/Subclass_1/TIR/EnSpm_CACTA	converted	20	RepeatMasker/Dfam name (rule 'DNA/(CMC|EnSpm|CACTA|CMC-EnSpm|CMC-Chapaev.*|CMC-Transib|EnSpm[-_/]CACTA)(-.*)?')	description after the first space dropped (RepeatMasker reads only the first word); alignment gap characters (- .) removed; RNA base U converted to T; class DNA/CMC-EnSpm -> Class_II/Subclass_1/TIR/EnSpm_CACTA; duplicate ID renamed: rm_gypsy -> rm_gypsy_dup2	
+16	trna	tRNA			error	20			'tRNA' is not a CARP classification and has no unambiguous translation. Replace it with a class from the guideline, e.g. Class_I/LTR/Ty3_gypsy or Class_II/Subclass_1/TIR/hAT.
+17	no_class				error	20			No classification. Add one after '#', e.g. >no_class#Class_I/LTR/Ty1_copia/Ale
+18	protein	LTR/Copia			error	16	RepeatMasker/Dfam name (rule 'LTR/(Copia|Ty1|Ty1[-_/]Copia)(-.*)?')	class LTR/Copia -> Class_I/LTR/Ty1_copia	Not a DNA sequence (contains ELPQ); a protein FASTA cannot be used as a repeat library.

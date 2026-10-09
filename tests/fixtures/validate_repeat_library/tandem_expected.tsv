@@ -1,0 +1,23 @@
+index	input_id	input_class	output_id	output_class	status	length_bp	rule	changes	errors
+1	X04322.1	CEN180	X04322.1	Satellite/CEN180	converted	178	Satellite/ prefix added	class CEN180 -> Satellite/CEN180	
+2	X06471.1	AthSat500	X06471.1	Satellite/AthSat500	converted	503	Satellite/ prefix added	class AthSat500 -> Satellite/AthSat500	
+3	X06472.1	AthSat160	X06472.1	Satellite/AthSat160	converted	481	Satellite/ prefix added	class AthSat160 -> Satellite/AthSat160	
+4	M65137.1	5S_rDNA	M65137.1	rDNA/5S_rDNA	converted	497	rDNA name recognised	class 5S_rDNA -> rDNA/5S_rDNA	
+5	X52322.1	45S_rDNA	X52322.1	rDNA/45S_rDNA	converted	10014	rDNA name recognised	class 45S_rDNA -> rDNA/45S_rDNA	
+6	plant_telomere	telomere	plant_telomere	Satellite/telomere	converted	98	Satellite/ prefix added	class telomere -> Satellite/telomere	
+7	X89195.1	CEN180	X89195.1	Satellite/CEN180	converted	4138	Satellite/ prefix added	class CEN180 -> Satellite/CEN180	
+8	AM177046.1	subtelomere	AM177046.1	Satellite/subtelomere	converted	2191	Satellite/ prefix added	class subtelomere -> Satellite/subtelomere	
+9	X94367.1	mil167	X94367.1	Satellite/mil167	converted	980	Satellite/ prefix added	class mil167 -> Satellite/mil167	
+10	X79716.1	AthMinisat1	X79716.1	Satellite/AthMinisat1	converted	902	Satellite/ prefix added	class AthMinisat1 -> Satellite/AthMinisat1	
+11	X79718.1	AthMinisat3	X79718.1	Satellite/AthMinisat3	converted	587	Satellite/ prefix added	class AthMinisat3 -> Satellite/AthMinisat3	
+12	X89198.1	CEN180	X89198.1	Satellite/CEN180	converted	539	Satellite/ prefix added	class CEN180 -> Satellite/CEN180	
+13	X79717.1	AthMinisat2	X79717.1	Satellite/AthMinisat2	converted	181	Satellite/ prefix added	class AthMinisat2 -> Satellite/AthMinisat2	
+14	AF331003.1	5S_rDNA	AF331003.1	rDNA/5S_rDNA	converted	121	rDNA name recognised	class 5S_rDNA -> rDNA/5S_rDNA	
+15	AF056631.1	Tat1	AF056631.1	Satellite/Tat1	converted	3979	Satellite/ prefix added	class Tat1 -> Satellite/Tat1	
+16	AF073829.1	romaniAt5	AF073829.1	Satellite/romaniAt5	converted	3398	Satellite/ prefix added	class romaniAt5 -> Satellite/romaniAt5	
+17	AJ749732.1	AtREP20	AJ749732.1	Satellite/AtREP20	converted	2525	Satellite/ prefix added	class AtREP20 -> Satellite/AtREP20	
+18	AB014748.1	AtRE1	AB014748.1	Satellite/AtRE1	converted	799	Satellite/ prefix added	class AtRE1 -> Satellite/AtRE1	
+19	AB033594.1	Tnat2	AB033594.1	Satellite/Tnat2	converted	772	Satellite/ prefix added	class Tnat2 -> Satellite/Tnat2	
+20	AF378074.1	Athila4	AF378074.1	Satellite/Athila4	converted	764	Satellite/ prefix added	class Athila4 -> Satellite/Athila4	
+21	AB033593.1	Tnat1	AB033593.1	Satellite/Tnat1	converted	639	Satellite/ prefix added	class Tnat1 -> Satellite/Tnat1	
+22	Z68909.1	Rtat1	Z68909.1	Satellite/Rtat1	converted	266	Satellite/ prefix added	class Rtat1 -> Satellite/Rtat1	

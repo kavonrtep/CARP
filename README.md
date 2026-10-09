@@ -123,6 +123,23 @@ Both libraries are FASTA. Sequence IDs encode the classification:
 Use the canonical slash-separated classification scheme listed under
 [Annotation categories](#annotation-categories).
 
+**Check and convert a library before a run.** The container includes a checker
+that rewrites the headers it can fix safely and explains the rest:
+
+```bash
+singularity exec -B $PWD carp.sif validate_repeat_library.py my_satellites.fasta -t tandem -o TR_lib
+singularity exec -B $PWD carp.sif validate_repeat_library.py my_TEs.fasta        -t custom -o custom_lib
+```
+
+It writes the converted library (`PREFIX.fasta`), a per-sequence table
+(`PREFIX.tsv`) and an HTML report with the format guideline (`PREFIX.html`).
+In a tandem library a bare name becomes `Satellite/<name>` and rDNA names become
+`rDNA/...` classes. In a custom library, RepeatMasker/Dfam names (`LTR/Gypsy`,
+`DNA/hAT-Ac`) and Wicker et al. (2007) codes (`RLC`, `DTC`) are translated. If
+any sequence cannot be converted without guessing, no library is written,
+unless you add `--drop-invalid`. Full rules, exit codes and Galaxy use:
+**[docs/library_validation.md](docs/library_validation.md)**.
+
 ### 3. Run
 
 ```bash
@@ -285,6 +302,8 @@ A high-level workflow schematic is in
 - [docs/output_reference.md](docs/output_reference.md) — complete output tree and
   density-track reference
 - [docs/configuration.md](docs/configuration.md) — every configuration parameter
+- [docs/library_validation.md](docs/library_validation.md) — checking and
+  converting a custom or tandem repeat library (`validate_repeat_library.py`)
 - [docs/unified_annotation_gff3_spec.md](docs/unified_annotation_gff3_spec.md) —
   `Repeat_Annotation_Unified.gff3` field contract
 - [docs/line_boundaries.md](docs/line_boundaries.md) — how LINE boundaries are

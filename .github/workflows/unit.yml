@@ -37,6 +37,9 @@ jobs:
       - name: User-supplied library class validation (custom / tandem library)
         run: python tests/test_validate_library_classes.py
 
+      - name: Library check / conversion tool (validate_repeat_library.py)
+        run: python tests/test_validate_repeat_library.py
+
       - name: Output manifest contract
         run: python tests/test_manifest.py
 
