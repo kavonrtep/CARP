@@ -241,3 +241,8 @@ jobs:
       # runs here rather than being deferred to the fixture jobs.
       - name: R per-sequence tile grid == tileGenome (density_utils)
         run: Rscript tests/test_density_tiling.R
+
+      # disjoin_by_seq_groups() must equal disjoin() exactly; it avoids IRanges'
+      # per-sequence fallback loop on genomes > ~2.1 Gbp in many sequences.
+      - name: R grouped disjoin == disjoin (disjoin_utils)
+        run: Rscript tests/test_disjoin_by_seq_groups.R

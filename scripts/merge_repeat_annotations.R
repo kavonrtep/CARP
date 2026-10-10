@@ -27,7 +27,9 @@ convert_names <- function(n, old_sep = "|" , new_sep = "\""){
 
 gff_cleanup <- function(gff){
   ## remove overlapin annotation track - assign new annot
-  gff_disjoin <- disjoin(gff, with.revmap=TRUE)
+  ## disjoin_by_seq_groups (disjoin_utils.R) == disjoin(), but avoids IRanges'
+  ## per-sequence fallback loop on genomes > ~2.1 Gbp in many sequences.
+  gff_disjoin <- disjoin_by_seq_groups(gff, with.revmap=TRUE)
   ## For each disjoint range, collapse the Names (and strands) of the source
   ## features with a single vectorized extractList + unstrsplit that stays in the
   ## compressed S4Vectors list domain. The previous approach did
@@ -63,8 +65,10 @@ if (N < 3) {
 suppressPackageStartupMessages(library(rtracklayer))
 suppressPackageStartupMessages(library(parallel))
 
-source(file.path(dirname(sub("^--file=", "",
-  grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "classification.R"))
+.script_dir <- dirname(sub("^--file=", "",
+  grep("^--file=", commandArgs(FALSE), value = TRUE)[1]))
+source(file.path(.script_dir, "classification.R"))
+source(file.path(.script_dir, "disjoin_utils.R"))
 
 
 
