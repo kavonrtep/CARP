@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.9.4
+
+- **Fixed `make_unified_annotation` crash on assemblies with very many
+  sequences** (issue #4). The step stopped with `Error: C stack usage ... is
+  too close to the limit`. It was reported on GCA_050662955.1 (22.4 Gbp in
+  305,167 sequences), after 3 d 21 h of pipeline run. Cause: when two
+  annotation sets each held sequence names the other lacked, the R
+  Bioconductor library (GenomeInfoDb 1.30.x) built a warning that listed every
+  unmatched name (~3 MB of text for ~207k names). Printing that warning
+  overflowed R's stack, and `suppressWarnings()` cannot stop it. Fix: every
+  annotation set now carries the full list of genome sequences from the FASTA
+  index, so all sets share one sequence list. The TE-derived satellite check
+  now also looks only at sequences that have TideCluster arrays (on the
+  reported genome: 435 s → 25 s). Output is unchanged: the unified GFF3,
+  `te_derived_trc.csv` and `overlaps.tsv` are byte-identical before vs after
+  on tiny_pea, drapa and the medium fixture (multi-batch runs included). New
+  regression test `tests/test_unified_many_seqlevels.sh` (adds 210k extra
+  sequences) fails on 1.9.3 and passes now; it runs in CI. Workaround for
+  1.9.x: run the rule with `ulimit -s 65536`.
+- **Fixed slow `make_unified_annotation` on assemblies with very many
+  sequences** (issue #5). On GCA_050662955.1 (305,167 sequences) the step
+  spent 6.2 h (22,366 s) just reading `DANTE_filtered.gff3`. Cause: DANTE's
+  filter script writes a SEQ/DOMAIN/COUNTS table into the GFF3 header, one `##`
+  comment line per sequence × domain (1.1 M lines on that genome), and the
+  rtracklayer GFF3 reader slows down quadratically with header comment lines
+  (10k/40k/160k lines → 0.7/7.4/127 s to read the same 50k features). Nothing
+  in CARP uses that table. The `filter_dante` rule now removes it (new helper
+  `scripts/strip_dante_seq_counts.py`). Feature lines, the other header lines
+  (filter thresholds, per-classification counts) and `DANTE_filtered.fasta`
+  are unchanged. Verified on tiny_pea: all 17,507 feature lines are
+  byte-identical, and so are the unified GFF3, `te_derived_trc.csv` and
+  `overlaps.tsv`; the 160k-line synthetic file now reads in 0.12 s (was
+  127 s). `merge_rm_and_dante` was not affected by this (it reads the
+  RepeatMasker GFF3 first, and header lines after the first feature are not
+  parsed), so the long runtime the issue also reports for it has another
+  cause. Resumed runs: Snakemake sees the code change and re-runs
+  `filter_dante` and the rules after it.
+
 ## 1.9.3
 
 - **New `validate_repeat_library.py` tool to check and convert user libraries**
