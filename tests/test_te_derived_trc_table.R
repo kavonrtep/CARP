@@ -36,6 +36,11 @@ log_msg <- function(...) invisible(NULL)   # stub
 # read_trc_periods lives in its own sourceable module (shared with the reports).
 source(file.path("scripts", "trc_periods.R"))
 
+restrict_seqlevels <- function(gr, keep) {
+  gr <- gr[seqnames(gr) %in% keep]
+  keepSeqlevels(gr, intersect(keep, seqlevels(gr)), pruning.mode = "coarse")
+}
+
 te_domain_rhythm <- function(arr, doms, P) {
   if (is.na(P) || P <= 0 || length(arr) == 0)
     return(list(occ = NA_real_, frac = NA_real_))
@@ -64,6 +69,13 @@ write_te_derived_trc_table <- function(level1, t1, t1_members, t2, period_defaul
   if (length(level1) == 0 || is.null(level1$TE_origin)) return(write_empty())
   te <- level1[!is.na(level1$TE_origin)]
   if (length(te) == 0) return(write_empty())
+  # Only the sequences carrying a tagged array matter (issue #4; see
+  # restrict_seqlevels).
+  keep       <- seqlevelsInUse(te)
+  te         <- restrict_seqlevels(te, keep)
+  t1         <- restrict_seqlevels(t1, keep)
+  t1_members <- restrict_seqlevels(t1_members, keep)
+  t2         <- restrict_seqlevels(t2, keep)
 
   run_of <- ifelse(as.character(te$source_tool) == "TideCluster_short", "short", "default")
   key    <- paste(run_of, as.character(te$Name), sep = "\t")

@@ -179,12 +179,47 @@ safe_import <- function(path) {
   if (is.null(path) || !file.exists(path) || file.size(path) == 0)
     return(GRanges())
   tryCatch(
-    import.gff3(path),
+    harmonise_seqlevels(import.gff3(path)),
     error = function(e) {
       message("  Warning: could not import ", basename(path), ": ", conditionMessage(e))
       GRanges()
     }
   )
+}
+
+# ── Seqlevels hygiene (issue #4) ──────────────────────────────────────────────
+# Every overlap / c() between two GRanges merges their Seqinfo. When EACH side has
+# seqlevels the other lacks, GenomeInfoDb (1.30.x) raises a warning that pastes
+# EVERY non-shared seqlevel name into one message, and R's warning() then dies
+# with "C stack usage ... is too close to the limit" once that message is a few
+# MB. suppressWarnings() cannot help — the overflow happens before any handler
+# runs. A 305,167-sequence assembly hit it in identify_te_derived_trcs() (795 TC
+# seqlevels vs 207,838 structural-TE seqlevels) after 3 d 21 h of pipeline.
+#
+# Two guards:
+#   * harmonise_seqlevels(): every imported tier gets the genome's FULL seqlevel
+#     set (from the FAI, in FAI order), so all global objects share one Seqinfo
+#     and no global merge can ever have non-shared levels on both sides.
+#   * restrict_seqlevels(): the global TE-derived passes cut the big tiers down to
+#     the few sequences that carry TideCluster arrays before looping. Overlaps
+#     only occur on shared seqnames, so the result is unchanged; it also avoids
+#     re-merging a ~300k-level Seqinfo on every per-TRC findOverlaps (25 s vs
+#     435 s on the issue's genome).
+.GENOME_SEQLEVELS <- NULL   # set from the FAI in main, before any tier is loaded
+harmonise_seqlevels <- function(gr) {
+  if (is.null(.GENOME_SEQLEVELS)) return(gr)
+  extra <- setdiff(seqlevels(gr), .GENOME_SEQLEVELS)
+  if (length(extra) > 0)
+    message("  Warning: ", length(extra), " seqid(s) not in the FAI, e.g. ",
+            paste(head(extra, 3), collapse = ", "))
+  # A superset of the current levels -> GenomeInfoDb matches by name (reorder +
+  # add), never a positional rename.
+  seqlevels(gr) <- c(.GENOME_SEQLEVELS, extra)
+  gr
+}
+restrict_seqlevels <- function(gr, keep) {
+  gr <- gr[seqnames(gr) %in% keep]
+  keepSeqlevels(gr, intersect(keep, seqlevels(gr)), pruning.mode = "coarse")
 }
 
 # Standard column names that every GRanges in process_batch carries.
@@ -746,6 +781,14 @@ TE_ORIGIN_LCA_MIN_SHARE <- 0.10   # a covered family must be >= this share of th
 #       demote what we cannot measure).
 identify_te_derived_trcs <- function(t3, t1, t2 = GRanges(), period_map = integer(0)) {
   if (length(t3) == 0 || length(t1) == 0) return(character(0))
+  # Work only on the sequences that carry an array (issue #4; see
+  # restrict_seqlevels). Subset the GRanges themselves so t1$classification
+  # stays aligned with the subject hits below.
+  keep <- seqlevelsInUse(t3)
+  t3 <- restrict_seqlevels(t3, keep)
+  t1 <- restrict_seqlevels(t1, keep)
+  t2 <- restrict_seqlevels(t2, keep)
+  if (length(t1) == 0) return(character(0))
   t3p <- granges(t3); strand(t3p) <- "*"
   t1p <- granges(t1); strand(t1p) <- "*"
   t2p <- if (length(t2) > 0) { g <- granges(t2); strand(g) <- "*"; g } else GRanges()
@@ -864,6 +907,13 @@ write_te_derived_trc_table <- function(level1, t1, t1_members, t2, period_defaul
   if (length(level1) == 0 || is.null(level1$TE_origin)) return(write_empty())
   te <- level1[!is.na(level1$TE_origin)]
   if (length(te) == 0) return(write_empty())
+  # Only the sequences carrying a tagged array matter (issue #4; see
+  # restrict_seqlevels).
+  keep       <- seqlevelsInUse(te)
+  te         <- restrict_seqlevels(te, keep)
+  t1         <- restrict_seqlevels(t1, keep)
+  t1_members <- restrict_seqlevels(t1_members, keep)
+  t2         <- restrict_seqlevels(t2, keep)
 
   run_of <- ifelse(as.character(te$source_tool) == "TideCluster_short", "short", "default")
   key    <- paste(run_of, as.character(te$Name), sep = "\t")
@@ -1634,6 +1684,15 @@ sanity_check <- function(gr, seqlengths_vec, overlaps_tsv = NULL) {
 
 log_msg("=== make_unified_annotation.R ===")
 
+# Read the FAI first: its seqlevels are given to every imported tier
+# (harmonise_seqlevels, issue #4).
+log_msg("── Reading FAI ────────────────────────────────────────────────")
+seqlengths_vec <- read_fai(opt$fai)
+genome_bp      <- sum(as.numeric(seqlengths_vec))
+log_msg("Genome: ", length(seqlengths_vec), " sequences, ",
+        format(genome_bp, big.mark=","), " bp total")
+.GENOME_SEQLEVELS <- names(seqlengths_vec)
+
 # Load all tiers
 log_msg("── Loading inputs ─────────────────────────────────────────────")
 t_load <- tic("loading all tiers")
@@ -1698,13 +1757,6 @@ if (rm_tc_tandem_gate) {
 }
 toc(t_load)
 log_mem("after loading all tiers")
-
-# Read genome FAI
-log_msg("── Reading FAI ────────────────────────────────────────────────")
-seqlengths_vec <- read_fai(opt$fai)
-genome_bp      <- sum(as.numeric(seqlengths_vec))
-log_msg("Genome: ", length(seqlengths_vec), " sequences, ",
-        format(genome_bp, big.mark=","), " bp total")
 
 # Decide whether to chunk
 data <- list(

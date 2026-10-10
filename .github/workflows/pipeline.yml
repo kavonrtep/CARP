@@ -310,6 +310,12 @@ jobs:
         if: matrix.fixture == 'small'
         run: bash tests/test_unified_multibatch_determinism.sh
 
+      # Issue #4: ~210k INSDC-style seqlevels used to overflow the C stack in a
+      # Seqinfo merge (identify_te_derived_trcs). Builds its fixture on the fly.
+      - name: make_unified many-seqlevels regression
+        if: matrix.fixture == 'small'
+        run: bash tests/test_unified_many_seqlevels.sh
+
       - name: Upload both runs on failure (to diff locally)
         if: failure()
         uses: actions/upload-artifact@v4
