@@ -974,7 +974,17 @@ rule filter_dante:
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
-        dante_gff_output_filtering.py --dom_gff {input} --domains_filtered {output.gff} --domains_prot_seq {output.fasta}
+        scripts_dir=$(realpath scripts)
+        export PATH="$scripts_dir:$PATH"
+        dante_gff_output_filtering.py --dom_gff {input} --domains_filtered {output.gff}.tmp.gff3 --domains_prot_seq {output.fasta}
+        # Cut DANTE's per-sequence SEQ/DOMAIN/COUNTS table out of the header
+        # (issue #5). It is one `##<seqid> <domain> <n>` row per sequence x
+        # domain (1.1 M rows on a 305k-sequence assembly), nothing in CARP reads
+        # it, and rtracklayer's GFF pragma reader is quadratic in comment lines:
+        # import.gff3 took 6.2 h with it vs seconds without. The other header
+        # lines (thresholds, classification counts) and every feature line stay.
+        strip_dante_seq_counts.py {output.gff}.tmp.gff3 -o {output.gff}
+        rm -f {output.gff}.tmp.gff3
         """
 
 

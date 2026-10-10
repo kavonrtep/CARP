@@ -100,6 +100,9 @@ jobs:
       - name: RepeatMasker-library canonical-order guard (assert_library_canonical_order)
         run: python tests/test_assert_library_canonical_order.py
 
+      - name: DANTE per-sequence count-table strip (strip_dante_seq_counts)
+        run: python tests/test_strip_dante_seq_counts.py
+
       - name: Memory-budget resolver (scheduler / cgroup / container chain)
         run: python tests/test_mem_utils.py
 
