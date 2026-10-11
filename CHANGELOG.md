@@ -34,9 +34,23 @@
   `overlaps.tsv`; the 160k-line synthetic file now reads in 0.12 s (was
   127 s). `merge_rm_and_dante` was not affected by this (it reads the
   RepeatMasker GFF3 first, and header lines after the first feature are not
-  parsed), so the long runtime the issue also reports for it has another
-  cause. Resumed runs: Snakemake sees the code change and re-runs
+  parsed); its long runtime in the issue had a different cause, fixed in the
+  next entry. Resumed runs: Snakemake sees the code change and re-runs
   `filter_dante` and the rules after it.
+- **Fixed slow `merge_rm_and_dante` on assemblies with very many sequences**
+  (also the GFF3 clean-up inside the `repeatmasker` rule, `clean_rm_output.R`).
+  On GCA_050662955.1 (22.4 Gbp in 305,167 sequences, same run as #4/#5) the
+  step took 4,804 s, ~3,100 s of it in one `disjoin()` call. Cause: IRanges'
+  `disjoin()` has a fast path that lays all sequences end to end on one
+  integer axis; when the total span exceeds ~2.1 Gbp (the 32-bit integer
+  limit) it falls back to one call per sequence (~5 ms each), which only hurts
+  with very many sequences. Fix: new helper `disjoin_by_seq_groups()`
+  (`scripts/disjoin_utils.R`) disjoins groups of sequences that each fit the
+  fast path and joins the results. On that genome: `disjoin()` 3,115 s → 43 s;
+  whole step 4,846 s → 1,305 s (the rest is mostly reading inputs from NFS and
+  the GFF3 export). Output unchanged: the merged GFF3 matches the original
+  run's on all 22,959,767 feature lines, and `clean_rm_output.R`'s GFF3
+  matches too.
 
 ## 1.9.3
 
