@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.5
+
+- **Fixed a CI-only test failure from 1.9.4.** The 1.9.4 helper
+  `restrict_seqlevels()` in `make_unified_annotation.R` (added for issue #4)
+  called `keepSeqlevels()`, which comes from GenomeInfoDb. Current
+  Bioconductor (CI `unit_r_bioc`: R 4.5.3, GenomicRanges 1.64.0) no longer
+  attaches GenomeInfoDb along with GenomicRanges, so
+  `tests/test_te_derived_trc_table.R` failed with `could not find function
+  "keepSeqlevels"`. The pipeline itself was not affected: the container's
+  Bioconductor (R 4.1.3) attaches GenomeInfoDb, and the 1.9.4 code was
+  verified there on real genomes. The helper now uses the
+  `seqlevels(x, pruning.mode = "coarse") <-` replacement form instead. Results
+  are unchanged. Verified in a fresh env built from the `unit_r_bioc` package
+  list: the 1.9.4 test fails there, and all 4 `unit_r_bioc` tests pass with
+  the fix.
+
 ## 1.9.4
 
 - **Fixed `make_unified_annotation` crash on assemblies with very many
