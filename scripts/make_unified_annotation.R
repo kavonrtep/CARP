@@ -219,7 +219,10 @@ harmonise_seqlevels <- function(gr) {
 }
 restrict_seqlevels <- function(gr, keep) {
   gr <- gr[seqnames(gr) %in% keep]
-  keepSeqlevels(gr, intersect(keep, seqlevels(gr)), pruning.mode = "coarse")
+  # Replacement form, not keepSeqlevels(): that lives in GenomeInfoDb, which
+  # current Bioconductor no longer attaches with GenomicRanges.
+  seqlevels(gr, pruning.mode = "coarse") <- intersect(keep, seqlevels(gr))
+  gr
 }
 
 # Standard column names that every GRanges in process_batch carries.

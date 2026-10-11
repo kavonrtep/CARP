@@ -38,7 +38,10 @@ source(file.path("scripts", "trc_periods.R"))
 
 restrict_seqlevels <- function(gr, keep) {
   gr <- gr[seqnames(gr) %in% keep]
-  keepSeqlevels(gr, intersect(keep, seqlevels(gr)), pruning.mode = "coarse")
+  # Replacement form, not keepSeqlevels(): that lives in GenomeInfoDb, which
+  # current Bioconductor no longer attaches with GenomicRanges.
+  seqlevels(gr, pruning.mode = "coarse") <- intersect(keep, seqlevels(gr))
+  gr
 }
 
 te_domain_rhythm <- function(arr, doms, P) {
