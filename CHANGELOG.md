@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.6
+
+- **TideCluster 1.21.2 → 1.22.2 (`envs/tidecluster_run.yaml`): report fix
+  only, no change to clustering or annotation output.** The unified
+  annotation, statistics and density tracks are therefore unchanged. What
+  changed upstream:
+  - **1.22.2** fixes the TideCluster HTML report
+    (`TideCluster/*/TideCluster_report/`, linked from the CARP report). The
+    cluster overview scatter tooltip showed `HOR arrays: 0` for every TRC,
+    because it counted arrays that kitehor labels `hor`. It now counts arrays
+    with a confident HOR (higher-order repeat) order (tier strict ∪
+    supported), the same number the TRC tables show. It also scales the
+    table font in the comparative report (comparative analysis only).
+  - **1.21.3, 1.21.4, 1.22.0** change only the comparative analysis, which
+    CARP does not run: a crash fix for a TRC removed by overlap resolution, a
+    template-path fix when run from conda or a container, and a new
+    `trc_similarity_tarean.tsv` table. **1.22.1** only repairs upstream's own
+    Singularity image build.
+
+  Verified: `TideCluster.py run_all --long` with 1.21.2 and 1.22.2 on the
+  small test genome (50 data files) and on A. thaliana chromosome 4 (26 Mb,
+  31 arrays in 10 TRCs; 222 data files). Every GFF3, FASTA, TSV and CSV
+  output is byte-identical (GFF3 `##` header lines ignored); only the HTML
+  report files differ.
+
 ## 1.9.5
 
 - **Fixed a CI-only test failure from 1.9.4.** The 1.9.4 helper

@@ -149,13 +149,21 @@
 # make_unified_annotation.R::load_rdna_map() reads -- no CARP change needed.
 # Setting `tidecluster_rdna_library` to CARP's own data/rdna_library.fasta is
 # now safe; before 1.21.2 it silently disabled rDNA detection.
+# 1.21.3 / 1.21.4 / 1.22.0 / 1.22.1 / 1.22.2 change no clustering or annotation
+# output. 1.21.3, 1.21.4 and 1.22.0 touch only the comparative analysis, which
+# CARP does not run (a crash fix, a template-path fix, and a new
+# trc_similarity_tarean.tsv table). 1.22.1 only repairs upstream's Singularity
+# image build. 1.22.2 fixes the HTML report: the cluster-overview tooltip showed
+# `HOR arrays: 0` for every TRC (it now counts arrays with a confident HOR
+# order, the number the TRC tables show), and the comparative tables scale their
+# font with the sample count.
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.21.2
+  - tidecluster=1.22.2
   # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
   # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
   # resolves (TideCluster needs r-base >= 4.2).
