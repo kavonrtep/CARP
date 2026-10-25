@@ -234,6 +234,53 @@ split_wide_ranges <- function(gr, max_width = .BW_MAX_ITEM_WIDTH) {
   out
 }
 
+# ── BigWig one-item-per-sequence writer bug ──────────────────────────────────
+# The same kent writer also aborts ("R: 0 21601 doesn't intersect 0 0 ...",
+# "Internal error ucsc/bbiWrite.c 414") when EVERY sequence in the track holds
+# exactly ONE item and those items all have the same width. A density track
+# reaches that shape when a family lies only on short contigs of equal length:
+# smoothing makes all bins of a contig equal and run-length merging collapses
+# them into a single interval per contig. Seen on GCA_988322725.1 (issue #6):
+# TRC_253 = two whole 21,601 bp contigs, failing at step = 10000. Measured
+# triggers: 2 x 21,601 bp, 2 x 20,000 bp, 2 x 5,000 bp contigs; NOT triggered by
+# unequal widths, a single sequence, or two items on one sequence.
+#
+# Fix: cut every item of width >= 2 into two halves carrying the same value.
+# Then every sequence holds two items, which the writer accepts. Splitting at the
+# tile step (as split_wide_ranges does) is NOT enough: a contig shorter than the
+# step stays one item. Like split_wide_ranges, this is representation-only, and
+# export_bigwig() only applies it after a failed export, so every track that
+# exports today stays byte-identical.
+split_in_halves <- function(gr) {
+  if (length(gr) == 0L) return(gr)
+  w   <- width(gr)
+  n   <- ifelse(w >= 2L, 2L, 1L)                   # pieces per input range
+  idx <- rep(seq_along(gr), n)
+  first <- sequence(n) == 1L
+  half  <- (w %/% 2L)[idx]
+  s <- ifelse(first, start(gr)[idx], start(gr)[idx] + half)
+  e <- ifelse(first & n[idx] == 2L, start(gr)[idx] + half - 1L, end(gr)[idx])
+  out <- GRanges(seqnames = seqnames(gr)[idx],
+                 ranges   = IRanges(start = s, end = e),
+                 seqinfo  = seqinfo(gr))
+  mcols(out) <- mcols(gr)[idx, , drop = FALSE]
+  out
+}
+
+# export(gr, path, format = "bigwig"), with one retry on the halved track when
+# the writer fails (see split_in_halves). The partial file of the failed attempt
+# is removed first. If the retry also fails, its error propagates as before.
+export_bigwig <- function(gr, path) {
+  ok <- tryCatch({ export(gr, path, format = "bigwig"); TRUE },
+                 error = function(e) e)
+  if (isTRUE(ok)) return(invisible(path))
+  unlink(path)
+  message(sprintf("NOTE: BigWig export of %s failed (%s); retrying with every interval split in two",
+                  basename(path), conditionMessage(ok)))
+  export(split_in_halves(gr), path, format = "bigwig")
+  invisible(path)
+}
+
 density_track <- function(g, chr_size_all, step, N_for_mean = 10,
                           keep_unoccupied = FALSE) {
   g   <- reduce(g, ignore.strand = TRUE)

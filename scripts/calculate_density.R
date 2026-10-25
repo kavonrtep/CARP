@@ -66,4 +66,4 @@ window_size <- opt$window/10 # 10 bins per window
 d <- density_track(g, chr_size_all, window_size, N_for_mean = 10,
                    keep_unoccupied = TRUE)
 
-export(d, opt$output, format="bigwig")
+export_bigwig(d, opt$output)

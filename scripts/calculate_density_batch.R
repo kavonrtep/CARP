@@ -80,7 +80,7 @@ process_task <- function(tk){
   # density_track() streams the tileGenome grid one sequence at a time and
   # returns the run-length-merged track (FR-1: adjacent equal-value tiles, incl.
   # zero runs, collapsed into one interval). Lossless; values unchanged.
-  export(density_track(g, chr_size_all, tk$step, 10), tk$out, format="bigwig")
+  export_bigwig(density_track(g, chr_size_all, tk$step, 10), tk$out)
   "ok"
 }
 

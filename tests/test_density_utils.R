@@ -246,4 +246,77 @@ test_split_wide_ranges <- function() {
 }
 test_split_wide_ranges()
 
+# 4. export_bigwig — the one-item-per-sequence writer bug (issue #6). The kent
+# BigWig writer aborts when every sequence holds exactly one item of the same
+# width; TRC_253 on GCA_988322725.1 (two whole 21,601 bp contigs, step = 10000)
+# took a 16.5 h run down. export_bigwig() retries with every interval halved.
+# Asserts: the raw export really fails (so the test keeps covering the bug), the
+# retry writes a file whose per-base values equal the track, and a track that
+# exports fine is written unchanged (byte-identical to a plain export).
+bw_values <- function(gr) coverage(gr, weight = "score")
+# BigWig stores scores as 32-bit floats, so a round trip through a file is
+# compared at float32 precision (0.3 comes back as 0.3 - 1.2e-8).
+same_values <- function(a, b, tol = 1e-6) {
+  va <- bw_values(a); vb <- bw_values(b)
+  sl <- union(names(va), names(vb))
+  all(vapply(sl, function(s) isTRUE(all.equal(as.numeric(va[[s]]), as.numeric(vb[[s]]),
+                                              tolerance = tol)),
+             logical(1)))
+}
+raw_export_fails <- function(gr) {
+  f <- tempfile(fileext = ".bw"); on.exit(unlink(f))
+  inherits(tryCatch(suppressWarnings(export(gr, f, format = "bigwig")),
+                    error = function(e) e), "error")
+}
+
+test_split_in_halves <- function() {
+  gr <- GRanges(c("a", "a", "b"), IRanges(c(1, 101, 1), c(100, 101, 7)),
+                score = c(0.5, 1, 0.25), seqinfo = Seqinfo(c("a", "b"), c(1000, 1000)))
+  out <- split_in_halves(gr)
+  if (length(out) != 5L) stop("split_in_halves: expected 5 pieces (1-bp range kept whole)")
+  if (!same_values(gr, out)) stop("split_in_halves changed the per-base values")
+  if (sum(width(out)) != sum(width(gr))) stop("split_in_halves changed covered bp")
+  if (!identical(seqinfo(out), seqinfo(gr))) stop("split_in_halves lost the seqinfo")
+  if (length(split_in_halves(gr[0])) != 0L) stop("split_in_halves: empty input")
+  cat("  split_in_halves: values preserved, 1-bp ranges kept whole\n")
+}
+test_split_in_halves()
+
+test_export_bigwig <- function() {
+  rest <- 5e6
+  cases <- list(
+    # name, contig lengths, step
+    list("issue #6: 2 x 21601 bp whole contigs, step 10000", c(21601, 21601), 10000L),
+    list("contig length multiple of step: 2 x 20000, step 10000", c(20000, 20000), 10000L),
+    list("contigs shorter than step: 2 x 5000, step 10000", c(5000, 5000), 10000L))
+  for (cs in cases) {
+    L <- cs[[2]]
+    g <- GRanges(c("a", "b"), IRanges(1, L))
+    d <- density_track(g, c(a = L[1], b = L[2], rest = rest), cs[[3]], 10)
+    if (!raw_export_fails(d))
+      stop("expected the plain BigWig export to fail for: ", cs[[1]],
+           " (writer fixed upstream? then this test needs a new trigger)")
+    f <- tempfile(fileext = ".bw")
+    suppressMessages(export_bigwig(d, f))
+    back <- import(f, format = "bigwig")
+    if (!same_values(d, back)) stop("export_bigwig changed values for: ", cs[[1]])
+    unlink(f)
+    cat("  export_bigwig:", cs[[1]], "-> retried, values preserved\n")
+  }
+  # Unaffected track: no retry, file byte-identical to a plain export.
+  g <- GRanges(c("a", "b"), IRanges(1, c(44160, 28334)))     # TRC_133 shape
+  d <- density_track(g, c(a = 44160, b = 28334, rest = rest), 10000L, 10)
+  f1 <- tempfile(fileext = ".bw"); f2 <- tempfile(fileext = ".bw")
+  export(d, f1, format = "bigwig")
+  msgs <- character(0)
+  withCallingHandlers(export_bigwig(d, f2),
+                      message = function(m) { msgs <<- c(msgs, conditionMessage(m)); invokeRestart("muffleMessage") })
+  if (length(msgs)) stop("export_bigwig retried a track that exports fine")
+  if (!identical(unname(tools::md5sum(f1)), unname(tools::md5sum(f2))))
+    stop("export_bigwig output differs from plain export on an unaffected track")
+  unlink(c(f1, f2))
+  cat("  export_bigwig: unaffected track written byte-identically, no retry\n")
+}
+test_export_bigwig()
+
 cat("test_density_utils: PASSED\n")

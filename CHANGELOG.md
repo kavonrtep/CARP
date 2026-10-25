@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed a BigWig export crash on tandem families found only on short,
+  equal-length contigs** (issue #6). rtracklayer's BigWig writer stops with
+  `doesn't intersect 0 0` / `Internal error ucsc/bbiWrite.c 414` when every
+  sequence in a track has exactly one interval and all those intervals have
+  the same width. A per-family density track gets that shape when the family
+  covers only short contigs of equal length. Example: TRC_253 on
+  GCA_988322725.1 covers two whole 21,601 bp contigs in the 100 kb track
+  (step 10,000). This failed `make_tidecluster_tandem_per_family_bigwig` and
+  stopped a 16.5 h run at step 18 of 43. The new `export_bigwig()` in
+  `scripts/density_utils.R`, used by `calculate_density.R` and
+  `calculate_density_batch.R`, now retries a failed export once, with every
+  interval cut into two halves that keep the same value. Cutting at the tile
+  step, as the issue proposed, is not enough: a contig shorter than the step
+  stays one interval (2 x 5,000 bp contigs at step 10,000 still fail). Density
+  values are unchanged. The retry runs only after a failed export, so every
+  track that exported before is byte-identical. Tested in
+  `tests/test_density_utils.R`.
+
 ## 1.9.6
 
 - **TideCluster 1.21.2 → 1.22.2 (`envs/tidecluster_run.yaml`): report fix
