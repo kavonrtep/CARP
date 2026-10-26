@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.9.8
+
+- **TideCluster 1.22.2 → 1.22.3 (`envs/tidecluster_run.yaml`): no change to
+  CARP's annotation, statistics or density tracks.** 1.22.3 fixes upstream
+  issue #12. Overlap resolution drops a TRC from `<prefix>_clustering.gff3`
+  when all its arrays lie inside the arrays of a dominant TRC, but the dropped
+  TRC's consensus files were still written. This "ghost" TRC then came back in
+  `consensus_sequences_all.fasta`, `TideCluster_rdna.tsv` and (through the
+  fallback for superfamilies below the threshold)
+  `TideCluster_trc_superfamilies.csv`. The TideCluster HTML report also listed
+  it as a superfamily member, with links to pages that do not exist. CARP's
+  output did not depend on the ghost: it was never in the clustering GFF3 nor
+  in the TAREAN dimer library that `tidecluster_reannotate` masks with, so its
+  name never reached a feature or a RepeatMasker hit. `tc_reannotate_sf_filter.py`
+  treats a superfamily of one real TRC plus ghosts exactly like that TRC alone.
+  Checked by running 1.22.2 and 1.22.3 with CARP's exact `run_all` arguments
+  on 5 genomes. Four had no absorbed TRC, and all their data files were
+  byte-identical: small fixture (23 files), medium fixture (15), A. thaliana
+  chr4 (110) and tiny_pea (81 Mbp, 182). On the full A. thaliana genome
+  (TRC_8 absorbed), 282 data files were byte-identical, including the
+  clustering GFF3 and the dimer library. The only differences were TRC_8's
+  rows in `_rdna.tsv` (where it had been labelled 45S rDNA) and in the
+  superfamily CSV, its two consensus files, its record in
+  `consensus_sequences_all.fasta`, and the TideCluster HTML report.
+
 ## 1.9.7
 
 - **Fixed a BigWig export crash on tandem families found only on short,

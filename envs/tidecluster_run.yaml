@@ -157,13 +157,27 @@
 # `HOR arrays: 0` for every TRC (it now counts arrays with a confident HOR
 # order, the number the TRC tables show), and the comparative tables scale their
 # font with the sample count.
+# 1.22.3 fixes upstream issue #12: a TRC that cross-TRC overlap resolution drops
+# from the clustering GFF3 (all its arrays lie inside a dominant TRC's arrays)
+# still had its <prefix>_consensus/TRC_x*.fasta written, so it came back as a
+# "ghost" in consensus_sequences_all.fasta, <prefix>_rdna.tsv and, through the
+# below-threshold fallback, <prefix>_trc_superfamilies.csv (the map
+# tidecluster_reannotate_superfamily_merge reads). No CARP annotation change: the
+# ghost was never in the clustering GFF3 nor in the TAREAN dimer library that
+# tidecluster_reannotate masks with, so its name never reaches a RepeatMasker hit
+# or a feature, and tc_reannotate_sf_filter.py treats a superfamily of one real
+# TRC plus ghosts exactly like that TRC alone (monomer scale comes from the dimer
+# library). Verified A/B 1.22.2 vs 1.22.3 with CARP's run_all args on 5 genomes:
+# small, medium, A. thaliana chr4 and tiny_pea had no absorbed TRC and are
+# byte-identical; full A. thaliana (GCA, TRC_8 absorbed) differs ONLY by TRC_8's
+# rows/files in the four outputs above, plus the HTML report.
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.22.2
+  - tidecluster=1.22.3
   # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
   # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
   # resolves (TideCluster needs r-base >= 4.2).
