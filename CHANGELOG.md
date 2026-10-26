@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.7
 
 - **Fixed a BigWig export crash on tandem families found only on short,
   equal-length contigs** (issue #6). rtracklayer's BigWig writer stops with
