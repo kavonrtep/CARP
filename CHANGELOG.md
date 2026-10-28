@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.9.9
+
+- **DANTE_LTR 0.6.4.0 → 0.6.5.0 (`envs/tidecluster.yaml`): fixes a crash that
+  stopped the whole run; no change to output for genomes that did not crash.**
+  In the default `dante_ltr_mode: lineage`, `dante_ltr` aborted with
+  `non-numeric argument to binary operator` (in `get_ranges()`, upstream issue
+  #17) when every complete element in a chunk lay within 100 bp of a sequence
+  end — for example a domain ending on the last base of a short unplaced
+  contig. CARP runs `dante_ltr -S 50000000`, so a single chunk made of such
+  unplaced contigs stopped the `dante_ltr` rule and with it the run. Reported
+  on Matthiola sinuata (GCA_964656325.1). Such elements are now reported as
+  rank D, as before. `core` mode was not
+  affected. Checked with the rule's exact arguments (`-M 1 -S 50000000 --mode
+  <mode> --max_memory`): the issue's contig (CAZZRL010000126.1, 47,569 bp)
+  crashes 0.6.4.0 and completes on 0.6.5.0, with its element reported as
+  rank D. On three runs that already completed under 0.6.4.0 — tiny_pea
+  (81 Mbp) in lineage mode (4,481 elements) and in core mode (4,444 elements),
+  and the full A. thaliana genome in lineage mode (1,025 elements) — all 8
+  data files per run were identical; the only difference was the
+  `##DANTE_LTR version` header line in `DANTE_LTR.gff3`.
+
 ## 1.9.8
 
 - **TideCluster 1.22.2 → 1.22.3 (`envs/tidecluster_run.yaml`): no change to
