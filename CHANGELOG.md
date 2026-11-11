@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.10
 
 - **TideCluster 1.22.3 → 1.22.4 (`envs/tidecluster_run.yaml`): fixes a crash
   that stopped the whole run; no change to output for genomes that did not
