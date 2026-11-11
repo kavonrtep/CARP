@@ -171,13 +171,22 @@
 # small, medium, A. thaliana chr4 and tiny_pea had no absorbed TRC and are
 # byte-identical; full A. thaliana (GCA, TRC_8 absorbed) differs ONLY by TRC_8's
 # rows/files in the four outputs above, plus the HTML report.
+# 1.22.4 fixes upstream issue #13 (from this project): `tarean` crashed in
+# build_monomer_size_csv with `_csv.Error: field larger than field limit
+# (131072)` when a long homopolymer array (poly-A / poly-C of ~100 kb or more)
+# got a several-hundred-kb consensus_monomer cell in kitehor.ssr.tsv. The whole
+# run stopped after clustering (GCA_030864225.1, darwin run-000988, short pass,
+# after 7.7 h). The csv field limit is now raised, and an SSR array's
+# monomer_size is the SSR motif (as founder_period already was) instead of
+# KITE's spurious kb-scale peak. CARP reads periods from trc_table.tsv
+# (prevalent_founder first; scripts/trc_periods.R), not from monomer_size.
 name: tidecluster_run
 channels:
   - conda-forge
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.22.3
+  - tidecluster=1.22.4
   # CARP-added helper deps, pinned to the validated SIF build (release 1.0.7);
   # the r-* / bioconductor builds here are the r-base 4.3.3 (r43) set this env
   # resolves (TideCluster needs r-base >= 4.2).

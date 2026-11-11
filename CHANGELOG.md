@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **TideCluster 1.22.3 → 1.22.4 (`envs/tidecluster_run.yaml`): fixes a crash
+  that stopped the whole run; no change to output for genomes that did not
+  crash.** 1.22.4 fixes upstream issue #13. For a long homopolymer array
+  (poly-A or poly-C of about 100 kb or more), TideCluster's KITE step can
+  write a "consensus monomer" of several hundred kb into one cell of
+  `kitehor.ssr.tsv`. That is longer than Python's default `csv` field limit
+  (131,072 characters), so `tarean` stopped with `field larger than field
+  limit` after all of clustering had run. Seen on GCA_030864225.1 (3.2 Gbp),
+  in the short-monomer TideCluster pass, after 7.7 h. A plain re-run fails
+  the same way. The limit is now raised. In addition, the `monomer_size` of
+  a simple-sequence-repeat array is now its motif length, not KITE's
+  spurious period of kb to 100+ kb. CARP takes TRC periods from
+  `trc_table.tsv` (founder period first, `scripts/trc_periods.R`), not from
+  `monomer_size`. Checked on that genome's saved KITE tables: 1.22.3
+  reproduces the crash, and 1.22.4 completes (137 arrays). For all 125 arrays
+  of the poly-A and poly-C TRCs, `monomer_size` is now no larger than the
+  founder period. Also checked by running 1.22.3 and 1.22.4 with CARP's
+  `run_all` arguments (default and short-monomer passes) on 4 genomes that
+  never crashed: small fixture, medium fixture, A. thaliana chr4 and tiny_pea
+  (81 Mbp). All data files have the same content, including the clustering
+  GFF3, the dimer library, `trc_table.tsv`, `_rdna.tsv` and the superfamily
+  CSV (838 of 880 files byte-identical across the 4 genomes). The other 42
+  files differ only in the TideCluster version, timestamp and run path in
+  two JSON files per pass, and in igraph's random per-run graph id inside
+  TAREAN's `.RData` files (all 32 have equal content).
+
 - **DANTE_TIR fallback and DANTE_LINE are now reproducible from run to run
   (issue #7). This is a one-time output change compared with 1.9.9.** Both
   rules use the same all-vs-all flank alignment step
