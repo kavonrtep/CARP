@@ -623,6 +623,17 @@ def run_mmseqs_prefilter(fasta_file, end, min_identity=0.8, threads=1, verbose=T
         print(f"  Extracting 30nt from {end}' end for MMseqs2 prefiltering...")
 
     end_region_file = extract_end_region(fasta_file, end, region_length=30)
+    # Lift mmseqs' default --max-seqs 300 cap to the input size. With the cap,
+    # a query with >300 prefilter hits keeps only the first 300, and ties at the
+    # cap break by input ORDER -- so the candidate pair set (and from it the
+    # inferred element lengths) depended on the order seqkit happened to write
+    # the flanks in (issue #7: 356/750 ZS97 CACTA queries hit the cap; 2,929
+    # pairs dropped). With max-seqs >= N every qualifying hit is kept, so the
+    # pair set is order-invariant. N is bounded by max_group_size (1000 in the
+    # pipeline), and the search is on a 30 nt window, so this stays cheap.
+    with open(end_region_file) as _fh:
+        n_seqs = sum(1 for line in _fh if line.startswith('>'))
+    max_seqs = max(n_seqs, 300)
 
     # Create temporary directory for MMseqs2
     tmp_dir = tempfile.mkdtemp(prefix='mmseqs_prefilter_')
@@ -643,7 +654,8 @@ def run_mmseqs_prefilter(fasta_file, end, min_identity=0.8, threads=1, verbose=T
             '--min-seq-id', str(min_identity),
             '--threads', str(threads),
             '--format-output', 'query,target',
-            '--search-type', '3'   #Nucleotide search
+            '--search-type', '3',  # Nucleotide search
+            '--max-seqs', str(max_seqs),
         ]
         if kmer:
             cmd += ['-k', str(kmer)]
@@ -772,7 +784,10 @@ def _bin_clusters(clusters, max_group_size):
     cross-pairs are sub-threshold and add nothing); the only approximate case
     is chopping one oversized cluster, which by construction is a near-identical
     high-copy family where any chunk yields the same inferred length. The result
-    is a fixed function of the cluster assignment, i.e. fully deterministic.
+    is a fixed function of the cluster assignment. The assignment itself depends
+    on mmseqs' input order, so run_all_vs_all_alignment feeds mmseqs a
+    canonically sorted FASTA (issue #7) -- that is what makes the grouping
+    reproducible end to end.
     """
     cluster_list = sorted(clusters.items(), key=lambda kv: (-len(kv[1]), kv[0]))
 
@@ -1026,6 +1041,32 @@ def run_all_vs_all_alignment(
     if verbose:
         print(f"Found {len(sequences)} sequences")
 
+    # Canonical input order (issue #7). mmseqs easy-cluster (grouping) and
+    # easy-search (prefilter) both depend on input order, and callers build the
+    # FASTA from `seqkit subseq`, whose record order varies run to run. Sorting
+    # here and feeding mmseqs a sorted copy makes the engine order-invariant
+    # whatever the caller hands it. Ids are unique; sequence breaks any tie.
+    sequences.sort(key=lambda r: (r[0], r[1]))
+    fd, canonical_fasta = tempfile.mkstemp(suffix="_canonical.fasta")
+    os.close(fd)
+    try:
+        with open(canonical_fasta, "w") as handle:
+            for sid, seq in sequences:
+                handle.write(f">{sid}\n{seq}\n")
+        return _run_all_vs_all_sorted(sequences, canonical_fasta, output_file,
+                                      args, verbose, use_prefilter,
+                                      prefilter_identity, prefilter_kmer,
+                                      max_group_size, threads)
+    finally:
+        if os.path.exists(canonical_fasta):
+            os.remove(canonical_fasta)
+
+
+def _run_all_vs_all_sorted(sequences, fasta_file, output_file, args, verbose,
+                           use_prefilter, prefilter_identity, prefilter_kmer,
+                           max_group_size, threads):
+    """Body of run_all_vs_all_alignment, run on canonically sorted input
+    (``sequences`` sorted by id, ``fasta_file`` the matching sorted FASTA)."""
     # Bounded, clustering-based grouping keeps the all-vs-all step from
     # exploding (O(N^2) memory/compute -> OOM) on very large families. When
     # max_group_size is None / the input already fits one group, this returns a

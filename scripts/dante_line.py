@@ -637,6 +637,12 @@ def process_strand_orientation_with_seqkit(input_fasta: str, output_fasta: str,
             else:
                 plus_sequences.append(sequence_data)
 
+    # seqkit subseq --bed emits records in a run-to-run varying chromosome
+    # order (issue #7); write them in group-id order so the FASTA is
+    # reproducible. (run_all_vs_all_alignment also re-sorts its input.)
+    plus_sequences.sort()
+    minus_sequences.sort()
+
     # Write output, processing minus strand sequences with seqkit
     with open(output_fasta, 'w') as outf:
         # Write plus strand sequences directly

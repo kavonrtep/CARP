@@ -61,6 +61,9 @@ jobs:
       - name: All-vs-all alignment grouping (OOM-guard) logic
         run: python tests/test_aln_grouping.py
 
+      - name: All-vs-all aligner is input-order invariant (issue #7)
+        run: python tests/test_aln_input_order.py
+
       - name: Flank-index equivalence (dante_line / dante_tir_fallback)
         run: python tests/test_flank_index.py
 

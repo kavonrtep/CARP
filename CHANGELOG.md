@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- **DANTE_TIR fallback and DANTE_LINE are now reproducible from run to run
+  (issue #7). This is a one-time output change compared with 1.9.9.** Both
+  rules use the same all-vs-all flank alignment step
+  (`scripts/global_local_aln.py`). Before this fix, two runs of the same genome
+  with the same container, settings and thread count could give different
+  fallback element boundaries. Across 12 pairs of repeated runs on 10 Oryza
+  genomes, 0–972 DANTE_TIR records per genome (out of 1,302–14,990) differed,
+  and the difference reached `DANTE_TIR.gff3` and the tier-1 records of
+  `Repeat_Annotation_Unified.gff3`. The cause was input order: `seqkit subseq
+  --bed` writes records in a random chromosome order, and mmseqs results depend
+  on that order in two places. The search prefilter keeps at most 300
+  candidates per sequence (`--max-seqs` default) and breaks ties by input
+  order, and `easy-cluster` grouping (used when a group has more than
+  `max_group_size` sequences) also follows input order. Fixes:
+  `run_all_vs_all_alignment` sorts its input by id and gives mmseqs a sorted
+  copy, so the result no longer depends on input order for any caller; the
+  prefilter now uses `--max-seqs` equal to the number of input sequences
+  (at least 300), so no valid candidate pair is lost to the cap (on the
+  issue's ZS97 CACTA example: 75,477 pairs vs 72,548 before, ~2,929 pairs
+  recovered); and `dante_line.py` writes the flank FASTAs
+  (`TPase_5prime.fasta` etc.) in group-id order. Expect slightly different,
+  more complete fallback and LINE element boundaries than in 1.9.9. New test
+  `tests/test_aln_input_order.py` runs in unit CI. Not fixed here: the primary
+  DANTE_TIR 0.3.1 output also differed in 2 of the 12 run pairs; that is an
+  upstream DANTE_TIR issue and will be handled separately.
+
 ## 1.9.9
 
 - **DANTE_LTR 0.6.4.0 → 0.6.5.0 (`envs/tidecluster.yaml`): fixes a crash that
