@@ -69,7 +69,9 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────
   build-sif:
     needs: unit
-    runs-on: ubuntu-latest
+    # Pinned: Apptainer's .deb needs libfuse3-3, not installable on the
+    # newer image ubuntu-latest is rolling to (1.9.10 release run failed there).
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
@@ -121,7 +123,9 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────
   test-in-container:
     needs: build-sif
-    runs-on: ubuntu-latest
+    # Pinned: Apptainer's .deb needs libfuse3-3, not installable on the
+    # newer image ubuntu-latest is rolling to (1.9.10 release run failed there).
+    runs-on: ubuntu-24.04
     # Match pipeline.yml's medium-fixture budget (75 min). The 30-min
     # value here was inherited from when the medium fixture failed
     # early at RepeatMasker::createLib (the BLAST-prime regression
@@ -190,7 +194,9 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────
   push-ghcr:
     needs: [build-sif, test-in-container]
-    runs-on: ubuntu-latest
+    # Pinned: Apptainer's .deb needs libfuse3-3, not installable on the
+    # newer image ubuntu-latest is rolling to (1.9.10 release run failed there).
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: eWaterCycle/setup-apptainer@v2
