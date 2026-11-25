@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.10.0
+## 1.9.11
 
 - **New optional config parameter `dante_extra_database` (issue #8).** A protein
   FASTA that DANTE adds to REXdb for the domain search (`dante -e`), for genomes
