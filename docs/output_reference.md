@@ -72,6 +72,9 @@ HTML reports:
 - `DANTE.gff3` — raw domain annotations
 - `DANTE_filtered.gff3` — filtered domains
 - `DANTE_filtered.fasta` — protein sequences for filtered domains
+- `extra_database.fasta` / `extra_database_summary.tsv` — only with
+  `dante_extra_database`: the user proteins that DANTE added to REXdb, and their
+  counts per class and domain
 
 **`DANTE_LTR/`** — complete LTR retrotransposons
 - `DANTE_LTR.gff3` — LTR-RT annotations (both LTRs present)

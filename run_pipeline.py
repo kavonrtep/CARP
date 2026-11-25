@@ -18,12 +18,12 @@ def show_singularity_settings(config_object):
     output_dir = os.path.abspath(config_object['output_dir'])
     # get dirname of output_dir
     genome_dir = os.path.dirname(os.path.abspath(config_object['genome_fasta']))
-    custom_library = os.path.dirname(os.path.abspath(config_object['custom_library']))
-    tandem_repeat_library = os.path.dirname(os.path.abspath(
-        config_object['tandem_repeat_library']))
-    # get unique directories
-    dirs = set([output_dir, genome_dir, custom_library, tandem_repeat_library])
-    bind_string = " ".join([F"-B {d}" for d in dirs])
+    dirs = {output_dir, genome_dir}
+    # optional inputs: only those that are set
+    for key in ('custom_library', 'tandem_repeat_library', 'dante_extra_database'):
+        if config_object.get(key):
+            dirs.add(os.path.dirname(os.path.abspath(config_object[key])))
+    bind_string = " ".join([F"-B {d}" for d in sorted(dirs)])
     print("Run singularity with following bind options:")
     print(F"singularity run {bind_string} ....")
 
@@ -205,6 +205,14 @@ rDNA_45S/ITS1
         tandem_repeat_library = os.path.abspath(config_object['tandem_repeat_library'])
         if not os.path.exists(tandem_repeat_library):
             print(F"Tandem repeat library file {tandem_repeat_library} does not exist or is not accessible")
+            show_singularity_settings(config_object)
+            exit(1)
+
+    # check if dante_extra_database is set and the file exists
+    if config_object.get('dante_extra_database'):
+        dante_extra_database = os.path.abspath(config_object['dante_extra_database'])
+        if not os.path.exists(dante_extra_database):
+            print(F"DANTE extra database file {dante_extra_database} does not exist or is not accessible")
             show_singularity_settings(config_object)
             exit(1)
 

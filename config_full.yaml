@@ -104,6 +104,12 @@ cross_class_ownership_margin: 0.10
 dante_line_library_source: core
 dante_tir_fallback_library_source: core
 
+# Extra protein domains that DANTE adds to REXdb (dante -e), for genomes REXdb
+# covers poorly. FASTA, headers ">ID DOMAIN CLASS", for example
+#   >chr1:1000-1400 RT Class_I|LTR|Ty1/copia|Ale
+# Empty = off. See docs/configuration.md for the format.
+dante_extra_database: ""
+
 # DANTE_LTR element-detection mode: lineage (default) | core. See
 # docs/configuration.md - core is for genomes REXdb covers poorly, where lineage
 # mode can find no complete elements at all; it is not a superset of lineage.

@@ -117,6 +117,9 @@ def _filter_config(config: dict) -> dict:
         # "lineage". make_repeat_report.R depends on this key to decide whether
         # internal-node LTR density tracks belong in the lineage panel.
         "dante_ltr_mode",
+        # User proteins appended to REXdb. make_repeat_report.R reads this when
+        # the report is rendered by hand, so keep the key name in step.
+        "dante_extra_database",
         "dante_tir_min_multiplicity",
         "dante_tir_fallback_min_alignments",
         "dante_tir_fallback_min_cluster_size",

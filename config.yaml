@@ -42,6 +42,13 @@ reduce_library_containment: True
 # validated lossless default; raise for a more conservative reduction.
 containment_min_identity: 80
 containment_min_coverage: 0.90
+
+# Extra protein domains that DANTE adds to REXdb (dante -e), for genomes REXdb
+# covers poorly. FASTA, headers ">ID DOMAIN CLASS", for example
+#   >chr1:1000-1400 RT Class_I|LTR|Ty1/copia|Ale
+# Empty = off. See docs/configuration.md for the format.
+dante_extra_database: ""
+
 # DANTE_LTR element-detection mode: lineage (default) or core.
 # lineage calls an element only when its protein domains agree on a REXdb
 # lineage; on a genome REXdb covers poorly they disagree and the element is

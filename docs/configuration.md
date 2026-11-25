@@ -80,6 +80,51 @@ These three flags are **independent** of each other.
 for a more conservative reduction. The two `reduce_library_max_*` knobs only
 affect scheduling/memory, never the reduced library's contents.
 
+## DANTE
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `dante_extra_database` | none | Protein FASTA that DANTE adds to REXdb for the domain search (`dante -e`). For genomes whose transposable elements REXdb covers poorly. Unset or empty = off, with no effect on the output. |
+
+Each header has three fields separated by a space, as in `DANTE_filtered.fasta`
+from an earlier run:
+
+```text
+>ID DOMAIN CLASS
+>chr1:1000-1400 RT Class_I|LTR|Ty1/copia|Ale
+```
+
+- **ID**: unique, and not an ID used in REXdb. Letters, digits and `_ . : -`.
+  DANTE treats `-` and `_` as the same character.
+- **DOMAIN**: one of `GAG`, `PROT`, `INT`, `RT`, `RH`, `aRH`, `CHD`, `CHDCR`,
+  `ENDO`, `TPase`, `HEL1`, `HEL2`, `YR`.
+- **CLASS**: a REXdb class in REXdb spelling, with `|` between levels
+  (`Class_I|LTR|Ty3/gypsy|chromovirus|CRM`). This is not the `/`-separated form
+  used in `custom_library`.
+- **Sequence**: protein letters and `*`. No gaps (`-`) or frameshift marks (`/`,
+  `\`).
+
+The file is checked before DANTE starts (`prepare_dante_extra_database`), and a
+bad record stops the run with a message in
+`logs/prepare_dante_extra_database.log`. DANTE itself accepts most bad records
+without an error and then classifies domains wrongly.
+
+**Use the most detailed class you can.** A class inside the REXdb tree
+(`Class_I|LTR|Ty1/copia`) is accepted with a warning. DANTE classifies a domain
+by the part of the class shared by all its good hits, so such a protein can
+lower a call from a lineage to that level. `dante_ltr` in its default mode then
+drops the element or keeps only a partial one. In one test on a 1 Mb fixture, with 60 proteins taken from the same genome, the number of complete LTR-RTs was
+24 with REXdb classes, and 15 when 9 of the 60 proteins had an internal class.
+Those proteins match that genome almost perfectly, so expect a smaller effect on
+real data.
+
+New lineages (names not in REXdb) are not supported. When no suitable proteins
+exist, try `dante_ltr_mode: core` (below).
+
+`DANTE/extra_database.fasta` is the copy that DANTE used, and
+`DANTE/extra_database_summary.tsv` counts its proteins per class and domain. The
+HTML report states that an extra database was used.
+
 ## DANTE_LTR
 
 | Parameter | Default | Description |

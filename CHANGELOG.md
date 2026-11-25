@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **New optional config parameter `dante_extra_database` (issue #8).** A protein
+  FASTA that DANTE adds to REXdb for the domain search (`dante -e`), for genomes
+  whose transposable elements REXdb covers poorly. Off by default; a run without
+  it has the same rules and output as before. The file is checked before DANTE
+  starts, because DANTE accepts most bad records (duplicate IDs, unknown domains,
+  misspelled classes, DNA) with exit status 0 and then classifies domains
+  wrongly. Classes must be REXdb classes or internal nodes of the REXdb tree;
+  internal nodes give a warning, because they can lower a lineage call. New
+  lineages are not supported. The HTML report states that an extra database was
+  used, and `run_provenance.json` records the path. See
+  [docs/configuration.md](docs/configuration.md#dante).
+- **`run_pipeline.py`: a missing input file no longer ends in `KeyError`.** When
+  the config had no `custom_library` or `tandem_repeat_library`, the bind hint
+  printed after "does not exist or is not accessible" failed instead.
+
 ## 1.9.10
 
 - **TideCluster 1.22.3 → 1.22.4 (`envs/tidecluster_run.yaml`): fixes a crash

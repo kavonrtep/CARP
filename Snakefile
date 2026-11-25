@@ -536,6 +536,21 @@ if (not isinstance(config["tidecluster_chunk_size"], int)
         or config["tidecluster_chunk_size"] < 1):
     raise ValueError("Invalid value for tidecluster_chunk_size: must be a positive integer (bytes).")
 
+# Optional user proteins that DANTE appends to REXdb (`dante -e`), for genomes
+# whose elements REXdb covers poorly. Empty / unset = off: the rule graph and the
+# output are then the same as without the option. The file is checked before
+# DANTE starts (prepare_dante_extra_database), because DANTE itself accepts
+# malformed records with exit status 0 and changes the annotation silently.
+if config.get("dante_extra_database") is None:
+    config["dante_extra_database"] = ""
+if not isinstance(config["dante_extra_database"], str):
+    raise ValueError("Invalid value for dante_extra_database: must be a string path.")
+
+# REXdb version searched by DANTE. This is DANTE's own default; it is stated here
+# so that the check above and the search always use the same version.
+DANTE_REXDB = "Viridiplantae_v4.0"
+DANTE_EXTRA_DB = F"{config['output_dir']}/DANTE/extra_database.fasta"
+DANTE_EXTRA_DB_SUMMARY = F"{config['output_dir']}/DANTE/extra_database_summary.tsv"
 
 # Define path to cleaned genome (will be created by clean_genome_fasta rule)
 genome_fasta_cleaned = F"{config['output_dir']}/genome_cleaned.fasta"
@@ -649,9 +664,44 @@ rule index_genome_fasta:
         seqkit faidx {input}
         """
 
+if config["dante_extra_database"]:
+    rule prepare_dante_extra_database:
+        """
+        Check the user's extra protein database and write the copy DANTE uses.
+        Defined only when dante_extra_database is set. Independent of the genome,
+        so a bad file stops the run within seconds.
+        """
+        input:
+            config["dante_extra_database"]
+        output:
+            fasta=DANTE_EXTRA_DB,
+            summary=DANTE_EXTRA_DB_SUMMARY
+        params:
+            rexdb=DANTE_REXDB
+        log:
+            # One file: snakemake --show-failed-logs prints only the first log of
+            # a failed rule, and the user must see which records are wrong.
+            F"{config['output_dir']}/logs/prepare_dante_extra_database.log"
+        conda:
+            # same env as `dante`: the REXdb files ship with the DANTE package
+            "envs/dante.yaml"
+        shell:
+            """
+            exec > {log} 2>&1
+            set -euo pipefail
+            scripts_dir=$(realpath scripts)
+            export PATH="$scripts_dir:$PATH"
+            rexdb_dir=$(dirname "$(readlink -f "$(command -v dante)")")/tool-data/protein_domains
+            prepare_dante_extra_database.py {input:q} \
+                --reference-class "$rexdb_dir/{params.rexdb}_class" \
+                --reference-pdb "$rexdb_dir/{params.rexdb}_pdb" \
+                -o {output.fasta} --summary {output.summary}
+            """
+
 rule dante:
     input:
-        genome_fasta_cleaned,
+        fasta=genome_fasta_cleaned,
+        extra_db=DANTE_EXTRA_DB if config["dante_extra_database"] else []
     output:
         F"{config['output_dir']}/DANTE/DANTE.gff3"
     log:
@@ -663,13 +713,16 @@ rule dante:
         # dante has its own env since 0.2.11 (r-base 4.2.3) — it can no longer
         # share envs/tidecluster.yaml with dante_ltr (r-base <4.2). See envs/dante.yaml.
         "envs/dante.yaml"
+    params:
+        rexdb=DANTE_REXDB,
+        extra_flag=F"-e {DANTE_EXTRA_DB}" if config["dante_extra_database"] else ""
     threads: workflow.cores
     shell:
         """
         exec > {log.stdout} 2> {log.stderr}
         set -euo pipefail
         set -x
-        dante -q {input} -o {output} -c {threads}
+        dante -q {input.fasta} -o {output} -c {threads} -D {params.rexdb} {params.extra_flag}
         """
 
 rule dante_tir:
@@ -2774,10 +2827,13 @@ rule make_repeat_report:
         ltr   = F"{config['output_dir']}/DANTE_LTR/DANTE_LTR.gff3",
         tir   = F"{config['output_dir']}/DANTE_TIR/TIR_classification_summary.txt",
         line  = F"{config['output_dir']}/DANTE_LINE/DANTE_LINE.gff3",
-        te_derived_trc = F"{config['output_dir']}/Repeat_Annotation_Unified.te_derived_trc.csv"
+        te_derived_trc = F"{config['output_dir']}/Repeat_Annotation_Unified.te_derived_trc.csv",
+        dante_extra_db = DANTE_EXTRA_DB_SUMMARY if config["dante_extra_database"] else []
     output:
         F"{config['output_dir']}/repeat_annotation_report.html"
     params:
+        extra_db_flag    = (F"--dante_extra_db_summary {DANTE_EXTRA_DB_SUMMARY}"
+                            if config["dante_extra_database"] else ""),
         output_dir       = config['output_dir'],
         bin_width        = config.get("report_bin_width", 100000),
         min_len_chart    = config.get("report_min_len_chart", 500000),
@@ -2812,7 +2868,8 @@ rule make_repeat_report:
                 --min_len_chart {params.min_len_chart} \
                 --min_len_tracks {params.min_len_tracks} \
                 --max_tracks {params.max_tracks} \
-                --top_sat_clusters {params.top_sat_clusters}; then
+                --top_sat_clusters {params.top_sat_clusters} \
+                {params.extra_db_flag}; then
             echo "WARNING: make_repeat_report.R failed; writing placeholder report so the pipeline continues" >&2
         fi
 

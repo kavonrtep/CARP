@@ -32,7 +32,9 @@ option_list <- list(
   make_option("--max_tracks",       type = "integer",   default = 50L,
               help = "Max sequences in density track dropdown [default %default]"),
   make_option("--top_sat_clusters", type = "integer",   default = 10L,
-              help = "Top N satellite clusters shown in section 5 [default %default]")
+              help = "Top N satellite clusters shown in section 5 [default %default]"),
+  make_option("--dante_extra_db_summary", type = "character", default = "",
+              help = "Summary TSV of the DANTE extra protein database, when one was used")
 )
 
 opt <- parse_args(OptionParser(option_list = option_list))
@@ -114,6 +116,30 @@ dante_ltr_mode_of_run <- function(outdir) {
   if (is.null(m) || length(m) != 1L || is.na(m) || !nzchar(as.character(m)))
     return("lineage")
   as.character(m)
+}
+
+# Summary of the user's extra protein database (config dante_extra_database),
+# written by prepare_dante_extra_database.py. The rule passes the path only when
+# the option is set. When the report is rendered by hand, provenance says whether
+# it was: the file alone is not proof, a later run without the option into the
+# same directory leaves it behind. Returns NULL when no extra database was used.
+extra_db_summary_path <- function(outdir, arg) {
+  if (nzchar(arg)) return(arg)
+  used <- tryCatch(load_provenance(outdir)$config$dante_extra_database,
+                   error = function(e) NULL)
+  f <- file.path(outdir, "DANTE", "extra_database_summary.tsv")
+  if (length(used) == 1L && !is.na(used) && nzchar(used) && file.exists(f)) f
+  else NULL
+}
+
+load_extra_db_summary <- function(path) {
+  lines <- readLines(path)
+  meta  <- strsplit(sub("^#", "", lines[startsWith(lines, "#")]), "\t", fixed = TRUE)
+  meta  <- setNames(vapply(meta, `[`, "", 2L), vapply(meta, `[`, "", 1L))
+  tab   <- read.table(text = lines[!startsWith(lines, "#")], sep = "\t",
+                      header = TRUE, quote = "", comment.char = "",
+                      stringsAsFactors = FALSE)
+  list(meta = meta, table = tab)
 }
 
 # ── B3. DANTE_LTR stats from GFF3 ─────────────────────────────────────────
@@ -1330,6 +1356,48 @@ html_provenance_footer <- function(prov) {
     if (nchar(envs_brief) > 0) envs_brief else "<em>not recorded</em>")
 }
 
+# ── E4c. Extra protein database note (config dante_extra_database) ───────
+# Shown in the Overview: the user's proteins change which domains are found and
+# how they are classified, so a reader must know that REXdb was extended.
+html_extra_db <- function(x) {
+  esc <- function(s) {
+    s <- gsub("&", "&amp;", s, fixed = TRUE)
+    s <- gsub("<", "&lt;", s, fixed = TRUE)
+    s <- gsub(">", "&gt;", s, fixed = TRUE)
+    gsub('"', "&quot;", s, fixed = TRUE)
+  }
+  tab <- x$table
+  n_internal <- sum(tab$proteins[tab$level == "internal"])
+  internal_note <- if (n_internal > 0) sprintf(paste0(
+    ' %s of the %s proteins have an internal class (not resolved to a lineage). ',
+    'Domains that match them may be classified less precisely.'),
+    format(n_internal, big.mark = ","),
+    format(sum(tab$proteins), big.mark = ",")) else ""
+  rows <- vapply(split(tab, tab$classification), function(d) sprintf(
+    '<tr><td>%s%s</td><td>%s</td><td style="text-align:right">%s</td></tr>',
+    esc(d$classification[1]),
+    if (d$level[1] == "internal")
+      '<span class="row-tag row-unspec">internal</span>' else "",
+    esc(paste(sprintf("%s (%d)", d$domain, d$proteins), collapse = ", ")),
+    format(sum(d$proteins), big.mark = ",")), "")
+  paste0(
+    '<div class="annot-note" id="extra-db"><b>Extra protein database used.</b> ',
+    sprintf('DANTE searched REXdb %s extended with %s user protein%s from <code>%s</code>.',
+            esc(x$meta[["rexdb"]]),
+            format(sum(tab$proteins), big.mark = ","),
+            if (sum(tab$proteins) == 1) "" else "s", esc(x$meta[["source"]])),
+    ' Protein domains, and the elements built from them, may be classified by ',
+    'these proteins.', internal_note,
+    '<details style="margin-top:8px"><summary>Proteins per class</summary>',
+    '<div style="overflow-x:auto"><table class="data-table" style="margin-top:8px">',
+    '<thead><tr><th>Class</th><th>Domains (proteins)</th>',
+    '<th style="text-align:right">Proteins</th></tr></thead><tbody>',
+    paste(rows, collapse = "\n"), '</tbody></table></div>',
+    sprintf('<div style="margin-top:6px">SHA-256 of the file: <code style="overflow-wrap:anywhere">%s</code></div>',
+            esc(x$meta[["sha256"]])),
+    '</details></div>\n')
+}
+
 # ── E5. DANTE structure-based summary table ───────────────────────────────
 html_dante_summary <- function(ltr_stats, tir_stats, line_stats, outdir) {
   ltr_count <- if (!is.null(ltr_stats) && nrow(ltr_stats) > 0) sum(ltr_stats$count) else 0
@@ -1879,6 +1947,17 @@ main <- function() {
 
   prov            <- load_provenance(outdir)
   prov_footer_html <- html_provenance_footer(prov)
+
+  # Put ahead of the summary cards rather than adding a placeholder to the
+  # positional sprintf template (same reason as the mode badge below).
+  extra_db_path <- extra_db_summary_path(outdir, opt$dante_extra_db_summary)
+  if (!is.null(extra_db_path)) {
+    extra_db_html <- safe_build("extra protein database",
+                                html_extra_db(load_extra_db_summary(extra_db_path)))
+    cards_html <- paste0(
+      extra_db_html %||% not_generated_html("The extra protein database note"),
+      cards_html)
+  }
 
   html_out <- assemble_html(
     plotly_js, cards_html, sunburst_div, comp_table_html,

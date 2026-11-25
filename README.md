@@ -181,6 +181,7 @@ and TideCluster tuning, in **[docs/configuration.md](docs/configuration.md)**):
 | `custom_library` | none | Extra repeat library merged into the RepeatMasker library |
 | `tandem_repeat_library` | none | Reference used by TideCluster to name tandem families |
 | `repeatmasker_sensitivity` | `default` | RepeatMasker mode: `rush`, `default`, or `quick` |
+| `dante_extra_database` | none | Protein FASTA that DANTE adds to REXdb (`dante -e`), for genomes REXdb covers poorly. Format: `>ID DOMAIN CLASS`; see [configuration](docs/configuration.md#dante) |
 | `dante_ltr_mode` | `lineage` | DANTE_LTR element detection. `core` seeds on the ordered RT/RH/INT domain triplet instead of requiring a REXdb lineage match — for genomes REXdb covers poorly, where `lineage` can find no complete LTR-RTs at all. Elements may then be classified only to superfamily or an intermediate node. Not a superset of `lineage`; see [configuration](docs/configuration.md#dante_ltr) |
 | `repeatmasker_culling_limit` | `0` (off) | rmblastn `-culling_limit` for RepeatMasker — caps redundant per-locus HSPs; `2` ≈ 3× faster at ~−0.7 % masked bp |
 | `tidecluster_reannotate_culling_limit` | `0` (off) | Same culling for TideCluster reannotation; `2` ≈ 3.7× faster. With superfamily-merge on (below) the result is culling-independent, so this becomes a pure speed knob |
