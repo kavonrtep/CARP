@@ -167,7 +167,9 @@ Use the standard PATH-prepend shell pattern.
 3. Each bad file stops the run before `dante` starts.
 4. Container run with the file in its own `-B` directory.
 
-Items 1 to 3 pass. Item 4 is open: it needs a newly built image.
+All four pass. Item 4 used the released 1.9.10 image with the new code mounted
+over it (the environments are unchanged): 83 output files byte-identical to the
+run outside the container. An image built from this code has not been run.
 
 Not tested: a full pipeline run on a genome that REXdb covers poorly. Only the
 validator and the DANTE step were run on such a genome (a 30 Mb Asteraceae
